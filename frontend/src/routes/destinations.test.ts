@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 import {
-  COMPARE_REPORT_TYPES,
+  COMPARE_REPORT,
   DESTINATIONS,
   ROUTES_REPORT_TYPES,
   SAVED_REPORT_TYPES,
   TIME_REPORT_TYPES,
-  WHY_REPORT_TYPES,
+  WHY_REPORT,
   agencySwitchHref,
   destHref,
   compareMode,
+  whyMode,
+  routesMode,
   mergeSearch,
   pickReport,
   reportDestination,
@@ -22,16 +24,16 @@ import {
 } from "./destinations";
 
 describe("destinations", () => {
-  it("lists the seven destinations in rail order", () => {
-    expect(DESTINATIONS).toEqual(["pulse", "routes", "time", "why", "compare", "live", "reports"]);
+  it("lists the rail's seven destinations, then Bus Town", () => {
+    expect(DESTINATIONS).toEqual(["pulse", "routes", "time", "why", "compare", "live", "reports", "bus-town"]);
   });
 
   it("gives every report type exactly one home", () => {
     const homes = [
       ...ROUTES_REPORT_TYPES,
       ...TIME_REPORT_TYPES,
-      ...WHY_REPORT_TYPES,
-      ...COMPARE_REPORT_TYPES,
+      WHY_REPORT,
+      COMPARE_REPORT,
       ...SAVED_REPORT_TYPES,
     ];
     expect([...homes].sort()).toEqual([...REPORT_TYPE_IDS].sort());
@@ -67,7 +69,9 @@ describe("destinations", () => {
 
   it("sends each report type to the screen that hosts it", () => {
     expect(reportHref(9, "trend", "?routes=5")).toBe("/agencies/9/time?routes=5&report=trend");
-    expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why?report=dwell_run");
+    expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why?by=dwell_run");
+    // The report's own view wins over the slow segments the link was on.
+    expect(reportHref(9, "dwell_run", "?by=segments")).toBe("/agencies/9/why?by=dwell_run");
     expect(reportHref(9, "on_time")).toBe("/agencies/9/routes?sort=on_time");
     expect(reportHref(9, "ranking_best", "?from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg&order=best");
     // A previous report or sort gives way to the report's own; a former
@@ -78,7 +82,7 @@ describe("destinations", () => {
     expect(reportHref(9, "ranking", "?order=best&from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg");
     expect(reportHref(9, "worst_5min", "?order=best")).toBe("/agencies/9/routes?sort=late5_count");
     expect(reportHref(9, "worst_5min")).toBe("/agencies/9/routes?sort=late5_count");
-    expect(reportHref(9, "compare_ranking")).toBe("/agencies/9/compare?by=periods&report=compare_ranking");
+    expect(reportHref(9, "compare_ranking")).toBe("/agencies/9/compare?by=periods");
     expect(reportHref(9, "council_summary", "?report=trend&from=2026-09-01")).toBe(
       "/agencies/9/reports?from=2026-09-01&doc=council",
     );
@@ -148,8 +152,17 @@ describe("the view a screen opens", () => {
     expect(routeTableView(search)).toEqual({ sort, order });
   });
 
-  it("compares agencies only for by=agencies", () => {
+  it("shows the slow segments on Why only for by=segments", () => {
+    expect(whyMode("segments")).toBe("segments");
+    expect(whyMode("dwell_run")).toBe("dwell_run");
+    expect(whyMode(null)).toBe("dwell_run");
+    expect(whyMode("agencies")).toBe("dwell_run");
+  });
+
+  it("opens the agencies, supply and transfers boards by their `by`, else periods", () => {
     expect(compareMode("agencies")).toBe("agencies");
+    expect(compareMode("supply")).toBe("supply");
+    expect(compareMode("transfers")).toBe("transfers");
     expect(compareMode("periods")).toBe("periods");
     expect(compareMode(null)).toBe("periods");
   });
@@ -158,6 +171,13 @@ describe("the view a screen opens", () => {
     expect(reportsView(null, "delay_certificate")).toBe("reports");
     expect(reportsView("council", null)).toBe("reports");
     expect(reportsView("saved", null)).toBe("saved");
+    expect(reportsView("revisions", null)).toBe("revisions");
     expect(reportsView(null, "ranking")).toBe("summary");
+  });
+
+  it("opens the report cards on Routes by report_cards and the table otherwise", () => {
+    expect(routesMode("report_cards")).toBe("report_cards");
+    expect(routesMode(null)).toBe("table");
+    expect(routesMode("segments")).toBe("table");
   });
 });

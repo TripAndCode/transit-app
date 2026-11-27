@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { act, cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow, type HeroFact } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
@@ -27,6 +28,7 @@ const concentration: OverviewConcentration = {
   rest_share_pct: 40,
 };
 const emptyConcentration: OverviewConcentration = { top_routes: [], rest_share_pct: 0 };
+const TREND_HREF = "/agencies/1/time?from=2026-05-11&to=2026-06-09&report=trend";
 
 function mockFeed(feedAgeHours: number | null) {
   const capturedAt =
@@ -56,8 +58,10 @@ function renderHero(overrides: {
   routeCount?: number;
   daily?: OverviewServiceSplitDay[];
   onOpenFact?: (fact: HeroFact) => void;
+  search?: string;
 } = {}) {
   return renderWithProviders(
+    <MemoryRouter initialEntries={[`/agencies/1/pulse${overrides.search ?? ""}`]}>
     <OverviewHeroRow
       headline={overrides.headline ?? headline()}
       severeCount={overrides.severeCount ?? 3}
@@ -67,13 +71,19 @@ function renderHero(overrides: {
       agencyId={1}
       sparklinePoints={overrides.sparklinePoints ?? [2.1, 2.8, 3.3]}
       periodAvgMin={overrides.periodAvgMin === undefined ? 2.7 : overrides.periodAvgMin}
-      headlineRange={formatDateRange("2026-06-03", "2026-06-09", { year: false })}
+      headlineRange={formatDateRange(
+        (overrides.headline ?? headline()).window_from,
+        (overrides.headline ?? headline()).window_to,
+        { year: false },
+      )}
       periodRange={formatDateRange("2026-05-11", "2026-06-09", { year: false })}
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
       concentration={overrides.concentration ?? concentration}
       daily={overrides.daily ?? []}
+      trendHref={TREND_HREF}
       onOpenFact={overrides.onOpenFact ?? (() => {})}
-    />,
+    />
+    </MemoryRouter>,
   );
 }
 
@@ -82,17 +92,134 @@ describe("OverviewHeroRow", () => {
     stubReducedMotion();
   });
 
+  describe("on-time pointer", () => {
+    it("points to Routes and the route page for on-time %", () => {
+      mockFeed(1);
+      renderHero();
+      const link = screen.getByRole("link", { name: "Routes" });
+      expect(link.closest("p")?.textContent).toBe("On-time % is on Routes and on each route's page.");
+    });
+
+    it("links to the Routes tab with the current scope kept", () => {
+      mockFeed(1);
+      renderHero({ search: "?from=2026-05-11&to=2026-06-09&dow=1,2" });
+      const link = screen.getByRole("link", { name: "Routes" });
+      expect(link.getAttribute("href")).toBe("/agencies/1/routes?from=2026-05-11&to=2026-06-09&dow=1%2C2&sort=on_time");
+    });
+
+    it("drops a stale report or sort from the scope", () => {
+      mockFeed(1);
+      renderHero({ search: "?from=2026-05-11&report=ranking_best&sort=avg" });
+      const href = screen.getByRole("link", { name: "Routes" }).getAttribute("href");
+      expect(href).toBe("/agencies/1/routes?from=2026-05-11&sort=on_time");
+    });
+
+    it("keeps a single-route selection on the Routes list", () => {
+      mockFeed(1);
+      renderHero({ search: "?routes=R1&from=2026-05-11&to=2026-06-09" });
+      const href = screen.getByRole("link", { name: "Routes" }).getAttribute("href");
+      expect(href).toBe("/agencies/1/routes?routes=R1&from=2026-05-11&to=2026-06-09&sort=on_time");
+    });
+
+    it("is present with the latest-day note, without a baseline, and with a withheld reference", () => {
+      mockFeed(1);
+      const daily: OverviewServiceSplitDay[] = Array.from({ length: 8 }, (_, i) => ({
+        date: `2026-06-0${i + 2}`,
+        day_type: "weekday",
+        avg_min: i === 7 ? 5.02 : i === 0 ? 5.32 : 3,
+        samples: 1000,
+      }));
+      const withNote = renderHero({ daily });
+      expect(withNote.container.querySelector(".ov-hero-note")).not.toBeNull();
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+      withNote.unmount();
+
+      const noBaseline = renderHero({
+        headline: headline({ avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null }),
+      });
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+      noBaseline.unmount();
+
+      renderHero({
+        headline: headline({
+          reference: {
+            avg_min: null,
+            delta_min: null,
+            delta_pct: null,
+            samples: 60,
+            window_from: "2026-03-05",
+            window_to: "2026-06-02",
+            days: 90,
+            days_selected: 90,
+            days_collected: 90,
+            min_days: 72,
+            min_samples: 100,
+            reason: "insufficient_samples",
+          },
+        }),
+      });
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+    });
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("prints the trailing reference under the figure, apart from the verdict's comparison", () => {
+    mockFeed(0.1);
+    renderHero({
+      headline: headline({
+        reference: {
+          avg_min: 2.5,
+          delta_min: 0.8,
+          delta_pct: 32,
+          samples: 4200,
+          window_from: "2026-03-05",
+          window_to: "2026-06-02",
+          days: 90,
+          days_selected: 90,
+          days_collected: 90,
+          min_days: 72,
+          min_samples: 100,
+          reason: null,
+        },
+      }),
+    });
+    const range = formatDateRange("2026-03-05", "2026-06-02", { year: false });
+    const figure = document.querySelector(".ov-hero-figure") as HTMLElement;
+    expect(within(figure).getByText(`Past 90 days (${range}): average delay 2.5 min`)).toBeInTheDocument();
+    expect(within(figure).getByText("Worse than the past 90 days")).toBeInTheDocument();
+    expect(screen.getByText("+0.5 min on the 7 days before")).toBeInTheDocument();
   });
 
   it("labels the primary figure with how many days it averages, and which", () => {
     mockFeed(0.1);
     renderHero();
     const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
-    expect(screen.getByText(`Average delay, last 7 days (${week})`)).toBeInTheDocument();
+    expect(screen.getByText(`Average delay over 7 days (${week})`)).toBeInTheDocument();
     expect(document.querySelector(".ov-kpi-value")).toHaveTextContent(/^3\.3/);
+  });
+
+  it("names a whole 30-day period, and the 30 days before it, by their length", () => {
+    mockFeed(0.1);
+    renderHero({
+      headline: headline({
+        avg_min: 3.23,
+        baseline_avg_min: 2.91,
+        delta_min: 0.32,
+        delta_pct: 11,
+        window_from: "2026-05-11",
+        window_to: "2026-06-09",
+      }),
+    });
+    const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
+    expect(screen.getByText(`Average delay over 30 days (${period})`)).toBeInTheDocument();
+    expect(screen.getByText("+0.3 min on the 30 days before")).toBeInTheDocument();
+    expect(
+      screen.getByText("These 30 days averaged 3.2 min, 0.3 min (11%) longer than the 30 days before (2.9 min)."),
+    ).toBeInTheDocument();
   });
 
   it("states a longer window as a chip with its change, then both averages and the change in a sentence", () => {
@@ -100,7 +227,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ headline: headline({ avg_min: 3.23, baseline_avg_min: 2.91, delta_min: 0.32, delta_pct: 11 }) });
     expect(screen.getByText("+0.3 min on the 7 days before")).toBeInTheDocument();
     expect(
-      screen.getByText("The last 7 days averaged 3.2 min, 0.3 min (11%) longer than the 7 days before (2.9 min)."),
+      screen.getByText("These 7 days averaged 3.2 min, 0.3 min (11%) longer than the 7 days before (2.9 min)."),
     ).toBeInTheDocument();
   });
 
@@ -109,7 +236,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ headline: headline({ avg_min: 2.6, baseline_avg_min: 3.8, delta_min: -1.2, delta_pct: -31.6 }) });
     expect(screen.getByText("\u22121.2 min on the 7 days before")).toBeInTheDocument();
     expect(
-      screen.getByText("The last 7 days averaged 2.6 min, 1.2 min (32%) shorter than the 7 days before (3.8 min)."),
+      screen.getByText("These 7 days averaged 2.6 min, 1.2 min (32%) shorter than the 7 days before (3.8 min)."),
     ).toBeInTheDocument();
   });
 
@@ -118,7 +245,7 @@ describe("OverviewHeroRow", () => {
     renderHero({ headline: headline({ avg_min: 2.52, baseline_avg_min: 2.46, delta_min: 0.06, delta_pct: 2.4 }) });
     expect(screen.getByText("About the same as the 7 days before")).toBeInTheDocument();
     expect(
-      screen.getByText("The last 7 days averaged 2.5 min, about the same as the 7 days before (2.5 min)."),
+      screen.getByText("These 7 days averaged 2.5 min, about the same as the 7 days before (2.5 min)."),
     ).toBeInTheDocument();
   });
 
@@ -157,7 +284,7 @@ describe("OverviewHeroRow", () => {
     mockFeed(0.1);
     const { container } = renderHero({ headline: headline({ avg_min: 3.7, delta_min: 0.9, delta_pct: 32.1 }) });
     expect(container.querySelector(".ov-hero-story")?.textContent).toBe(
-      "The last 7 days averaged 3.7 min, 0.9 min (32%) longer than the 7 days before (2.8 min).",
+      "These 7 days averaged 3.7 min, 0.9 min (32%) longer than the 7 days before (2.8 min).",
     );
   });
 
@@ -177,21 +304,25 @@ describe("OverviewHeroRow", () => {
     // late-route count, like the headline, counts the headline's window.
     const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
     const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
-    expect(screen.getByRole("button", { name: /Heaviest hour/ })).toHaveTextContent(period);
+    expect(screen.getByRole("link", { name: /Heaviest hour/ })).toHaveTextContent(period);
     expect(screen.getByRole("button", { name: /Share of delay/ })).toHaveTextContent(period);
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent(
       `Observed 100+ times, ${week}`,
     );
   });
 
-  it("lists the heaviest hour as a fact row that opens the peak-hour card", async () => {
+  it("lists the heaviest hour as a fact row that leads to Time's trend", () => {
     mockFeed(0.1);
-    const onOpenFact = vi.fn();
-    renderHero({ onOpenFact });
-    const row = screen.getByRole("button", { name: /Heaviest hour/ });
+    renderHero();
+    const row = screen.getByRole("link", { name: /Heaviest hour/ });
     expect(within(row).getByText("17:00–18:00")).toHaveClass("num");
-    await userEvent.click(row);
-    expect(onOpenFact).toHaveBeenCalledWith("peak_hour");
+    expect(row).toHaveAttribute("href", TREND_HREF);
+  });
+
+  it("links the sparkline's trend to Time", () => {
+    mockFeed(0.1);
+    renderHero();
+    expect(screen.getByRole("link", { name: "See the trend on Time →" })).toHaveAttribute("href", TREND_HREF);
   });
 
   it("lists the top route's share of delay as a fact row that opens the concentration card", async () => {
@@ -248,9 +379,9 @@ describe("OverviewHeroRow", () => {
     expect(late).toHaveClass("ov-hero-fact", { exact: true });
   });
 
-  // The routes-to-check list holds five routes; the count is the server's,
-  // over every route the list ranks, not only the listed ones.
-  it("prints a count past the five routes the list holds", () => {
+  // The routes-to-check preview holds five routes; the count is the server's,
+  // over every ranked route, not only the listed ones.
+  it("prints a count past the five routes the preview holds", () => {
     mockFeed(0.1);
     renderHero({ severeCount: 12 });
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("12/ 38 routes");
@@ -267,7 +398,7 @@ describe("OverviewHeroRow", () => {
   it("omits the heaviest-hour row without an hourly profile, keeping the others", () => {
     mockFeed(0.1);
     renderHero({ peakHour: null });
-    expect(screen.queryByRole("button", { name: /Heaviest hour/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Heaviest hour/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Share of delay/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
   });
@@ -276,27 +407,67 @@ describe("OverviewHeroRow", () => {
     mockFeed(0.1);
     renderHero({ concentration: emptyConcentration });
     expect(screen.queryByRole("button", { name: /Share of delay/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Heaviest hour/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Heaviest hour/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
   });
 
   it("says how long a quiet feed has been quiet, by the rule Live uses", () => {
     mockFeed(2);
     renderHero();
-    expect(screen.getByText("Feed quiet for 2 h")).toBeInTheDocument();
+    expect(screen.getByText("No reports for 2 h")).toBeInTheDocument();
     expect(screen.getByText(/Last report /)).toBeInTheDocument();
   });
 
   it("renders an inline info hint next to the verdict", () => {
     mockFeed(0.1);
     renderHero();
-    expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
+    const verdict = document.querySelector<HTMLElement>(".ov-hero-verdict")!;
+    expect(within(verdict).getByRole("button", { name: "Hint" })).toBeInTheDocument();
+  });
+
+  it("defines the average delay beside its figure, with the manual as a secondary link", async () => {
+    mockFeed(0.1);
+    renderHero();
+    const label = document.querySelector<HTMLElement>(".ov-hero-label")!;
+    await userEvent.click(within(label).getByRole("button", { name: "Hint" }));
+    const popover = screen.getByRole("dialog", { name: "Average delay" });
+    expect(popover).toHaveTextContent("Early departures stay in the mean as negative delays.");
+    expect(within(popover).getByRole("link", { name: "More in the user manual" })).toHaveAttribute(
+      "href",
+      "/help#13-2-delay-figures",
+    );
+  });
+
+  it("defines every fact row beside its control, without opening the fact's card", async () => {
+    mockFeed(0.1);
+    const onOpenFact = vi.fn();
+    renderHero({ onOpenFact });
+    const rows = [...document.querySelectorAll<HTMLElement>(".ov-hero-facts > li")];
+    expect(rows).toHaveLength(3);
+    const titles: string[] = [];
+    const bodies: string[] = [];
+    for (const row of rows) {
+      const hint = within(row).getByRole("button", { name: "Hint" });
+      expect(hint.closest(".ov-hero-fact")).toBeNull();
+      await userEvent.click(hint);
+      const popover = screen.getByRole("dialog");
+      titles.push(document.getElementById(popover.getAttribute("aria-labelledby")!)?.textContent ?? "");
+      bodies.push(popover.textContent ?? "");
+      expect(within(popover).getByRole("link", { name: "More in the user manual" })).toHaveAttribute(
+        "href",
+        "/help#4-pulse--the-period-at-a-glance",
+      );
+      await userEvent.keyboard("{Escape}");
+    }
+    expect(titles).toEqual(["Heaviest hour", "Share of delay", "Routes averaging late"]);
+    expect(bodies[2]).toContain("at least 5 min late over the period, out of the routes observed 100 or more times");
+    expect(onOpenFact).not.toHaveBeenCalled();
   });
 
   it("counts a long-quiet feed in days", () => {
     mockFeed(30 * 24);
     renderHero();
-    expect(screen.getByText("Feed quiet for 30 days")).toBeInTheDocument();
+    expect(screen.getByText("No reports for 30 days")).toBeInTheDocument();
     // A quiet feed keeps the dot but not the live green.
     expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
   });
@@ -305,7 +476,7 @@ describe("OverviewHeroRow", () => {
     mockFeed(0.05);
     renderHero();
     expect(screen.getByText("Reporting live")).toBeInTheDocument();
-    expect(screen.queryByText(/Feed quiet/)).toBeNull();
+    expect(screen.queryByText(/No reports for/)).toBeNull();
   });
 
   it("claims nothing about reports when the feed status could not be read", () => {
@@ -393,7 +564,8 @@ describe("OverviewHeroRow", () => {
     expect(figure.findIndex((el) => el.matches(".ov-pulse-ribbon"))).toBeLessThan(
       figure.findIndex((el) => el.matches(".ov-hero-label")),
     );
-    expect(document.querySelector(".ov-hero-text svg")).toBeNull();
+    // The facts' definition icons are the only drawings there.
+    expect(document.querySelector(".ov-hero-text svg:not(.lucide-info)")).toBeNull();
   });
 
   it("draws no ribbon without an hourly profile", () => {

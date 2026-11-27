@@ -17,16 +17,23 @@ Two lock domains, distinguished by what the caller is about to write:
    caller that wants the same key with no wait at all -- a sibling, not a
    layer beneath it; each issues its own acquire).
    Held by promotion (pipeline/promote.py) around its copy from
-   `updates_live` into `updates`, by analyze() for the whole of its own
+   `updates_live` into `updates`, by archive ingest (pipeline.ingest.ingest)
+   for the whole of its run, which can replace a promoted day
+   (pipeline.archive_replace), by analyze() for the whole of its own
    run, and by `gtfs_pipeline.py restamp_archive --apply` for every agency
-   it moves, under domain 1, across its rewrite of the whole table. The
-   realtime writers (collector push, `ingest_live`) write `updates_live`,
-   which analyze never reads, and take no per-agency key.
+   it moves, under domain 1, across its rewrite of the whole table, and by
+   `gtfs_pipeline.py prune-updates` (pipeline.retention.prune_updates) for
+   every agency with rows in a month it may drop, under domain 1, from
+   reading the agencies' ledgers until its last drop. The realtime writers
+   (collector push, `ingest_live`) write `updates_live`, which analyze never
+   reads, and take no per-agency key.
    This is analyze's own exclusion against promotion's copy landing
    mid-run, independent of whether a caller also holds domain 1. Current
-   callers hold both: the cron sweep takes domain 1 once around its whole
-   per-agency loop, and promotion/analyze each still take domain 2 per
-   agency inside it -- domain 1 alone cannot stand in for domain 2.
+   callers hold both: the cron sweep and the standalone poller's daily step
+   (pipeline.poller) each take domain 1 once around their whole per-agency
+   loop. Inside it, promotion and analyze each still take domain 2 per
+   agency, as does the poller step's archive ingest; the sweep's
+   `ingest_live` takes none. Domain 1 alone cannot stand in for domain 2.
 
 Domain 2 covers analyze() as well as promotion's copy precisely BECAUSE
 Postgres keeps single-argument and two-argument advisory locks in separate
@@ -48,7 +55,7 @@ provide it either, even for a caller that already holds domain 1 for its own
 reasons: the two locks occupy separate advisory-lock spaces, so holding one
 never grants the other's exclusion.
 
-Best-effort, not job-level atomicity: production (scripts/fetch_and_ingest.sh,
+Best-effort, not job-level atomicity: a shell loop (scripts/fetch_and_ingest.sh,
 docs/deploy-railway.md's Railway sketch) invokes load_static/ingest/analyze
 as separate per-agency CLI processes, each independently acquiring and
 releasing this lock -- so a cron poke can still land *between* two of those
@@ -160,15 +167,16 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     while N+1..last are processed, well past the point this key's exclusion
     is still needed for agency N.
 
-    Waiting cannot deadlock. Promotion and analyze take one agency's key at
-    a time, never nesting, while holding at most INGEST_ANALYZE_LOCK_KEY's
-    single-argument lock, which no holder of this key waits on. The restamp is
-    the one holder of several keys: it takes them in ascending agency_id while
-    holding that single-argument lock, so no other holder of a key can be
-    running and no cycle can form. A load_static that remaps a timetable
-    version name takes one agency's key to clear its archive-joined tables'
-    states (pipeline.static_archive), holding no other lock and no open
-    transaction, so it only waits out that agency's analyze.
+    Waiting cannot deadlock. Promotion, archive ingest and analyze take one
+    agency's key at a time, never nesting, while holding at most
+    INGEST_ANALYZE_LOCK_KEY's single-argument lock, which no holder of this
+    key waits on. The restamp and the `updates` prune are the holders of
+    several keys: each takes them in ascending agency_id while holding that
+    single-argument lock, so no other holder of several keys can be running
+    and no cycle can form. A load_static that remaps a timetable version name
+    takes one agency's key to clear its archive-joined tables' states
+    (pipeline.static_archive), holding no other lock and no open transaction,
+    so it only waits out that agency's analyze, archive ingest or promotion.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))

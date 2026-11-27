@@ -21,8 +21,15 @@
   margin: 0 auto;
   padding: 24px 24px 0;
 }
+/* BP.sm */
 @media (max-width: 640px) {
   .ov-page-head { padding: 16px 16px 0; }
+  /* Shrinks the shared page-header title (ui.css) under this page's own
+     wrapper rather than its shared class, which five other tabs also use:
+     at a phone's fold, --text-2xl pushes the headline figure below it. */
+  .ov-page-head .ui-page-header__title {
+    font-size: var(--text-xl);
+  }
 }
 
 /* ---------- Card surface (everything except hero) ---------- */
@@ -120,8 +127,7 @@
   margin: 12px 0 0;
 }
 
-/* ---------- Routes-to-check list (dedicated — do NOT reuse .ov-pareto-*,
-   which ConcentrationBar.tsx and PeakHourRibbon.tsx also depend on) ---------- */
+/* ---------- Routes-to-check preview (the rows are ReportTable's own) ---------- */
 .ov-check-section-hd {
   font-size: var(--text-xs);
   font-weight: 600;
@@ -129,86 +135,6 @@
   text-transform: uppercase;
   color: var(--text-tertiary);
   margin-bottom: 10px;
-}
-/* One grid for every row, as .ov-pareto-list, so the names line up. */
-.ov-check-list {
-  display: grid;
-  grid-template-columns: [plate] auto [name] minmax(0, 1fr) [bar] auto [figures] auto [arrow] auto;
-  column-gap: 0;
-}
-.ov-check-band-hd {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 0 6px;
-  border-bottom: 1px solid var(--border-soft);
-  margin-bottom: 8px;
-  font-weight: 600;
-  font-size: 13px;
-  /* A header moves with the rows when a band appears or goes (useFlipRows). */
-  transition: transform var(--dur-3) var(--ease-out);
-}
-.ov-check-row {
-  grid-column: 1 / -1;
-  display: grid;
-  grid-template-columns: subgrid;
-  align-items: center;
-  padding: 10px 14px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  margin-bottom: 5px;
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
-  /* A re-ranked row travels to its new place (useFlipRows) rather than
-     teleporting; background is the only other thing that moves. */
-  transition: transform var(--dur-3) var(--ease-out), background var(--transition);
-}
-.ov-check-row:hover {
-  background: var(--bg-soft);
-}
-.ov-check-name {
-  grid-column: plate / bar;
-  display: grid;
-  grid-template-columns: subgrid;
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-}
-.ov-check-track,
-.ov-check-figures,
-.ov-check-arrow {
-  margin-inline-start: 12px;
-}
-.ov-check-track {
-  width: 120px;
-  height: 4px;
-  background: var(--bg-soft);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.ov-check-fill {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 2px;
-  /* --bar-share is the row's share of the worst route, set inline per row,
-     slid like the compare bars (compareBars.css). */
-  transform: translateX(calc((var(--bar-share, 0) - 1) * 100%));
-  transition: transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out);
-}
-/* The face and tabular figures come from .num on the element. */
-.ov-check-value {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  width: 60px;
-  text-align: right;
-  flex-shrink: 0;
-}
-.ov-check-arrow {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
 }
 .ov-check-empty {
   font-size: 13px;
@@ -220,169 +146,41 @@
   color: var(--text-tertiary);
   margin: -4px 0 12px;
 }
-/* The average and, under it, its change from the window before: stacked so
-   the change costs the route name little width. A fixed width keeps every
-   row's bar the same length; a longer change wraps rather than shift it. */
-.ov-check-figures {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  width: 92px;
-  text-align: right;
-}
-/* Neutral whichever way it moved: the figure beside it is the finding. */
-.ov-check-change {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-.ov-check-legend {
-  margin: 10px 0 4px;
-}
+
 .ov-check-more {
-  display: inline-block;
   margin: 6px 0 20px;
+}
+/* A preview or summary's link to the screen that answers its question in
+   full. */
+.ov-check-more,
+.ov-card-link {
+  display: inline-block;
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--accent-strong);
   text-decoration: none;
 }
-.ov-check-more:hover {
+.ov-check-more:hover,
+.ov-card-link:hover {
   text-decoration: underline;
 }
-
-/* ---------- Peak hour ---------- */
-.ov-peak-svg-wrap {
-  position: relative;
-  width: 100%;
-}
-/* HTML chart labels, placed as .ov-chart-plot describes. */
-.ov-peak-label {
-  position: absolute;
+.ov-card-link--small {
+  margin-top: 8px;
   font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  pointer-events: none;
-  transform: translateY(-50%);
-  white-space: nowrap;
-}
-.ov-peak-label--max { color: var(--trend-bad); font-weight: 600; }
-.ov-peak-label--flip { transform: translate(-100%, -50%); }
-.ov-peak-label--tick { transform: translate(-50%, 0); line-height: 1; }
-/* Plain fallback first: an engine without color-mix() would otherwise
-   resolve `fill` to its initial value (black), not transparent. */
-.ov-peak-spread { fill: rgba(180, 83, 9, 0.06); fill: color-mix(in srgb, var(--trend-bad) 6%, transparent); }
-.ov-peak-legend {
-  margin: 4px 0 0;
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
 }
 
-/* ---------- Service split ---------- */
-/* One grid for every day type, so the label column takes the widest label
-   and every bar starts and ends at the same x: the bars share one scale. */
-.ov-svc-list {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) auto;
-  column-gap: 12px;
-  row-gap: 4px;
-  align-items: center;
-}
-.ov-svc-row { display: contents; }
-.ov-svc-label {
-  grid-column: 1;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-.ov-svc-num {
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-primary);
-  text-align: right;
-  white-space: nowrap;
-}
-.ov-svc-meta {
-  grid-column: 2 / 4;
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-  margin-bottom: 10px;
-}
-.ov-svc-row--muted .ov-svc-label,
-.ov-svc-row--muted .ov-svc-num { color: var(--text-tertiary); }
-/* Stands in the bar's place for a day type too thin to compare. */
-.ov-svc-insufficient {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-.ov-svc-track {
-  position: relative;
-  height: 10px;
-  background: var(--track-bg);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.ov-svc-fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  /* Plain fallback first: without color-mix() support, `background`
-     would otherwise resolve to transparent, hiding the progress fill.
-     The exact original literal, not a --trend-*-bg token — those are
-     fixed at 8-16% alpha, far off this rule's intended 50%. */
-  background: rgba(71, 85, 105, 0.5);
-  background: color-mix(in srgb, var(--trend-neutral) 50%, transparent);
-  border-radius: var(--radius);
-}
-/* Tick labels under the bars' column, each centred on its value; the end
-   ticks align to the track's edges so neither spills past it. */
-.ov-svc-scale {
-  grid-column: 2;
-  position: relative;
-  height: 1.4em;
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-.ov-svc-tick {
-  position: absolute;
-  top: 0;
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
-.ov-svc-tick--first { transform: none; }
-.ov-svc-tick--last { transform: translateX(-100%); }
-.ov-svc-story {
+/* ---------- One-sentence summary cards (heaviest hour, day types) ---------- */
+.ov-card-summary {
   font-size: 14px;
   color: var(--text-primary);
   font-weight: 500;
   margin: 0 0 16px;
 }
-
-/* ---------- Tooltip (HTML, absolutely positioned) ---------- */
-.ov-tooltip {
-  position: absolute;
-  background: var(--tooltip-bg);
-  color: var(--tooltip-fg);
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-  z-index: var(--z-popover);
-  white-space: nowrap;
-  box-shadow: var(--el-2);
-  transform: translate(-50%, -100%) translateY(-8px);
-  transition: opacity var(--dur-1) var(--ease-out);
-}
-.ov-tooltip::after {
-  content: "";
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  border-width: 4px 4px 0;
-  border-style: solid;
-  border-color: var(--tooltip-bg) transparent transparent;
+/* The figures a summary sentence compares, one line under it. */
+.ov-card-detail {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: -8px 0 16px;
 }
 
 /* Entrance animations (.ov-modal, .reveal) live in global.css so every tab
@@ -436,10 +234,10 @@
   color: var(--text-secondary);
 }
 
-/* Card hover affordance for the clickable summary cards. */
+/* Why this composes --lift-transition: see .lift in global.css. */
 .ov-card.ov-clickable {
   cursor: pointer;
-  transition: background var(--dur-1) var(--ease-out);
+  transition: var(--lift-transition), background var(--dur-1) var(--ease-out);
 }
 .ov-card.ov-clickable:hover {
   background: var(--bg-soft);
@@ -450,45 +248,12 @@
   outline-offset: 2px;
 }
 
-/* Peak-hour modal: stacked DOW panels */
-.ov-peak-dow-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-.ov-peak-dow-panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0 0 8px;
-}
-.ov-peak-dow-empty {
-  font-size: 13px;
-  color: var(--text-tertiary);
-  margin: 4px 0;
-}
-
-/* Service-split daily line chart */
-.ov-svc-daily-wrap {
-  position: relative;
-  width: 100%;
-  margin-top: 20px;
-}
-.ov-svc-daily-legend {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-}
 /* The box a chart's HTML labels are placed against. A stretched svg scales
    any text inside it with the chart, distorting it and shrinking it below
    the 12px floor on a narrow card, so the labels are HTML instead. The box
    is exactly the svg (no legend, caption or tooltip offset inside it), so
-   a percent of it is a percent of the viewBox. The peak ribbon's
-   .ov-peak-svg-wrap is the same kind of box. */
+   a percent of it is a percent of the viewBox. */
 .ov-chart-plot { position: relative; }
-.ov-svc-daily-label,
 .ov-lorenz-label {
   position: absolute;
   font-size: var(--text-xs);
@@ -496,15 +261,8 @@
   pointer-events: none;
   white-space: nowrap;
 }
-.ov-svc-daily-label--y,
 .ov-lorenz-label--y { transform: translate(-100%, -50%); }
-.ov-svc-daily-label--x,
 .ov-lorenz-label--x { transform: translate(-50%, -50%); }
-.ov-svc-daily-legend-swatch {
-  display: inline-block;
-  vertical-align: middle;
-  margin-right: 6px;
-}
 
 /* Lorenz curve overlay (concentration modal) */
 .ov-lorenz-wrap { margin-top: 24px; }
@@ -519,12 +277,7 @@
 @media (max-width: 640px) {
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
-  /* The route's name needs the width more than the bar does. */
-  .ov-check-row { padding: 10px 12px; }
-  .ov-check-track,
-  .ov-check-figures,
-  .ov-check-arrow { margin-inline-start: 8px; }
-  .ov-check-track { width: 48px; }
+
   /* A concentration route's name takes the row's whole width, its bar and
      share beneath it: beside them it had a third of a phone's width. */
   .ov-pareto-list {
@@ -544,6 +297,7 @@
     grid-row: 2;
     margin-top: 6px;
   }
+
   .ov-modal {
     width: 100%;
     max-height: 100vh;
@@ -637,6 +391,15 @@
   -webkit-mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
   mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
 }
+/* The sparkline's own full-bleed box, pulled out of OverviewHeroRow.tsx's
+   inline style so a breakpoint below can reach it -- an inline style always
+   wins the cascade over a stylesheet rule short of `!important`. */
+.ov-hero-sparkline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
 /* .label and .val below must stay `position: relative` -- without it they
    are non-positioned in-flow content, which paints BEFORE (under) the
    positioned, absolutely-filled sparkline behind them, regardless of DOM
@@ -665,6 +428,29 @@
   font-weight: 500;
   color: var(--text-secondary);
   margin-left: 6px;
+}
+/* The trailing reference reads as a note under the figure, its judgement in
+   the verdict chip's neutral tone whichever way it falls. It wraps inside the
+   width the sparkline fades under (.ov-hero-figure > svg's mask), so the
+   chart's line never runs across it. */
+.ov-hero-reference {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  max-width: 250px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.ov-hero-reference-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  white-space: nowrap;
 }
 /* Legend for the sparkline's dashed reference line. HTML rather than SVG
    text: the chart behind it is stretched with preserveAspectRatio="none",
@@ -706,6 +492,22 @@
   color: var(--text-secondary);
   word-break: auto-phrase;
 }
+.ov-hero-pointer {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  word-break: auto-phrase;
+}
+.ov-hero-pointer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ov-hero-pointer a:hover {
+  color: var(--text-secondary);
+}
 /* Today's feed, under the period's figure: a quiet meta line. Positioned
    for the same reason .ov-hero-label is. */
 .ov-hero-feed {
@@ -714,6 +516,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 10px;
+  /* Unlike .ov-hero-reference just above, which wraps at the same width on
+     purpose, this line had no width cap: on a narrow figure the status text
+     ran past the fade and sat over the chart at near-full opacity. */
+  max-width: 250px;
   margin-top: 12px;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
@@ -733,7 +539,17 @@
 .ov-hero-facts li + li {
   border-top: 1px solid var(--border-soft);
 }
+/* The fact's definition sits beside its button, never inside it. */
+.ov-hero-facts li {
+  display: flex;
+  align-items: center;
+}
+.ov-hero-facts li > .ov-hero-fact {
+  flex: 1;
+  min-width: 0;
+}
 .ov-hero-fact {
+  text-decoration: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 14px;
   gap: 12px;
@@ -781,8 +597,11 @@
 .ov-routes-anchor {
   scroll-margin-top: 16px;
 }
-/* Feed-status dot: still by default; it breathes (motion block at the end
-   of this file) only inside BREATH_WINDOW_MS (overview/freshness.ts). */
+/* Feed-status dot: still at rest. It breathes (motion block at the end of
+   this file) only inside BREATH_WINDOW_MS (overview/freshness.ts), right
+   after a report lands; once that window closes, a still-live feed keeps
+   the shared .live-dot ring (global.css) running for the rest of the live
+   window instead. */
 .ov-fresh-dot {
   display: inline-block;
   width: 8px;
@@ -798,6 +617,13 @@
 .ov-fresh-dot--stale {
   background: var(--text-tertiary);
 }
+/* The feed's ongoing "live" state (not only the moment a fresh report
+   lands, which .ov-fresh-dot--live's breath covers): the shared .live-dot
+   primitive's ring reads currentColor, so it's told the same green the dot
+   itself is already filled with. */
+.ov-fresh-dot.live-dot {
+  color: var(--delay-text-ok);
+}
 
 /* BP.sm. Kept after the hero's base rules: an override of equal specificity
    placed earlier in the file loses to them at every width. */
@@ -809,16 +635,58 @@
     border-bottom: 1px solid var(--border-soft);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   }
+  /* A shorter figure gives the line less headroom under `top_pad`, so its
+     peak can sit flush against the card's shadow ring (box-shadow is never
+     clipped by the figure's own overflow:hidden); a few px of top inset
+     reads as a gap again without moving the chart's bottom edge. */
+  .ov-hero-sparkline {
+    top: 8px;
+    height: calc(100% - 8px);
+  }
+  /* Two columns (label, value) read side by side fine at 880px, but at a
+     phone's width the label's share of them is too narrow for its period
+     clause, which wraps word by word. Stacked label-then-value with the
+     chevron spanning both rows reads cleanly at any label length. */
+  .ov-hero-fact {
+    grid-template-columns: minmax(0, 1fr) 14px;
+  }
+  .ov-hero-fact-label {
+    grid-column: 1;
+    grid-row: 1;
+    text-wrap: pretty;
+  }
+  .ov-hero-fact-period {
+    text-wrap: pretty;
+  }
+  .ov-hero-fact-value {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .ov-hero-fact-go {
+    grid-column: 2;
+    /* The base align-items: baseline misplaces an item spanning both rows. */
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
 }
 
 /* The freshness dot's breath: a symmetric loop (the place --ease-in-out
-   belongs), never for a reduced-motion viewer. */
+   belongs), never for a reduced-motion viewer. Exclusive with the shared
+   .live-dot ring (rule above, keyframes in global.css) -- both set
+   `animation`, so React only ever puts one class on the dot at a time
+   (OverviewHeroRow.tsx). Also brightens .ov-fresh-dot.live-dot to full
+   opacity under the same condition: opacity dims the ring too, as it is
+   the dot's own box-shadow, and at the dot's resting opacity the ring
+   fades to an alpha too faint to read, so the bump only matters where
+   the ring can actually run. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ov-breath {
     0%, 100% { opacity: 0.55; }
     50%      { opacity: 1; }
   }
   .ov-fresh-dot--live { animation: ov-breath calc(var(--dur-4) * 3) var(--ease-in-out) infinite; }
+  .ov-fresh-dot.live-dot { opacity: 1; }
 }
 
 /* Without subgrid, inside the build's browser floor, each route row keeps
@@ -828,17 +696,12 @@
   .ov-pareto-row {
     grid-template-columns: minmax(160px, 1.2fr) 2.5fr 56px;
   }
-  .ov-check-row {
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
-  }
+
   .ov-pareto-label {
     grid-column: auto;
     display: block;
   }
-  .ov-check-name {
-    grid-column: auto;
-    display: block;
-  }
+
   @media (max-width: 640px) {
     .ov-pareto-row {
       grid-template-columns: minmax(0, 1fr) auto;

@@ -36,6 +36,7 @@ _RUN_ROW = {
     "lock_wait_ms": None,
     "error": None,
     "requested_by": 1,
+    "rebuild_headline": None,
 }
 
 

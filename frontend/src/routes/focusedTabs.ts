@@ -1,6 +1,6 @@
 import { SAVED_REPORT_TYPES } from "./destinations";
 
-/** Tabs that own their whole viewport: the banners, HelpHint and CopilotPanel
+/** Tabs that own their whole viewport: the banners and HelpHint
  *  are hidden on these so nothing competes with the visualization.
  *
  *  None of the analysis screens is listed: the data notices matter wherever
@@ -12,12 +12,8 @@ import { SAVED_REPORT_TYPES } from "./destinations";
  *  `<Navigate>` fires from an effect after the redirect element renders once,
  *  so the pathname is briefly the pre-redirect one — listing them avoids a
  *  one-frame flash of the chrome.
- *
- *  Anything routed here is a place CopilotPanel can never appear, because
- *  App.tsx mounts it only as `{!focused && <CopilotPanel />}`.
- *  `CopilotPanel.routing.test.ts` asserts the panel's `COPILOT_INSIGHT_ROUTE`
- *  stays outside this set. */
-export const FOCUSED_TAB_SEGMENTS: readonly string[] = [
+ */
+const FOCUSED_TAB_SEGMENTS: readonly string[] = [
   "live",
   "operations",
   "overview",

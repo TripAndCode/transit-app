@@ -44,3 +44,17 @@ RETENTION_DAYS=90 STATIC_RETENTION_DAYS=365 ../bin/prune.sh
 [ -f "$sdir/gtfs_static_20200101.zip" ] && fail "old static survived"
 [ -f "$sdir/gtfs_static_20200102.zip" ] || fail "latest.zip target deleted despite age"
 pass "prune respects retention + latest target once the marker is fresh"
+
+# VehiclePositions tarballs follow the same RETENTION_DAYS as RT ones; the
+# live vp day dir is never touched.
+vp="$COLLECTOR_BASE/data/8/vp"
+mkdir -p "$vp/29990101"
+printf 'oldvp' > "$vp/20200101.tar.gz"
+printf 'newvp' > "$vp/29990102.tar.gz"
+touch -t "$old_ts" "$vp/20200101.tar.gz"
+touch "$COLLECTOR_BASE/.sync-r2.last-ok"
+RETENTION_DAYS=90 STATIC_RETENTION_DAYS=365 ../bin/prune.sh > /dev/null
+[ -f "$vp/20200101.tar.gz" ] && fail "old VP tarball survived"
+[ -f "$vp/29990102.tar.gz" ] || fail "young VP tarball deleted"
+[ -d "$vp/29990101" ] || fail "live vp day dir deleted"
+pass "prune applies RETENTION_DAYS to VehiclePositions tarballs too"

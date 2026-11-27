@@ -9,7 +9,10 @@ current: those whose Postgres ledger (agg_feed_health) still matches ClickHouse'
 per-date counts. A date ingested or changed since the last analyze would differ
 for that reason alone. The whole-history tables are computed in the query from
 the agency's whole history and compared whole, and only when every date is
-current, since each of their rows spans every date.
+current, since each of their rows spans every date. An agency with a retention
+floor (pipeline.retention.retention_floor) never has every date current, its
+dropped dates' ledger rows having no rows left in `updates`, so for it they
+are always skipped.
 
 --time-only skips the comparison and times each month's build instead: the dedup
 on its own, then each table's SELECT, each run in full with its rows discarded on
@@ -137,7 +140,7 @@ def parity(ch, conn, agency_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute("SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
         stored = {day: (raw, total) for day, raw, total in cur.fetchall()}
-    live = _ledger_counts(agency_id, ch)
+    live = {day: counts[:2] for day, counts in _ledger_counts(agency_id, ch).items()}
     dates = comparable_dates(stored, live)
     print(f"agency {agency_id}: {len(dates)} of {len(stored)} ledger dates are current")
     if not dates:

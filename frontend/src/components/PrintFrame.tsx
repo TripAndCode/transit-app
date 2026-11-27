@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { use, useEffect, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useAgencies } from "../api/hooks";
 import { useScope } from "../api/scope";
 import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
+import { usePlaceLabels } from "../api/usePlaceLabels";
 import { formatDateTime } from "../utils/format";
+import { PrintFootSlotContext } from "./printFootSlot";
 import { scopeTitle } from "./scope/scopePhrases";
 import { useAgencyCredit } from "./useAgencyCredit";
 
@@ -30,19 +32,29 @@ function usePrintedAt(): string | null {
   return printedAt;
 }
 
+/** Wraps the app shell, so a screen can add a line to the printed foot
+ *  (printFootSlot.ts). */
+export function PrintFootProvider({ children }: { children: ReactNode }) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  return <PrintFootSlotContext value={{ slot, setSlot }}>{children}</PrintFootSlotContext>;
+}
+
 /** What a printed page cannot show on its own: the URL is lost on paper, and
  *  the agency, window, service pattern and routes that produced the numbers
- *  live in it. Hidden on screen; the print stylesheet shows it. */
+ *  live in it. Its foot also holds the line a screen adds there for its own
+ *  figures. Hidden on screen; the print stylesheet shows it. */
 export function PrintFrame() {
   const { t } = useTranslation();
+  const foot = use(PrintFootSlotContext);
   const agencyId = useAgencyId();
   const agencyName = useAgencies().data?.find((a) => a.agency_id === agencyId)?.agency_name ?? "";
   const [scope] = useScope();
   const names = useRouteNames(agencyId);
+  const { stopName } = usePlaceLabels(agencyId, scope.stop != null);
   const printedAt = usePrintedAt();
   if (agencyId == null) return null;
 
-  const conditions = scopeTitle(scope, { t, agencyName, routeLabel: names.format });
+  const conditions = scopeTitle(scope, { t, agencyName, routeLabel: names.format, stopName });
   const named = scope.routes.length > 0 && scope.routes.length <= MAX_NAMED_ROUTES;
   return (
     <div className="print-frame" data-testid="print-frame">
@@ -56,6 +68,7 @@ export function PrintFrame() {
         )}
       </header>
       <footer className="print-frame__footer" data-testid="print-frame-footer">
+        <span ref={foot?.setSlot} className="print-frame__snapshot" />
         {printedAt && t("print.generated_at", { time: formatDateTime(printedAt, STAMP_OPTIONS) })}
       </footer>
     </div>

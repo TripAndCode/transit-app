@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import i18n from "../../i18n";
 import { SCOPE_EXTRAS_NONE, type Scope } from "../../api/scope";
-import { periodDays, scopeTitle, scopeTokens, sentenceParts, suggestedViewName, tokenChanged } from "./scopePhrases";
+import {
+  conditionUsed,
+  durationLabel,
+  isScopeConditionOff,
+  mergeScopeApplied,
+  periodDays,
+  scopeTitle,
+  scopeTokens,
+  suggestedViewName,
+  tokenChanged,
+} from "./scopePhrases";
 
 const base: Scope = {
   ...SCOPE_EXTRAS_NONE,
@@ -32,7 +42,7 @@ describe("scopeTokens", () => {
       "period=9/1〜9/28",
       "days=すべての曜日",
       "time=全時間帯",
-      "tolerance=1分以内",
+      "tolerance=5分以内",
     ]);
     expect(labels("en")).toEqual([
       "agency=青森市バス",
@@ -40,7 +50,7 @@ describe("scopeTokens", () => {
       "period=9/1 – 9/28",
       "days=every day",
       "time=all hours",
-      "tolerance=within 1 min",
+      "tolerance=within 5 min",
     ]);
   });
 
@@ -76,9 +86,29 @@ describe("scopeTokens", () => {
     expect(tokens("ja").map((tok) => tok.key)).not.toContain("service");
     expect(labels("ja", { service: "平日", stop: "S1", dir: 0 }).slice(5, 8)).toEqual([
       "service=平日ダイヤ",
-      "stop=停留所 S1",
-      "dir=方向 0",
+      "stop=選択した停留所",
+      "dir=方面A",
     ]);
+  });
+
+  it("names the stop from the static GTFS and shows no id to a reader", () => {
+    const t = i18n.getFixedT("en");
+    const scope = { ...base, stop: "S1", dir: 0 as const };
+    const phrases = { t, agencyName: "A", routeLabel: (c: string) => c, stopName: (id: string) => (id === "S1" ? "Central Station" : undefined) };
+    const read = (ctx: object) => scopeTokens(scope, { ...phrases, ...ctx }).filter((tok) => tok.key === "stop" || tok.key === "dir").map((tok) => tok.label);
+    expect(read({})).toEqual(["Central Station", "Direction A"]);
+    expect(read({ stopName: () => undefined })).toEqual(["selected stop", "Direction A"]);
+  });
+
+  it("keeps the ids for an admin as secondary text after the words", () => {
+    const t = i18n.getFixedT("en");
+    const phrases = { t, agencyName: "A", routeLabel: (c: string) => c, showIds: true, stopName: () => "Central Station" };
+    const placed = scopeTokens({ ...base, stop: "S1", dir: 1 }, phrases).filter((tok) => tok.key === "stop" || tok.key === "dir");
+    expect(placed.map((tok) => [tok.label, tok.idTag])).toEqual([
+      ["Central Station", "(S1)"],
+      ["Direction B", "(direction_id 1)"],
+    ]);
+    expect(scopeTitle({ ...base, stop: "S1" }, phrases)).not.toContain("S1");
   });
 
   it("adds the early tolerance only when set, after direction and before the late tolerance", () => {
@@ -87,6 +117,8 @@ describe("scopeTokens", () => {
     expect(ja.map((tok) => tok.key).slice(-3)).toEqual(["dir", "early", "tolerance"]);
     expect(ja.find((tok) => tok.key === "early")).toEqual({ key: "early", label: "早発は2分まで", field: "early" });
     expect(labels("en", { early: 30 })).toContain("early=early by up to 30 s");
+    expect(labels("ja", { early: "any", late: 60 }).slice(-2)).toEqual(["early=早発も定時扱い", "tolerance=1分以内"]);
+    expect(labels("en", { early: "any" })).toContain("early=any early departure on time");
   });
 
   it("states the tolerance in minutes or seconds", () => {
@@ -116,23 +148,11 @@ describe("scopeTokens", () => {
   });
 });
 
-describe("sentenceParts", () => {
-  it("splits a template into text and slots", () => {
-    expect(sentenceParts("見ているのは[agency]の[routes]を")).toEqual([
-      { text: "見ているのは" },
-      { slot: "agency" },
-      { text: "の" },
-      { slot: "routes" },
-      { text: "を" },
-    ]);
-  });
-});
-
 describe("scopeTitle", () => {
   it("joins the conditions for a saved-analysis title", () => {
     const t = i18n.getFixedT("ja");
     expect(scopeTitle({ ...base, routes: ["50"] }, { t, agencyName: "x", routeLabel: (c) => `R${c}` })).toBe(
-      "R50・9/1〜9/28・すべての曜日・全時間帯・1分以内",
+      "R50・9/1〜9/28・すべての曜日・全時間帯・5分以内",
     );
   });
 });
@@ -167,7 +187,8 @@ describe("tokenChanged", () => {
   });
 
   it("marks a tolerance only when it differs from the one the server applies by default", () => {
-    expect(changed({ late: 60 })).toEqual([]);
+    expect(changed({ late: 300 })).toEqual([]);
+    expect(changed({ late: 60 })).toEqual(["tolerance"]);
     expect(changed({ late: 180 })).toEqual(["tolerance"]);
   });
 
@@ -189,5 +210,65 @@ describe("suggestedViewName", () => {
   it("falls back to the routes and the period when nothing is changed", () => {
     expect(suggestedViewName(base, ctx("ja"), period)).toBe("全路線・9/1〜9/28");
     expect(suggestedViewName(base, ctx("en"), period)).toBe("all routes, 9/1 – 9/28");
+  });
+});
+
+describe("isScopeConditionOff", () => {
+  const token = (scope: Partial<Scope>, key: string) => tokens("en", scope).find((tok) => tok.key === key)!;
+
+  it("marks a set condition the screen's data reports it did not use", () => {
+    const scope = { ...base, time_band: "morning" } as Scope;
+    expect(isScopeConditionOff(token(scope, "time"), scope, { time_band: false })).toBe(true);
+  });
+
+  it("leaves a condition alone when it was used, when nothing is reported, or when it is at its default", () => {
+    const scope = { ...base, time_band: "morning" } as Scope;
+    expect(isScopeConditionOff(token(scope, "time"), scope, { time_band: true })).toBe(false);
+    expect(isScopeConditionOff(token(scope, "time"), scope, undefined)).toBe(false);
+    expect(isScopeConditionOff(token(base, "time"), base, { time_band: false })).toBe(false);
+    expect(isScopeConditionOff(token(base, "agency"), base, { time_band: false })).toBe(false);
+  });
+});
+
+describe("conditionUsed", () => {
+  it("counts every condition used while the screen has said nothing", () => {
+    expect(conditionUsed("days", undefined)).toBe(true);
+    expect(conditionUsed("stop", null)).toBe(true);
+  });
+
+  it("drops a condition only when every field its control sets went unused", () => {
+    expect(conditionUsed("days", { dow: false, service: true })).toBe(true);
+    expect(conditionUsed("days", { dow: false, service: false })).toBe(false);
+    expect(conditionUsed("time", { time_band: false, hour: true })).toBe(true);
+    expect(conditionUsed("time", { time_band: false, hour: false })).toBe(false);
+    expect(conditionUsed("period", { from: false, to: false })).toBe(false);
+    expect(conditionUsed("tolerance", { late: false })).toBe(false);
+  });
+
+  it("counts a field the screen did not report on as used", () => {
+    expect(conditionUsed("routes", { dow: false })).toBe(true);
+  });
+});
+
+describe("durationLabel", () => {
+  it("prints a span the way the scope bar does, seconds under a minute and else minutes to a tenth, its figure held to its unit", () => {
+    const en = i18n.getFixedT("en");
+    const ja = i18n.getFixedT("ja");
+    expect([45, 60, 90, 300].map((sec) => durationLabel(sec, en))).toEqual(["45\u00a0s", "1\u00a0min", "1.5\u00a0min", "5\u00a0min"]);
+    expect([45, 60, 90, 300].map((sec) => durationLabel(sec, ja))).toEqual(["45秒", "1分", "1.5分", "5分"]);
+  });
+});
+
+describe("mergeScopeApplied", () => {
+  it("counts a condition as used when any section used it", () => {
+    expect(mergeScopeApplied({ late: false, stop: false, routes: true }, { late: true, stop: false })).toEqual({
+      late: true,
+      stop: false,
+      routes: true,
+    });
+  });
+
+  it("knows nothing until every section has answered", () => {
+    expect(mergeScopeApplied({ late: false }, undefined)).toBeUndefined();
   });
 });

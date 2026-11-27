@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily GTFS-RT validator sample
+
+[Timer]
+# 09:40 JST, after the collector has synced yesterday's archive to R2 and
+# verified it (09:10 and 09:15 JST), and before transit-ml-sync.timer's 10:30
+# run. No systemd ordering enforces either: the times are set far enough
+# apart, and on an on-time run the script's run budget (RUN_BUDGET_SEC less
+# TIMEOUT_SEC) starts no agency after 10:15. A catch-up run after downtime can
+# overlap the sync; the two only contend for the host.
+OnCalendar=*-*-* 09:40:00 Asia/Tokyo
+Persistent=true
+
+[Install]
+WantedBy=timers.target

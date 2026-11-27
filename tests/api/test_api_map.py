@@ -942,6 +942,62 @@ async def test_route_shape_falls_back_to_bounded_window_shape_when_ctx_window_is
 
 
 @pytest.mark.asyncio
+async def test_route_shape_fallback_vote_ignores_a_cancellation_listing_no_stop(map_app_ch, ch_client):
+    """The empty-window fallback weighs each trip by its rows, and the one row
+    a cancellation listing no stop stores is no stop of its trip: T2,
+    cancelled so, gives its shape S2 no weight, and T1's one stop picks S1.
+    Counted as a stop, it would tie S1 and win the tie on the shape name."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE, insert_updates
+
+    app, agency_id = map_app_ch
+    pool = app.state.pool
+    async with pool.acquire() as conn:
+        await _seed_route_existence(conn, agency_id, "R1")
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) "
+            "VALUES ($1, 'T1', 'R1', 'S1'), ($1, 'T2', 'R1', 'S2')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), ($1, 'T2', 1, 'ST1', '10:00:00', '10:00:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) "
+            "SELECT $1, shape_id, "
+            "ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(140.74, 40.82), ST_MakePoint(lon, lat)]), 4326) "
+            "FROM (VALUES ('S1', 140.75, 40.83), ('S2', 140.76, 40.84)) AS v(shape_id, lon, lat)",
+            agency_id,
+        )
+    # Both 60 days ago, outside the default 30-day window, so only the fallback votes.
+    at = datetime.now(timezone.utc) - timedelta(days=60)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("a.pb", at, "T1", "weekday", "09:00:00", "R1", 1, 60),
+            # file_name, captured_at, trip_id, service_type, scheduled_time, route_code, stop_sequence,
+            # dep_delay, stop_id, arr_delay, schedule_relationship_trip (CANCELED).
+            ("a.pb", at, "T2", "weekday", None, "R1", TRIP_LEVEL_STOP_SEQUENCE, None, None, None, 3),
+        ],
+    )
+
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/{agency_id}/route-shape?route=R1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["stops"] == [], body
+    assert body["shape_id"] == "S1", body
+
+
+@pytest.mark.asyncio
 async def test_route_shape_shape_vote_ignores_null_delay_only_trips(map_app_ch, ch_client):
     """The shape-vote's per-trip weights are derived from the dedup
     query's own rows, which are filtered by `dep_delay

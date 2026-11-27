@@ -3,22 +3,25 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { PendingNavLink } from "./navPending";
 import { NavIndicator } from "./NavIndicator";
 import {
+  Bus,
   Gauge,
   HelpCircle,
   Info,
+  MessageSquare,
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
+  NotebookPen,
   Shield,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useIsAdmin } from "../api/useIsAdmin";
+import { useConfig } from "../api/config";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import { useRailAgencyId } from "../api/railAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
-import { SettingsDrawer } from "./SettingsDrawer";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
@@ -29,6 +32,7 @@ import { SidebarLineMap } from "./SidebarLineMap";
 import { SidebarPinnedRoutes } from "./SidebarPinnedRoutes";
 import { SidebarTicket } from "./SidebarTicket";
 import { readStorage, writeStorage } from "../utils/safeStorage";
+import "./sidebarOtherNav.css";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
@@ -36,10 +40,15 @@ const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
 /** On a phone the bottom bar holds Pulse, Routes, Live and Ask; the other
  *  destinations are reached from the More sheet, which keeps each tab's label
- *  on one line at phone widths. */
+ *  on one line at phone widths. The sheet also lists Bus Town, which has no
+ *  rail stop: the command palette finds it only by a typed query, so the
+ *  sheet is its one browse path on a phone. */
 const TAB_BAR_DESTINATIONS: ReadonlySet<string> = new Set(["pulse", "routes", "live"]);
 const TAB_BAR_ITEMS = ITEMS.filter((item) => TAB_BAR_DESTINATIONS.has(item.to));
-const MORE_SHEET_ITEMS = ITEMS.filter((item) => !TAB_BAR_DESTINATIONS.has(item.to));
+const MORE_SHEET_ITEMS = [
+  ...ITEMS.filter((item) => !TAB_BAR_DESTINATIONS.has(item.to)),
+  { to: "bus-town", labelKey: "nav.bus-town", Icon: Bus } as const,
+];
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 
@@ -50,6 +59,8 @@ const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
  *  in sync by that rule's comment pointing back here, since a plain
  *  TS constant has no way to reach a separate stylesheet. */
 export const MOBILE_TABBAR_HEIGHT_PX = 56;
+
+const TAB_LABEL_STYLE: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" };
 
 /** Read the persisted collapse preference. No-ops to `false` (expanded) if
  *  localStorage is unavailable or unset — matches theme.ts's fail-open shape. */
@@ -66,7 +77,7 @@ function writeCollapsedPref(collapsed: boolean): void {
 const MORE_SHEET_PAD_PX = 16;
 
 /** The mobile "…" destination: a bottom sheet holding the agency picker and
- *  the account/settings controls that don't fit as one of the four tab bar
+ *  the account controls that don't fit as one of the four tab bar
  *  slots.
  *
  *  Not the shared `Modal`: its two variants are a centred card and a
@@ -127,17 +138,44 @@ function railLinkStyle(collapsedFlag: boolean) {
   });
 }
 
+/** Layout only, for the desktop rail's "Other" footer links -- their own
+ *  soft accent pill and hover come from sidebarOtherNav.css's `.other-nav-link`,
+ *  since what can't go inline is the `:hover` rule and the `.active` class
+ *  NavLink merges in automatically. */
+function otherLinkStyle(collapsedFlag: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: collapsedFlag ? "center" : "flex-start",
+    justifyContent: collapsedFlag ? "center" : "flex-start",
+    gap: 12,
+    margin: "0 8px",
+    padding: collapsedFlag ? "10px 0" : "10px 14px",
+    textDecoration: "none",
+  };
+}
+
+/** `className`/`style` for one of the "Other" footer links, shared by the
+ *  desktop rail's `.other-nav-link` pill and the phone sheet's plain
+ *  `railLinkStyle` row. In the sheet, `style` is `railLinkStyle`'s function,
+ *  for a `NavLink`/`PendingNavLink` to call with its own `isActive`. */
+function otherNavProps(collapsedFlag: boolean, inSheet: boolean): { className?: string; style: CSSProperties | ReturnType<typeof railLinkStyle> } {
+  return {
+    className: inSheet ? undefined : "other-nav-link",
+    style: inSheet ? railLinkStyle(collapsedFlag) : otherLinkStyle(collapsedFlag),
+  };
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const agencyId = useRailAgencyId();
   const { pathname } = useLocation();
   const isAdmin = useIsAdmin();
+  const feedbackUrl = useConfig().data?.feedback_url;
   // Each screen opens with its own last filters (see api/screenScope), so
   // nothing set on the screen being left follows the visitor elsewhere.
   const screenQuery = useScreenQuery();
   const screenHref = (screen: string) => withQuery(`/agencies/${agencyId}/${screen}`, agencyId ? screenQuery(agencyId, screen) : "");
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   // Below 640px (the shared MOBILE_BREAKPOINT_QUERY) the desktop rail's
   // fixed 248/76px width would eat most of a ~390px phone screen, leaving
   // almost no room for tab content. isMobile renders only the active
@@ -151,7 +189,7 @@ export function Sidebar() {
   // (thumb-reachable, and it gives the tab content the width the rail
   // would take); this sheet holds what doesn't fit in the tab slots --
   // the agency picker, the other destinations, the Other group and the
-  // settings/account controls -- behind "…".
+  // account controls -- behind "…".
   const [moreOpen, setMoreOpen] = useState(false);
 
   function toggleCollapsed() {
@@ -160,11 +198,6 @@ export function Sidebar() {
       writeCollapsedPref(next);
       return next;
     });
-  }
-
-  function openSettings() {
-    setSettingsOpen(true);
-    setMoreOpen(false);
   }
 
   // The destinations, the Other group, and the account menu — everything
@@ -176,11 +209,15 @@ export function Sidebar() {
   // out, and no Ask, which has a tab of its own there: repeating the bar's
   // links here would put the same links twice on screen at once.
   function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, inSheet = false) {
+    const otherNav = otherNavProps(collapsedFlag, inSheet);
+    // Not a NavLink, so there is no router callback to supply isActive: an
+    // external link is never the current route.
+    const feedbackStyle = typeof otherNav.style === "function" ? otherNav.style({ isActive: false }) : otherNav.style;
     return (
       <>
         {/* On the phone sheet the account row leads: at the end it sat below
             the sheet's first screen. */}
-        {inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
+        {inSheet && <SidebarUserMenu />}
         {!collapsedFlag && (
           <div style={{ padding: inSheet ? "0 22px 16px" : "0 14px 14px" }}>
             {inSheet ? <AgencyPicker /> : <SidebarTicket />}
@@ -217,6 +254,7 @@ export function Sidebar() {
                 padding: "0 22px",
                 marginBottom: 4,
                 fontSize: "var(--text-xs)",
+                fontWeight: 700,
                 color: "var(--text-tertiary)",
                 letterSpacing: "0.04em",
               }}
@@ -230,7 +268,7 @@ export function Sidebar() {
                 to={agencyId ? `/model?from=${agencyId}` : "/model"}
                 aria-label={collapsedFlag ? t("nav.model") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)}
+                {...otherNav}
               >
                 <Gauge size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("nav.model")}</span>}
@@ -242,18 +280,39 @@ export function Sidebar() {
               to="/help"
               aria-label={collapsedFlag ? t("nav.help") : undefined}
               onClick={() => onNavigate?.()}
-              style={railLinkStyle(collapsedFlag)}
+              {...otherNav}
             >
               <HelpCircle size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.help")}</span>}
             </PendingNavLink>
           </RailTooltip>
+          {feedbackUrl && (
+            <RailTooltip collapsed={collapsedFlag} label={t("nav.feedback")}>
+              <a
+                href={feedbackUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={collapsedFlag ? t("nav.feedback") : undefined}
+                onClick={() => onNavigate?.()}
+                className={otherNav.className}
+                style={feedbackStyle}
+              >
+                <MessageSquare
+                  size={18}
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                  style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }}
+                />
+                {!collapsedFlag && <span>{t("nav.feedback")}</span>}
+              </a>
+            </RailTooltip>
+          )}
           <RailTooltip collapsed={collapsedFlag} label={t("nav.about")}>
             <NavLink
               to="/welcome"
               aria-label={collapsedFlag ? t("nav.about") : undefined}
               onClick={() => onNavigate?.()}
-              style={railLinkStyle(collapsedFlag)}
+              {...otherNav}
             >
               <Info size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.about")}</span>}
@@ -265,7 +324,7 @@ export function Sidebar() {
                 to="/admin"
                 aria-label={collapsedFlag ? t("account.admin_link") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)}
+                {...otherNav}
               >
                 <Shield size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("account.admin_link")}</span>}
@@ -274,7 +333,7 @@ export function Sidebar() {
           )}
         </nav>
         <div style={{ flex: 1 }} />
-        {!collapsedFlag && !inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
+        {!collapsedFlag && !inSheet && <SidebarUserMenu />}
       </>
     );
   }
@@ -294,10 +353,10 @@ export function Sidebar() {
       <span
         aria-hidden="true"
         style={{
-          width: 32,
-          height: 32,
+          width: 40,
+          height: 40,
           flexShrink: 0,
-          borderRadius: 8,
+          borderRadius: "var(--radius-lg)",
           background: "var(--accent)",
           color: "var(--on-accent)",
           display: "flex",
@@ -344,6 +403,7 @@ export function Sidebar() {
       padding: "6px 2px 2px",
       color: isActive ? "var(--accent)" : "var(--text-secondary)",
       fontSize: "var(--text-xs)",
+      fontWeight: 700,
       textDecoration: "none",
       transition: "color var(--transition)",
     });
@@ -387,8 +447,8 @@ export function Sidebar() {
                 onFocus={() => prefetchRouteChunk(item.to)}
                 style={tabItemStyle}
               >
-                <item.Icon size={20} strokeWidth={1.5} aria-hidden="true" />
-                <span>{t(item.labelKey)}</span>
+                <item.Icon size={20} strokeWidth={2} aria-hidden="true" />
+                <span style={TAB_LABEL_STYLE}>{t(item.labelKey)}</span>
               </PendingNavLink>
             ))}
           {agencyId && (
@@ -398,8 +458,8 @@ export function Sidebar() {
               onFocus={() => prefetchRouteChunk("ask")}
               style={tabItemStyle}
             >
-              <HelpCircle size={20} strokeWidth={1.5} aria-hidden="true" />
-              <span>{t("nav.ask")}</span>
+              <NotebookPen size={20} strokeWidth={2} aria-hidden="true" />
+              <span style={TAB_LABEL_STYLE}>{t("nav.ask")}</span>
             </PendingNavLink>
           )}
           <button
@@ -411,8 +471,8 @@ export function Sidebar() {
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(true)}
           >
-            <MoreHorizontal size={20} strokeWidth={1.5} aria-hidden="true" />
-            <span>{t("nav.more")}</span>
+            <MoreHorizontal size={20} strokeWidth={2} aria-hidden="true" />
+            <span style={TAB_LABEL_STYLE}>{t("nav.more")}</span>
           </button>
         </nav>
 
@@ -457,63 +517,43 @@ export function Sidebar() {
             {renderNavAndFooter(false, () => setMoreOpen(false), true)}
           </MoreSheet>
         )}
-
-        <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </>
     );
   }
 
   return (
-    <>
-      <aside
-        className="app-sidebar-desktop"
+    <aside
+      className="app-sidebar-desktop"
+      style={{
+        // The line map's badge column is centred 38px in at either width
+        // (sidebarLineMap.css), so the collapsed rail is twice that. At 248
+        // a station's name has about 165px beside its badge, and about
+        // 110px while the chord hint shows; a longer name truncates
+        // (`.rail-name`), so a long screen name gets a short rail key.
+        width: collapsed ? 76 : 248,
+        background: "var(--bg-surface)",
+        borderRight: "1px solid var(--border-soft)",
+        padding: "16px 0",
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+      }}
+    >
+      <div
         style={{
-          // The line map's badge column is centred 38px in at either width
-          // (sidebarLineMap.css), so the collapsed rail is twice that. 248
-          // fits a station's name and its chord hint beside the badge.
-          width: collapsed ? 76 : 248,
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border-soft)",
-          padding: "16px 0",
-          flexShrink: 0,
           display: "flex",
-          flexDirection: "column",
-          height: "100%",
+          alignItems: "center",
+          justifyContent: collapsed ? "center" : "space-between",
+          gap: 4,
+          padding: collapsed ? "0 0 16px" : "0 12px 16px 22px",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: collapsed ? "center" : "space-between",
-            gap: 4,
-            padding: collapsed ? "0 0 16px" : "0 12px 16px 22px",
-          }}
-        >
-          {brandBlock(collapsed)}
-          {!collapsed && (
-            <button
-              type="button"
-              aria-label={t("nav.collapse_sidebar")}
-              onClick={toggleCollapsed}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--text-tertiary)",
-                cursor: "pointer",
-                display: "flex",
-                padding: 4,
-                flexShrink: 0,
-              }}
-            >
-              <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        {collapsed && (
+        {brandBlock(collapsed)}
+        {!collapsed && (
           <button
             type="button"
-            aria-label={t("nav.expand_sidebar")}
+            aria-label={t("nav.collapse_sidebar")}
             onClick={toggleCollapsed}
             style={{
               background: "transparent",
@@ -521,18 +561,34 @@ export function Sidebar() {
               color: "var(--text-tertiary)",
               cursor: "pointer",
               display: "flex",
-              justifyContent: "center",
-              padding: "0 0 12px",
-              width: "100%",
+              padding: 4,
+              flexShrink: 0,
             }}
           >
-            <ChevronRight size={16} strokeWidth={1.5} aria-hidden="true" />
+            <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" />
           </button>
         )}
-        {renderNavAndFooter(collapsed)}
-      </aside>
-
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </>
+      </div>
+      {collapsed && (
+        <button
+          type="button"
+          aria-label={t("nav.expand_sidebar")}
+          onClick={toggleCollapsed}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--text-tertiary)",
+            cursor: "pointer",
+            display: "flex",
+            justifyContent: "center",
+            padding: "0 0 12px",
+            width: "100%",
+          }}
+        >
+          <ChevronRight size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
+      )}
+      {renderNavAndFooter(collapsed)}
+    </aside>
   );
 }

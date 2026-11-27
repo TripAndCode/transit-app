@@ -15,8 +15,9 @@ from starlette.requests import Request
 
 from api.security import current_user
 
-FREE_LIMIT = "60/minute"
-PRO_LIMIT = "600/minute"
+#: The per-minute budget every caller is held to, keyed on the address
+#: ``ForwardedClientMiddleware`` resolved.
+DEFAULT_LIMIT = "60/minute"
 
 #: Budget for admin-triggered pipeline/agency actions (manual run trigger,
 #: feed probe, reanalyze) -- generous enough that an operator working a board
@@ -24,31 +25,20 @@ PRO_LIMIT = "600/minute"
 #: route that queues real pipeline work.
 ADMIN_ACTION_LIMIT = "20/minute"
 
-
-def tier_limit(key: str) -> str:
-    """The one limit a caller is held to, chosen from the key `_key_func` built.
-
-    slowapi enforces every limit a decorator names, so naming both tiers' limits
-    in one string would hold every caller to the stricter. A provider that
-    declares a ``key`` parameter is called with ``key_func(request)`` instead,
-    and only the caller's own tier's limit is checked.
-    """
-    return PRO_LIMIT if key.startswith("pro:") else FREE_LIMIT
-
-
-def _key_func(request: Request) -> str:
-    # get_remote_address() reads request.client.host, which
-    # ForwardedClientMiddleware sets to the address the edge proxy saw.
-    if getattr(request.state, "tier", "free") == "pro":
-        return f"pro:{request.headers.get('X-API-Key', 'anon')}"
-    return get_remote_address(request)
+#: Budget for a snapshot's figures recomputed for today
+#: (``GET /api/snapshots/{id}/today``), the same for every caller: a public
+#: path that runs a report computation for whoever holds a link. A reader asks
+#: once each time they turn the comparison on, again on a language switch, so
+#: this leaves room for reading several snapshots while capping a scripted
+#: loop well below the report endpoints' own budget.
+SNAPSHOT_TODAY_LIMIT = "10/minute"
 
 
 def user_key(request: Request) -> str:
     """Bucket a signed-in caller's writes by account, not by address.
 
-    Session middleware attaches the resolved user before routing. The address
-    fallback covers anonymous-only mode, where nobody can sign in.
+    Session middleware attaches the resolved user before routing. A
+    signed-out caller is bucketed by address.
     """
     user = current_user(request)
     if user is not None:
@@ -56,4 +46,4 @@ def user_key(request: Request) -> str:
     return get_remote_address(request)
 
 
-limiter = Limiter(key_func=_key_func)
+limiter = Limiter(key_func=get_remote_address)

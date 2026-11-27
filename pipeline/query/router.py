@@ -1,45 +1,16 @@
-"""Pre-LLM router.
+"""Pre-LLM router: regex rules that dispatch a question straight to a tool.
 
-Three-stage pipeline orchestrated from :func:`route_or_examples`:
-
-1. **Rules** — :data:`_RULES` regex match → direct dispatch.
-2. **Embedding** — nearest golden-Q in ``rag_chunks``; if distance is below
-   :data:`_EMBED_DISPATCH_THRESHOLD`
-   → direct dispatch using that Q's stored tool/args.
-3. **(caller)** — When :func:`route_or_examples` returns no decision, the
-   top-3 nearest it returns alongside serve as few-shot context for the LLM
-   call (Stage 3, in :mod:`pipeline.query.chat`).
-
-The router is additive: any failure (no rule match, embedder unavailable,
-empty index) returns ``(None, [])`` so the caller falls through to the LLM
-with empty examples.
+:func:`match_rules` is the whole router. A question no rule matches returns
+``None`` and the caller falls through to the LLM stage in
+:mod:`pipeline.query.chat`.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
 import re
 import unicodedata
-from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Any, Literal
-
-_log = logging.getLogger(__name__)
-
-# Distance below which Stage 2 will dispatch directly (cosine distance;
-# smaller = closer). Kept tight because a wrong direct dispatch is worse than
-# falling through to the LLM stage, which can still use the match as context.
-_EMBED_DISPATCH_THRESHOLD = 0.12
-
-# Minimum gap between the top match and the runner-up. When two golden Qs
-# are nearly equidistant the top hit is ambiguous, so we decline to
-# dispatch and fall through to the LLM (with the same rows as few-shot).
-_EMBED_MARGIN = 0.02
-
-# How many golden examples to retrieve for Stage 3 RAG injection.
-_RAG_TOP_K = 3
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -55,10 +26,8 @@ class Rule:
 
 @dataclass
 class RouterDecision:
-    stage: Literal["rules", "embedding"]
     tool: str
     args: dict[str, Any]
-    score: float
     matched_pattern: str | None
 
 
@@ -78,7 +47,7 @@ _DELAY_THRESHOLD = r"\d+\s*分\s*(?:を\s*)?(?:超|越|以上)"
 # The meta rules answer questions about what the dataset holds (routes, date
 # range, stops). A delay word or a route code (4+ digits) marks an analytic
 # question about the data itself, which the meta answers would replace with an
-# answer to a different question, so such a question is left to the later stages.
+# answer to a different question, so such a question is left to the LLM stage.
 _DELAY_WORDS = r"遅延|遅れ|遅く"
 _ANALYTIC_WORDS = rf"{_DELAY_WORDS}|\d{{4,}}"
 # The ranking rules rank routes; a question about stops has no rule here.
@@ -94,7 +63,7 @@ _RULES: list[Rule] = [
         args={"kind": "routes"},
         # An on-time list is ranking-on-time's to answer, a sample-count list
         # meta-sample-counts'.
-        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数"),
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数|観測数"),
     ),
     Rule(
         name="meta-date-range",
@@ -136,11 +105,21 @@ _RULES: list[Rule] = [
         tool="describe_data",
         args={"kind": "metrics"},
     ),
+    # An analytic question that names the count as a filter ("観測数が多い路線の
+    # 定時率ランキング") belongs to its ranking rule, so both count listings skip it.
     Rule(
         name="meta-sample-counts",
-        pattern=re.compile(r"サンプル数.*?(多い|TOP|ランキング)"),
+        pattern=re.compile(r"(サンプル数|観測数).*?(多い|TOP|ランキング)"),
         tool="describe_data",
         args={"kind": "sample_counts"},
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率"),
+    ),
+    Rule(
+        name="meta-sample-counts-least",
+        pattern=re.compile(r"(サンプル数|観測数).*?少な"),
+        tool="describe_data",
+        args={"kind": "sample_counts", "order": "asc"},
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率"),
     ),
     # ---- top_n ----
     # More-specific rules precede `ranking-worst` (first match wins), so e.g.
@@ -285,7 +264,7 @@ def is_follow_up(question: str) -> bool:
     """True when a question's wording reads as a continuation of the previous turn.
 
     With history present the API sends such a question straight to the LLM
-    stage with that history attached, since a stateless rule or embedding
+    stage with that history attached, since a stateless rule
     match cannot see what it continues.
     """
     return bool(_FOLLOW_UP_RE.search((question or "").strip()))
@@ -295,7 +274,7 @@ def needs_previous_turn(question: str, *, router_runs: bool = True) -> bool:
     """True when a follow-up question cannot be answered on its own.
 
     A back-reference always needs a previous turn. Continuation wording
-    (pagination, "more") needs one unless a Stage-1 rule answers the
+    (pagination, "more") needs one unless a rule answers the
     question. Refinement wording (re-sort, filter, "another") needs one only
     when the question names no subject of its own to refine, and then
     likewise unless a rule answers it; a noun that belongs to a reference
@@ -308,7 +287,7 @@ def needs_previous_turn(question: str, *, router_runs: bool = True) -> bool:
     needs_prior_result = bool(_CONTINUATION_RE.search(text)) or (
         bool(_REFINEMENT_RE.search(text)) and not _has_own_subject(text)
     )
-    return needs_prior_result and not (router_runs and _match_rules(text) is not None)
+    return needs_prior_result and not (router_runs and match_rules(text) is not None)
 
 
 # Words that point at something the conversation already named ("その路線",
@@ -354,8 +333,8 @@ def needs_history(question: str) -> bool:
     """True when a question points back at the conversation and names no route of its own.
 
     With history present the API sends such a question to the LLM stage with
-    that history instead of Stages 1-2: a rule or embedding match would replay
-    args stored for some other question, so "その路線は？" would be answered
+    that history instead of the rules: a rule match would replay
+    args fixed for some other question, so "その路線は？" would be answered
     about whichever route those args name. A question that names its own
     route gives the reference something in the question to point at
     ("22171の遅延とその推移").
@@ -370,7 +349,7 @@ def _has_own_subject(question: str) -> bool:
     return named and not needs_history(question)
 
 
-def _match_rules(question: str) -> RouterDecision | None:
+def match_rules(question: str) -> RouterDecision | None:
     """Return the first matching rule's decision, or ``None``.
 
     The question is NFKC-normalised first, so full-width digits and Latin
@@ -391,203 +370,12 @@ def _match_rules(question: str) -> RouterDecision | None:
                         args["n"] = int(g)
                         break
             return RouterDecision(
-                stage="rules",
                 tool=rule.tool,
                 args=args,
-                score=1.0,
                 matched_pattern=rule.name,
             )
     return None
 
 
-# Default lives in tests/ask_eval/. Tests override via set_golden_set_path.
-_DEFAULT_GOLDEN_SET = Path(__file__).resolve().parents[2] / "tests" / "ask_eval" / "golden_set.jsonl"
-_golden_path: Path = _DEFAULT_GOLDEN_SET
-_golden_cache: dict[str, tuple[str, dict]] | None = None
-
-
-def set_golden_set_path(path: Path | None) -> None:
-    """Test hook: point the golden-set loader at a different file."""
-    global _golden_path, _golden_cache
-    _golden_path = path if path is not None else _DEFAULT_GOLDEN_SET
-    _golden_cache = None
-
-
-def _load_golden() -> dict[str, tuple[str, dict]]:
-    """``chunk_id → (tool, args)`` mapping from golden_set.jsonl."""
-    global _golden_cache
-    if _golden_cache is not None:
-        return _golden_cache
-    mapping: dict[str, tuple[str, dict]] = {}
-    if not _golden_path.exists():
-        _log.warning("golden_set.jsonl not found at %s — Stage 2 will produce empty examples", _golden_path)
-        _golden_cache = mapping
-        return mapping
-    with _golden_path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except ValueError as exc:
-                # A malformed line must not break the "always degrade"
-                # contract — log and skip so routing still works.
-                _log.warning("golden_set.jsonl: skipping malformed line: %s", exc)
-                continue
-            cid = entry.get("id")
-            tool = entry.get("expected_tool")
-            args = entry.get("expected_args") or {}
-            if cid and tool:
-                mapping[cid] = (tool, args)
-    _golden_cache = mapping
-    return mapping
-
-
-# rag_chunks rows written by intent-cache promotion
-# (pipeline.query.intent_promotion); their tool/args live in ask_intent_cache.
-_CACHE_CHUNK_PREFIX = "cache_"
-
-
-async def _resolve_cache_chunks(conn, agency_id: int, chunk_ids: list[str]) -> dict[str, tuple[str, dict]]:
-    """``chunk_id → (tool, args)`` for the promoted intent-cache chunks among
-    *chunk_ids*. A row that was never promoted, or is gone, resolves to
-    nothing, like a golden id no longer in golden_set.jsonl."""
-    sigs = [cid.removeprefix(_CACHE_CHUNK_PREFIX) for cid in chunk_ids if cid.startswith(_CACHE_CHUNK_PREFIX)]
-    if not sigs:
-        return {}
-    rows = await conn.fetch(
-        "SELECT signature_hash, tool, args FROM ask_intent_cache "
-        "WHERE agency_id = $1 AND signature_hash = ANY($2::text[]) AND promoted_at IS NOT NULL",
-        agency_id,
-        sigs,
-    )
-    return {
-        # asyncpg returns jsonb as str (no codec is registered).
-        _CACHE_CHUNK_PREFIX + r["signature_hash"]: (r["tool"], json.loads(r["args"]))
-        for r in rows
-    }
-
-
-# In these questions the entities a stored arg names (route codes "22171",
-# aliases "A1", counts and thresholds "TOP5"/"10分") are ASCII letters and
-# digits, after NFKC folds full-width forms.
-_ENTITY_TOKEN = re.compile(r"[0-9a-z]+")
-
-
 def _fold(text: str) -> str:
     return unicodedata.normalize("NFKC", text).lower()
-
-
-def _args_carry_over(question: str, matched: str, args: dict) -> bool:
-    """Whether the *matched* question's stored *args* also answer *question*.
-
-    Stage 2 replays them verbatim, and they name the matched question's own
-    entities: "22171の運行情報" stores route 22171, which a near-identical
-    "22172の運行情報" must not inherit. So the entity tokens must agree, and
-    so must any arg value the matched question spells out (a stop named in
-    kanji).
-    """
-    if not args:
-        return True
-    q, m = _fold(question), _fold(matched)
-    if set(_ENTITY_TOKEN.findall(q)) != set(_ENTITY_TOKEN.findall(m)):
-        return False
-    spelled_out = [v for v in (_fold(a) for a in args.values() if isinstance(a, str) and a) if v in m]
-    return all(v in q for v in spelled_out)
-
-
-def _get_embedder():
-    """Indirection so tests can monkeypatch."""
-    from pipeline.query.embeddings import get_embedder
-
-    return get_embedder()
-
-
-def _enrich(raw, resolved):
-    """Join raw :class:`Match` rows to their resolved tool/args."""
-    enriched = []
-    for m in raw:
-        if m.chunk_id in resolved:
-            tool, args = resolved[m.chunk_id]
-            enriched.append(replace(m, tool=tool, args=dict(args)))
-    return enriched
-
-
-async def route_or_examples(question, conn, agency_id, k=_RAG_TOP_K):
-    """Single embed+search. Returns (decision_or_None, examples_list).
-
-    If the top match is within threshold+margin → (RouterDecision, []).
-    Otherwise → (None, top-k enriched examples for the LLM).
-
-    Rules are checked first: a rule hit returns ``(decision, [])`` with no
-    embed at all. The router is additive — any failure (empty question,
-    embedder down, nearest error, empty index) returns ``(None, [])``.
-    """
-    if not question or not question.strip():
-        return None, []
-
-    decision = _match_rules(question)
-    if decision is not None:
-        return decision, []
-
-    embedder = _get_embedder()
-    if not getattr(embedder, "available", False):
-        return None, []
-
-    try:
-        # encode() is CPU-bound — keep it off the shared event loop.
-        qvec = await asyncio.to_thread(embedder.embed, question, mode="query")
-    except Exception as exc:
-        _log.warning("Stage 2 embed failed: %s — falling through to LLM", exc.__class__.__name__)
-        return None, []
-
-    try:
-        from pipeline.query.rag_index import nearest
-
-        # Fetch enough rows to both decide dispatch (needs top-2 for the
-        # margin guard) and serve the few-shot examples on fall-through.
-        matches = await nearest(conn, agency_id, qvec, k=max(2, k))
-    except Exception as exc:
-        _log.warning("Stage 2 nearest failed: %s — falling through to LLM", exc.__class__.__name__)
-        return None, []
-
-    golden = _load_golden()
-    try:
-        resolved = {m.chunk_id: golden[m.chunk_id] for m in matches if m.chunk_id in golden}
-        resolved.update(await _resolve_cache_chunks(conn, agency_id, [m.chunk_id for m in matches]))
-    except Exception as exc:
-        _log.warning("Stage 2 cache resolve failed: %s — falling through to LLM", exc.__class__.__name__)
-        return None, []
-    # A row with no tool/args behind it can neither dispatch nor teach the
-    # LLM anything, so it is not a candidate at all.
-    stale = [m.chunk_id for m in matches if m.chunk_id not in resolved]
-    if stale:
-        _log.warning("rag_chunks rows with no tool/args (%s) — skipped", ", ".join(stale))
-    matches = [m for m in matches if m.chunk_id in resolved]
-    if not matches:
-        return None, []
-
-    top = matches[0]
-    within_threshold = top.distance <= _EMBED_DISPATCH_THRESHOLD
-    # The margin guard only matters under genuine TOOL ambiguity — when the
-    # runner-up maps to a *different* tool and sits within _EMBED_MARGIN of
-    # the top. Two near-identical paraphrases of the SAME tool (e.g. several
-    # "<route>の遅延" route_stats chunks) must not be blocked by a tiny gap.
-    ambiguous = False
-    if within_threshold and len(matches) >= 2 and (matches[1].distance - top.distance) < _EMBED_MARGIN:
-        ambiguous = resolved[top.chunk_id][0] != resolved[matches[1].chunk_id][0]
-    if within_threshold and not ambiguous:
-        tool, args = resolved[top.chunk_id]
-        if _args_carry_over(question, top.content, args):
-            decision = RouterDecision(
-                stage="embedding",
-                tool=tool,
-                args=dict(args),
-                score=1.0 - top.distance,
-                matched_pattern=top.chunk_id,
-            )
-            return decision, []
-
-    # Fall-through: serve top-k enriched examples for the LLM few-shot.
-    return None, _enrich(matches[:k], resolved)

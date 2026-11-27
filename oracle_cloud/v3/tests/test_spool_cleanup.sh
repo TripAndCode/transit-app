@@ -145,3 +145,38 @@ grep -q "PROBLEM local spool is" "$TEST_BASE/out.log" || fail "budget-exceeded r
 [ -f "$rt1/20260902.tar.gz" ] || fail "budget overage must not cause deletion of an unverified file"
 [ -f "$rt8/20260901.tar.gz" ] || fail "budget overage must not cause deletion of a mismatched file"
 pass "exceeding the disk budget fails loudly without deleting unverified archives"
+
+# --- VehiclePositions archives ----------------------------------------------
+# A vp/ day is reclaimed only once vp/<id>/ in R2 holds it. Its RT tarball for
+# the same day has the same basename, so an rt/<id>/ object must never count
+# as its upload.
+VP_BASE=$(mktemp -d)
+vp8="$VP_BASE/data/8/vp"; rt8b="$VP_BASE/data/8/rt"
+mkdir -p "$vp8" "$rt8b"
+printf 'VPDATA-A' > "$vp8/20260901.tar.gz"
+printf 'VPDATA-B' > "$vp8/20260902.tar.gz"
+printf 'RTDATA-B' > "$rt8b/20260902.tar.gz"
+vp_size=$(wc -c < "$vp8/20260901.tar.gz" | tr -d ' ')
+export LS_vp_8_="$fresh $vp_size vp/8/20260901.tar.gz"$'\n'
+export LS_rt_8_="$fresh $vp_size rt/8/20260902.tar.gz"$'\n'
+: > "$AWS_LOG"
+set +e
+COLLECTOR_BASE="$VP_BASE" ../bin/spool-cleanup.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || fail "spool-cleanup with a vp/ dir should exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q "s3://test-bucket/vp/8/" "$AWS_LOG" || fail "vp/8/ was never listed: $(cat "$AWS_LOG")"
+[ -f "$vp8/20260901.tar.gz" ] && fail "a VP day R2 holds under vp/8/ survived cleanup"
+[ -f "$vp8/20260902.tar.gz" ] || fail "a VP day was deleted on the strength of its RT namesake in rt/8/"
+[ -f "$rt8b/20260902.tar.gz" ] && fail "the RT day R2 holds under rt/8/ survived cleanup"
+pass "VP days are reclaimed against vp/<id>/, never against rt/<id>/"
+
+# What stays local under vp/ counts toward the disk budget.
+set +e
+COLLECTOR_BASE="$VP_BASE" SPOOL_DISK_BUDGET_BYTES=1 ../bin/spool-cleanup.sh > "$TEST_BASE/out.log" 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 1 ] || fail "a pending VP day over the budget should exit 1, got $rc: $(cat "$TEST_BASE/out.log")"
+[ -f "$vp8/20260902.tar.gz" ] || fail "budget overage deleted an unverified VP day"
+rm -rf "$VP_BASE"
+pass "pending VP days count toward the spool budget"

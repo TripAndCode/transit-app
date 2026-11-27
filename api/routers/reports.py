@@ -22,8 +22,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, ctx_payload, get_range_ctx
+from api.routers.network import COMPARABILITY_THRESHOLDS, ComparabilityThresholds
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.data_sources import credit_line
 from pipeline.day_types import DayType
@@ -62,10 +63,13 @@ from pipeline.reports import (
     delay_certificate_observed,
     format_definition_csv_line,
     observation_disclaimer,
+    read_standards,
     resolve_definition_meta,
     simulation_disclaimer,
     sort_route_table,
+    stamp_build,
 )
+from pipeline.reports.comparability import ComparableReason
 from pipeline.reports.council import DELIVERED_HONOURS as COUNCIL_DELIVERED_HONOURS
 from pipeline.reports.council import ON_TIME_HONOURS as COUNCIL_ON_TIME_HONOURS
 from pipeline.reports.delay_record import compute_record_stops, compute_record_trips
@@ -77,10 +81,12 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
-from pipeline.reports.route_table import RouteTableOrder
-from pipeline.reports.schedule_revision import get_schedule_revision_boundaries
+from pipeline.reports.network import compute_agency_feed_quality, feed_quality_of
+from pipeline.reports.rankings import DEFAULT_PRESET, EARLY_ANY, EarlyTolerance, on_time_window, report_reads_aggregates
+from pipeline.reports.reference import REFERENCE_MIN_SAMPLES, ReferenceReason
+from pipeline.reports.report_stamp import report_definition, scanned_schedule
+from pipeline.reports.route_table import RouteTableOrder, compute_route_references, route_references_for
 from pipeline.reports.service_delivered import DeliveredMissing
-from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
     RETIRED,
     ZERO_DELAY,
@@ -125,10 +131,11 @@ _ML_FRESHNESS_DAYS = 2
 # share a weekday with the new horizon's row for that slot.
 _ML_HORIZON_DAYS = 7
 
-# The rows the heatmap overlays: inside the horizon, from a recent publish, and
-# within a day's 24 hours (no band covers a run's hour 24 or later). Only the
-# latest publish (one generated_at) counts: a slot it dropped still holds a
-# superseded model's row. Built from the constants above, never from input.
+# The rows the heatmap overlays: inside the horizon, from the latest publish
+# (a slot it dropped still holds a superseded model's row), and below hour 24.
+# The model counts any run before the service-day cutover past 24, the past
+# averages only a time its feed writes past 24:00, so those hours do not meet.
+# Built from the constants above, never from input.
 _ML_FRESH_ROWS = (
     "service_date > now()::date "
     f"AND service_date <= now()::date + {_ML_HORIZON_DAYS} "
@@ -259,6 +266,12 @@ async def fetch_live_ml_agencies(conn: asyncpg.Connection) -> set[int]:
     return {row["agency_id"] for row in rows}
 
 
+#: The most rows a report lists in one response (the client's
+#: ``REPORT_ROWS_MAX`` in ``frontend/src/api/hooks.ts``). A route's page asks
+#: the agency's route lists at this length and reads a shorter list as
+#: complete, so a list stored for its snapshot is asked at the same length.
+REPORT_ROWS_MAX = 500
+
 # Static metadata for the listing endpoint. Ordered for sidebar display.
 _REPORT_TYPES = (
     "route_table",
@@ -327,11 +340,53 @@ def report_scope_applied(report_type: str) -> dict[str, bool]:
     return scope_applied(*honoured)
 
 
+def _preset_window(
+    preset: str | None, early_tolerance_sec: EarlyTolerance, late_tolerance_sec: int | None
+) -> tuple[int | None, int]:
+    """The (early, late) on-time window a request names
+    (:func:`pipeline.reports.rankings.on_time_window`): its *preset*'s, or
+    each tolerance it names and the default preset's for the rest. A 400 for
+    a preset :data:`~pipeline.reports.rankings.ON_TIME_PRESETS` lacks, or one
+    beside an explicit tolerance it would override."""
+    if preset is not None:
+        if early_tolerance_sec is not None or late_tolerance_sec is not None:
+            raise HTTPException(status_code=400, detail="preset cannot be combined with an early or late tolerance")
+        if preset not in ON_TIME_PRESETS:
+            raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
+    return on_time_window(preset, early_tolerance_sec, late_tolerance_sec)
+
+
+_MAX_EARLY_SEC = 3600
+
+
+def scope_early(
+    early: str | None = Query(
+        default=None,
+        pattern=f"^({EARLY_ANY}|[0-9]{{1,4}})$",
+        description="The scope's early tolerance: how many seconds early a departure may still be on time, "
+        f"up to {_MAX_EARLY_SEC}, or '{EARLY_ANY}' for every early departure. Unset, it is the default "
+        "preset's (pipeline.reports.rankings.DEFAULT_PRESET).",
+    ),
+) -> EarlyTolerance:
+    """The scope's ``early`` as :func:`pipeline.reports.rankings.on_time_window`
+    reads it, shared by every endpoint that takes it."""
+    if early is None:
+        return None
+    if early == EARLY_ANY:
+        return EARLY_ANY
+    seconds = int(early)
+    if seconds > _MAX_EARLY_SEC:
+        raise HTTPException(status_code=422, detail=f"early must be at most {_MAX_EARLY_SEC} seconds or '{EARLY_ANY}'")
+    return seconds
+
+
 # What each panel endpoint filters on: headway_quality's aggregate carries
-# neither service nor time band; performance_standards reads dates only; the
-# forecast endpoints read all-time aggregates, the heatmap for the scope's one route.
+# neither service nor time band; performance_standards reads dates only,
+# except for its on-time targets, which read the Routes table's scope less its
+# route filter; the forecast endpoints read all-time aggregates, the heatmap for the scope's one route.
 _HEADWAY_SCOPE = scope_applied("from", "to", "dow", "routes")
 _STANDARDS_SCOPE = scope_applied("from", "to")
+_ON_TIME_STANDARDS_SCOPE = scope_applied("from", "to", "dow", "time_band", "service", "late", "early")
 _WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
 _FORECAST_HEATMAP_SCOPE = scope_applied("routes")
 _FORECAST_OVERVIEW_SCOPE = scope_applied()
@@ -364,6 +419,65 @@ class ReportCtx(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class CouncilComparability(BaseModel):
+    """Whether the agencies board would rank this agency over the report's
+    dates, with the figures the gate judged and its thresholds; see
+    pipeline.reports.comparability and docs/features/network-tab.md. It
+    judges the board's figures (the whole agency, on the board's on-time
+    definition), so no filter or tolerance on the report changes it."""
+
+    comparable: bool
+    # The first check the gate fails, or None beside comparable.
+    reason: ComparableReason | None
+    coverage_pct: float | None
+    observed_trips: int | None
+    coverage_planned_trips: int | None
+    ci_low: float | None
+    ci_high: float | None
+    clamp_pct: float | None
+    # The board's own plan figures for the agency, which say why coverage
+    # could not be measured, so a verdict's reason comes from one read.
+    planned_trips: int
+    delivered_missing: DeliveredMissing | None
+    thresholds: ComparabilityThresholds
+
+
+class RouteReference(BaseModel):
+    """One route's on-time rate and average delay over its reference window,
+    as the Routes table computes them; both are None whenever ``reason``
+    names why the window cannot stand as the route's usual level."""
+
+    on_time_pct: float | None
+    avg_min: float | None
+    samples: int
+    reason: ReferenceReason | None
+
+
+class RouteReferences(BaseModel):
+    """The ``days`` days before the period, under the report's scope and
+    on-time window (pipeline.reports.route_table.compute_route_references),
+    and each listed route's figures over them.
+
+    ``days_selected`` counts the window's days the scope's day-of-week and
+    service filters keep, ``days_collected`` those the agency's feed holds
+    data on, and ``min_days`` / ``min_samples`` the floors a figure needs.
+    ``samples`` and ``reason`` judge the scope's observations together:
+    ``not_aggregated`` reads nothing, so its counts are 0, and a reason here
+    withholds every route's figure.
+    """
+
+    samples: int
+    window_from: str  # ISO date
+    window_to: str  # ISO date
+    days: int
+    days_selected: int
+    days_collected: int
+    min_days: int
+    min_samples: int
+    reason: ReferenceReason | None
+    routes: dict[str, RouteReference]
+
+
 class ReportResponse(BaseModel):
     """Payload returned by ``GET /reports/{report_type}`` in JSON mode."""
 
@@ -390,6 +504,10 @@ class ReportResponse(BaseModel):
     covered_days: int | None = None
     window_days: int | None = None
     delivered_missing: DeliveredMissing | None = None
+    # council_summary only (None elsewhere, and while the cached agencies
+    # board does not list the agency yet or the board cannot be built):
+    # whether the board ranks this agency over the same dates.
+    comparability: CouncilComparability | None = None
     # How many routes (delay_certificate: trips) qualified before `limit` cut
     # the list (route_table, ranking, ranking_best, on_time, compare_ranking
     # and delay_certificate; None elsewhere), and, for route_table, ranking and
@@ -418,6 +536,10 @@ class ReportResponse(BaseModel):
     # label the rows it holds rather than the ones it asked for.
     sort: str | None = None
     order: str | None = None
+    # route_table and on_time only (None elsewhere): each listed route's own
+    # figures over the 90 days before the period, under the same scope and
+    # on-time window, so a screen can say whether its figure is usual for it.
+    reference: RouteReferences | None = None
 
 
 def _report_ctx(ctx: RangeCtx) -> ReportCtx:
@@ -426,7 +548,7 @@ def _report_ctx(ctx: RangeCtx) -> ReportCtx:
 
 
 @router.get("/reports", response_model=list[ReportMeta])
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -437,17 +559,19 @@ async def list_reports(
 
 
 class HeadwayQualityRow(BaseModel):
-    """One high-frequency route's pooled Excess Waiting Time / coefficient of
-    variation / long-gap rate over the request's range, on the days of its
+    """One route's pooled Excess Waiting Time / coefficient of variation /
+    long-gap rate over the days in the request's range that it is
+    high-frequency on, each by the timetable in force that day, and of its
     ``day_type`` — see ``pipeline.reports.headway_quality.compute_headway_quality_report``.
 
     ``ewt_sec``/``cov``/``long_gap_rate`` are independently nullable, not
-    nullable together: a route can appear here (it's classified
+    nullable together: a route can appear here (a day's timetable classes it
     high-frequency) yet still have no resolvable metric for the requested
-    range slice (e.g. its scheduled mean-wait predates this feature and
-    hasn't been re-analyzed). ``cov`` alone additionally requires at least
-    two pooled samples, so a route pooled from a single-sample day can have
-    a resolvable ``ewt_sec``/``long_gap_rate`` with a null ``cov``.
+    range slice (e.g. a pooled day's timetable was kept before its scheduled
+    sums were, which leaves ``ewt_sec`` null). ``cov`` alone additionally
+    requires at least two pooled samples, so a route pooled from a
+    single-sample day can have a resolvable ``ewt_sec``/``long_gap_rate``
+    with a null ``cov``.
     """
 
     route_code: str
@@ -457,6 +581,12 @@ class HeadwayQualityRow(BaseModel):
     samples: int
     # The class of day pooled (the route's dominant timetable's), or None for every day.
     day_type: DayType | None = None
+    # Gaps shorter than a quarter of their day's scheduled headway, of the gaps
+    # judged, and their share: None when a pooled day was not measured (built
+    # before the counts were stored, or before the retention floor), never 0.
+    bunched: int | None = None
+    bunching_judged: int | None = None
+    bunching_rate: float | None = None
 
 
 class HeadwayQualityResponse(BaseModel):
@@ -472,6 +602,10 @@ class HeadwayQualityResponse(BaseModel):
     rows: list[HeadwayQualityRow]
     # High-frequency routes with data in range, none of it on a day of their class.
     routes_off_timetable: int = 0
+    # Days in range run under a timetable whose scheduled headways aren't kept, left out.
+    days_timetable_not_kept: int = 0
+    # Days pooled under a timetable kept without its scheduled wait, which hides the routes' excess wait.
+    days_scheduled_wait_not_kept: int = 0
     unavailable_reason: Literal["no_high_frequency_routes"] | CoverageGapReason | None = None
     last_checked: date | None = None
     ctx: ReportCtx
@@ -479,7 +613,7 @@ class HeadwayQualityResponse(BaseModel):
 
 
 @router.get("/headway_quality", response_model=HeadwayQualityResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_headway_quality(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -493,14 +627,52 @@ async def get_headway_quality(
     server-side by classification, not by a ranking/threshold the caller
     chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
-    rows, off_timetable, unavailable = await compute_headway_quality_report(agency_id, ctx, conn)
+    return await render_headway_quality(agency_id, ctx, conn)
+
+
+async def render_headway_quality(agency_id: int, ctx: RangeCtx, conn: asyncpg.Connection) -> HeadwayQualityResponse:
+    """``GET /headway_quality``'s whole computation, for a caller that holds
+    the request's scope already: a Routes table snapshot stores exactly what
+    the panel beside the table was served."""
+    report = await compute_headway_quality_report(agency_id, ctx, conn)
     return HeadwayQualityResponse(
-        rows=[HeadwayQualityRow(**r) for r in rows],
-        routes_off_timetable=off_timetable,
-        **unavailable,
+        rows=[HeadwayQualityRow(**r) for r in report.rows],
+        routes_off_timetable=report.routes_off_timetable,
+        days_timetable_not_kept=report.days_timetable_not_kept,
+        days_scheduled_wait_not_kept=report.days_scheduled_wait_not_kept,
+        **report.unavailable,
         ctx=_report_ctx(ctx),
         scope_applied=_HEADWAY_SCOPE,
     )
+
+
+class NotJudged(BaseModel):
+    """Why an `on_time_pct`, `service_delivered_pct` or
+    `vehicle_km_delivered_pct` row has no figure to judge
+    (`pipeline.reports.performance_standard.on_time_reading` and
+    `delivered_reading`): `too_few_observations` gives the route's
+    `observations` in the scope and the `floor` a verdict needs, and
+    `too_few_planned_trips` its `planned_trips` and that `floor`.
+    `route_plan_unknown` says a planned day of the period has no saved split
+    by route, `no_shapes` that the timetable has no route shapes for vehicle-km,
+    and the agency's own reasons for having no service-delivered rate
+    (`pipeline.reports.service_delivered.DeliveredMissing`) stand for each of
+    its routes. Those, and `zero_delay_feed`, give no count."""
+
+    reason: Literal[
+        "too_few_observations",
+        "zero_delay_feed",
+        "too_few_planned_trips",
+        "route_plan_unknown",
+        "no_shapes",
+        "no_plan",
+        "feed_cannot_report",
+        "feed_unverified",
+        "feed_reports_no_cancellations",
+    ]
+    observations: int | None
+    floor: int | None
+    planned_trips: int | None = None
 
 
 class PerformanceStandardRow(BaseModel):
@@ -515,42 +687,69 @@ class PerformanceStandardRow(BaseModel):
     have no resolvable actual figure for the requested range (e.g. an
     `ewt_sec` standard on a route not classified high-frequency), or a
     `threshold_value` of exactly 0 makes the relative-deviation ratio
-    undefined. `metric_scope` is `"agency"` for `vehicle_km_delivered_pct`
-    (that figure has no per-route breakdown -- every route configured with
-    it is compared against its own agency's rate) and `"route"` for
-    `ewt_sec`; the frontend must label an `"agency"`-scoped row accordingly
-    rather than implying a route-specific figure.
+    undefined. Every figure is the route's own. An `on_time_pct` row reads the
+    Routes table's on-time figure for the route (see
+    `PerformanceStandardsResponse.on_time_definition`); a
+    `service_delivered_pct` or `vehicle_km_delivered_pct` row reads the
+    route's service-delivered rate over the dates.
     """
 
     route_code: str
     metric_type: str
-    metric_scope: str
     threshold_value: float
     bonus_malus_rate: float
     actual_value: float | None
     achievement_rate: float | None
     estimated_bonus_deduction: float | None
+    #: Whether `actual_value` is at least as good as `threshold_value`;
+    #: `None` exactly when `actual_value` is.
+    meets: bool | None
+    #: Why an `on_time_pct`, `service_delivered_pct` or
+    #: `vehicle_km_delivered_pct` row is not judged; `None` on a judged row and
+    #: on every `ewt_sec` row.
+    not_judged: NotJudged | None = None
 
 
 class PerformanceStandardsResponse(BaseModel):
     """Payload for `GET /performance_standards`. `disclaimer` is a
     server-rendered, already-localized caveat that MUST be surfaced
     verbatim wherever these figures are shown -- this is an internal
-    simulation/estimate, never an actual invoice or contractual output."""
+    simulation/estimate, never an actual invoice or contractual output.
+
+    `on_time_definition` is the on-time definition the `on_time_pct` rows were
+    judged on, which a reader needs to read their target; `None` when no such
+    row came back. With one, `scope_applied` names the Routes table's scope,
+    which those rows follow; the other rows read the dates only."""
 
     rows: list[PerformanceStandardRow]
     ctx: ReportCtx
     disclaimer: str
+    on_time_definition: DefinitionMeta | None
     scope_applied: dict[str, bool]
 
 
 @router.get("/performance_standards", response_model=PerformanceStandardsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_performance_standards(
     request: Request,
+    preset: str | None = Query(
+        default=None,
+        description="The on-time preset the on_time_pct targets are judged on (ON_TIME_PRESETS), as the "
+        "route_table report takes it; unset, the default preset's window. Mutually exclusive with late/early.",
+    ),
+    late: int | None = Query(
+        default=None, ge=0, le=3600, description="The scope's on-time late tolerance in seconds, for on_time_pct."
+    ),
+    early: EarlyTolerance = Depends(scope_early),
+    route: str | None = Query(
+        default=None,
+        description="One route's own page: only this route's standards, each judged on figures read for it "
+        "alone. Unlike the scope's routes filter, which never narrows the standards returned.",
+    ),
     agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
-    ctx: RangeCtx = Depends(get_range_ctx),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
 ) -> PerformanceStandardsResponse:
     """Per-route minimum-performance-standard achievement rate and
@@ -562,12 +761,61 @@ async def get_performance_standards(
     populated config table joined against other reports' own compute
     functions, not a single `agg_*` table scan.
     """
-    rows = await compute_performance_standards(agency_id, ctx, conn)
+    return await render_performance_standards(
+        agency_id, ctx, conn, ch, locale=locale, route=route, preset=preset, late=late, early=early
+    )
+
+
+async def render_performance_standards(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    *,
+    locale: str,
+    route: str | None = None,
+    preset: str | None = None,
+    late: int | None = None,
+    early: EarlyTolerance = None,
+) -> PerformanceStandardsResponse:
+    """``GET /performance_standards``'s whole computation, for a caller that
+    resolved the request's parameters itself: a snapshot stores exactly what
+    the panel was served. Each argument means what the
+    endpoint's parameter of the same name means."""
+    early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
+    standards = await read_standards(conn, agency_id, route)
+    judges_on_time = any(r["metric_type"] == "on_time_pct" for r in standards)
+    on_time_definition = None
+    if judges_on_time:
+        # Stamped before the rows are computed, as get_report does: a rebuild
+        # since this process last looked clears the caches the rows read.
+        live = not report_reads_aggregates(
+            "route_table", ctx, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
+        )
+        schedule, joined = await scanned_schedule(conn, ch, agency_id, ctx, live)
+        on_time_definition = await stamp_build(
+            conn,
+            resolve_definition_meta("on_time", early_tolerance_sec, late_tolerance_sec, live=live),
+            agency_id,
+            schedule,
+            joined,
+        )
+    rows = await compute_performance_standards(
+        agency_id,
+        ctx,
+        conn,
+        standards,
+        route=route,
+        ch=ch,
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+    )
     return PerformanceStandardsResponse(
         rows=[PerformanceStandardRow(**r) for r in rows],
         ctx=_report_ctx(ctx),
         disclaimer=simulation_disclaimer(locale),
-        scope_applied=_STANDARDS_SCOPE,
+        on_time_definition=on_time_definition,
+        scope_applied=_ON_TIME_STANDARDS_SCOPE if judges_on_time else _STANDARDS_SCOPE,
     )
 
 
@@ -645,7 +893,7 @@ class WeatherDelayResponse(BaseModel):
 
 
 @router.get("/weather_delay", response_model=WeatherDelayResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -730,7 +978,7 @@ class DelayRecordStopsResponse(BaseModel):
 
 
 @router.get("/delay_record/trips", response_model=DelayRecordTripsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_delay_record_trips(
     request: Request,
     day: date = Query(alias="date", description="The service day travelled on."),
@@ -755,7 +1003,7 @@ async def get_delay_record_trips(
 
 
 @router.get("/delay_record/stops", response_model=DelayRecordStopsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_delay_record_stops(
     request: Request,
     day: date = Query(alias="date", description="The service day travelled on."),
@@ -778,58 +1026,6 @@ async def get_delay_record_stops(
         stops=[DelayRecordStop(**s) for s in record["stops"]],
         scope_applied=_DELAY_RECORD_SCOPE,
     )
-
-
-class SuggestionResponse(BaseModel):
-    """Payload for GET /reports/suggest -- the Insight Panel's single pick."""
-
-    report_type: str
-    route_code: str
-    reason_text: str
-    severity: str
-    # The evaluation window the rule that produced this suggestion actually
-    # used (1 day for the anomaly rule, 7 days for trend-shift/on-time) --
-    # ISO date strings so the frontend can pin its click-through navigation
-    # to the window the reason text describes, instead of the user's ambient
-    # (possibly 30-day) Analysis tab filter, which can dilute or hide the
-    # very signal being described.
-    from_date: str
-    to_date: str
-
-
-class SuggestionEnvelope(BaseModel):
-    """Payload for GET /reports/suggest.
-
-    ``suggestion`` is ``null`` when no rule produced a pick. The envelope
-    exists so that "no signal" stays a described 200 body a client can read
-    fields off, rather than a bare ``null`` with nowhere to say why.
-    """
-
-    suggestion: SuggestionResponse | None = None
-
-
-@router.get("/reports/suggest", response_model=SuggestionEnvelope)
-@limiter.limit(tier_limit)
-async def get_suggestion(
-    request: Request,
-    agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
-    ch: AsyncClient = Depends(get_ch),
-    locale: str = Depends(get_locale),
-    exclude: list[str] = Query(default=[]),
-) -> SuggestionEnvelope:
-    """One rule-based 'go look at this' suggestion for the Analysis tab's
-    Insight Panel. ``exclude`` entries are ``"report_type:route_code"``
-    pairs the frontend has already shown this session (sessionStorage-backed,
-    stateless here). Returns ``{"suggestion": null}`` when every rule's
-    candidates are excluded or the agency has no data at all -- the frontend
-    renders its own calm 'no signal' copy for that case, not this endpoint.
-    """
-    exclude_set: frozenset[tuple[str, str]] = frozenset(
-        (report_type, route_code) for item in exclude if ":" in item for report_type, route_code in [item.split(":", 1)]
-    )
-    result = await compute_suggestion(agency_id, conn, ch, exclude=exclude_set, locale=locale)
-    return SuggestionEnvelope(suggestion=SuggestionResponse(**result) if result else None)
 
 
 class ForecastHeatmapCell(BaseModel):
@@ -856,7 +1052,8 @@ class ForecastDay(BaseModel):
 
 
 class ForecastHeatmapResponse(BaseModel):
-    """Payload for ``GET /forecast/heatmap`` — the full 7×24 day×hour grid.
+    """Payload for ``GET /forecast/heatmap`` — the full day×hour grid, 7×24 and
+    wider when the route runs past midnight on its service day's clock.
     `forecast_days` names the dates this route's ML cells forecast, oldest
     first; `history_from`/`history_to` bound the analyzed days of this
     route that its past averages pool (null for a route with none)."""
@@ -871,7 +1068,7 @@ class ForecastHeatmapResponse(BaseModel):
 
 
 @router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def forecast_heatmap(
     request: Request,
     route: str = Query(..., min_length=1),
@@ -879,7 +1076,8 @@ async def forecast_heatmap(
     conn: asyncpg.Connection = Depends(get_conn),
     locale: str = Depends(get_locale),
 ) -> dict[str, Any]:
-    """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23) for a
+    """Expected delay by day-of-week (ISODOW 1=Mon..7=Sun) × hour (0..23, then 24
+    and on for a departure after midnight on its service day's clock) for a
     route, pooled across service types (sample-weighted = exact pooled mean).
     Seasonal-naive baseline, NOT a prediction; carries a disclaimer.
     """
@@ -989,7 +1187,7 @@ async def _fetch_recent_daily_rows(
 
 
 @router.get("/forecast/overview", response_model=ForecastOverviewResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def forecast_overview(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -1068,6 +1266,7 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
         "5分超の割合(%)",
         "5分超回数",
         "観測数",
+        "早発率(%)",
         "誤差大",
         "誤差(±ポイント)",
     ],
@@ -1080,7 +1279,20 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     "dow_weekday": ["系統コード", "種別", "日種別", "平均遅延(分)", "観測数"],
     "trend": ["日付", "平均遅延(分)", "7日移動平均(分)", "観測数", "悪化系統トップ3"],
     "dwell_run": ["系統コード", "種別", "滞留観測数", "滞留平均(秒)", "走行観測数", "走行平均(秒)"],
-    "council_summary": ["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"],
+    "council_summary": [
+        "定時率(%)",
+        "平均遅延(分)",
+        "観測数",
+        "計画本数",
+        "運行本数",
+        "運行実績率(%)",
+        "早発率(%)",
+        "他事業者と比較できる",
+        "比較できない理由",
+        "観測カバー率(%)",
+        "定時率95%信頼区間下限(%)",
+        "定時率95%信頼区間上限(%)",
+    ],
     "delay_certificate": [
         "事業者名",
         "系統コード",
@@ -1093,6 +1305,38 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
         "始発の停留所",
     ],
 }
+
+# Why a route's reference has no figure, in the route table's CSV.
+_REFERENCE_REASON_CSV: dict[str, str] = {
+    "no_data": "観測なし",
+    "insufficient_days": "データのある日が{days_collected}日で、必要な{min_days}日に満たない",
+    "insufficient_samples": "観測が{samples}回で、必要な{min_samples}回に満たない",
+    "not_aggregated": "集計のない条件のため比べない",
+}
+
+
+def _reference_csv_columns(reference: dict) -> list[str]:
+    days = reference["days"]
+    return [
+        f"過去{days}日({reference['window_from']}〜{reference['window_to']})の定時率(%)",
+        f"過去{days}日の定時率を示さない理由",
+    ]
+
+
+def _reference_csv_cells(reference: dict, route_code: str) -> list:
+    """A route's reference rate and, where it has none, why, in the words of
+    the rules the screen states."""
+    entry = reference["routes"][route_code]
+    if entry["reason"] is None:
+        return [entry["on_time_pct"], ""]
+    reason = _REFERENCE_REASON_CSV[entry["reason"]].format(
+        days_collected=reference["days_collected"],
+        min_days=reference["min_days"],
+        samples=entry["samples"],
+        min_samples=REFERENCE_MIN_SAMPLES,
+    )
+    return ["", reason]
+
 
 # A downloaded file's name, where the report's user-facing name differs from
 # its type identifier: the delay_certificate type is shown to users as a
@@ -1109,6 +1353,7 @@ def _csv_response(
     credit: str | None,
     unavailable_message: str | None = None,
     extra_footnotes: list[str] | None = None,
+    reference: dict | None = None,
 ) -> StreamingResponse:
     """Stream a UTF-8 BOM CSV (BOM lets Excel auto-detect Japanese encoding).
 
@@ -1116,7 +1361,7 @@ def _csv_response(
     definition-metadata preamble (see
     ``pipeline.reports.definition.format_definition_csv_line``) so a CSV
     exported with non-default tolerances shows those exact values instead of
-    silently reading as the legacy_60s default. `extra_footnotes`, when
+    silently reading as the default. `extra_footnotes`, when
     given, adds one single-cell preamble row per string AFTER that line and
     BEFORE the column header -- the council_summary report type's
     freshness/quality caveats (see
@@ -1139,8 +1384,12 @@ def _csv_response(
     (`dwell_run`'s `available`/`time_band_supported` flags), an empty CSV
     with only a header row would silently collapse that same distinction
     back into a misleading blank/zero.
+
+    `reference`, the route table's (``RouteReferences``), adds each route's
+    reference rate and why it has none as the last two columns.
     """
-    cols = _REPORT_CSV_COLUMNS.get(report_type, [])
+    with_reference = reference if report_type == "route_table" else None
+    cols = _REPORT_CSV_COLUMNS.get(report_type, []) + (_reference_csv_columns(with_reference) if with_reference else [])
     buf = io.StringIO()
     buf.write("﻿")  # BOM
     w = csv.writer(buf)
@@ -1159,7 +1408,8 @@ def _csv_response(
     elif report_type in ("on_time", "route_table"):
         for r in rows:
             *lead, low_confidence, margin_pp = r
-            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else "", margin_pp])
+            tail = _reference_csv_cells(with_reference, r[0]) if with_reference else []
+            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else "", margin_pp, *tail])
     elif report_type == "delay_certificate":
         # A stop the loaded timetable does not name is left blank, not called
         # a non-origin: whether the trip starts there is unknown.
@@ -1192,45 +1442,46 @@ def _csv_response(
 
 
 @router.get("/reports/{report_type}", response_model=ReportResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_report(
     request: Request,
     report_type: str,
-    limit: int | None = Query(default=None, ge=1, le=500),
+    limit: int | None = Query(default=None, ge=1, le=REPORT_ROWS_MAX),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,
-        description="Named on-time/late tolerance preset (currently only 'legacy_60s'). "
-        "Mutually exclusive with early_tolerance_sec/late_tolerance_sec.",
+        description="Named on-time window (pipeline.reports.rankings.ON_TIME_PRESETS): 'standard_m1_p5', "
+        "the default (no more than 60s early and 300s late), or 'legacy_60s' (up to 60s late, any early "
+        "departure on time), which only the on_time, route_table and council_summary reports take; the "
+        "default changes nothing on the others. Mutually exclusive with the tolerances.",
     ),
     early_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time/council_summary only: how many seconds early a departure may still be "
-        "'on time'. Unset means unbounded (any early departure counts), matching legacy_60s.",
+        description="on_time/route_table/council_summary only: how many seconds early a departure may still "
+        "be 'on time'; unset, the default preset's 60s, and early=any counts every early departure. On "
+        "route_table/council_summary it is also how early a departure must be to count in the "
+        "early-departure rate, 60s with no early bound.",
     ),
     late_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time/worst_5min/council_summary: the late-side cutoff (default 60s for "
-        "on_time/council_summary, 300s for worst_5min). Passing this opts into a query-time "
-        "histogram estimate instead of the exact legacy_60s column.",
+        description="on_time/route_table/worst_5min/council_summary: the late-side cutoff (default 300s, "
+        "the default preset's, and worst_5min's own five minutes). An on-time count is exact for "
+        "60s or 300s with no early tolerance or one on a whole minute up to 300s "
+        "(pipeline.histogram.exact_window), and a histogram estimate otherwise; worst_5min's count is "
+        "a histogram estimate. A cutoff of 1800s or more, or an early tolerance over 300s, is scanned "
+        "live, past the histogram's open end buckets.",
     ),
     late: int | None = Query(
         default=None,
         ge=0,
         le=3600,
-        description="The scope's on-time late tolerance in seconds. Applied by on_time and "
+        description="The scope's on-time late tolerance in seconds. Applied by on_time, route_table and "
         "council_summary; otherwise ignored and reported false in scope_applied (worst_5min's "
         "threshold stays its own late_tolerance_sec).",
     ),
-    early: int | None = Query(
-        default=None,
-        ge=0,
-        le=3600,
-        description="The scope's early tolerance in seconds. Applied by on_time and council_summary; "
-        "otherwise ignored and reported false in scope_applied.",
-    ),
+    early: EarlyTolerance = Depends(scope_early),
     threshold_sec: int | None = Query(
         default=None,
         ge=0,
@@ -1280,6 +1531,80 @@ async def get_report(
     locale: str = Depends(get_locale),
 ) -> ReportResponse | StreamingResponse:
     """Compute the named report live and render it."""
+    return await render_report(
+        report_type,
+        limit=limit,
+        format=format,
+        preset=preset,
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+        late=late,
+        early=early,
+        threshold_sec=threshold_sec,
+        include_sparse=include_sparse,
+        include_retired=include_retired,
+        include_zero_delay=include_zero_delay,
+        order=order,
+        sort=sort,
+        lang=lang,
+        agency_id=agency_id,
+        ctx=ctx,
+        conn=conn,
+        ch=ch,
+        locale=locale,
+    )
+
+
+async def _listed_references(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    rows: list,
+    early_tolerance_sec: int | None,
+    late_tolerance_sec: int | None,
+) -> dict | None:
+    """The reference of each route ``rows`` lists, under the rows' own window,
+    or None when it cannot be read: it is context beside the rows, so a failed
+    read leaves the list standing without it."""
+    try:
+        references = await compute_route_references(
+            agency_id, ctx, conn, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
+        )
+    except Exception:
+        _log.exception("route references: could not read agency %s's trailing window", agency_id)
+        return None
+    return route_references_for(references, [r[0] for r in rows])
+
+
+async def render_report(
+    report_type: str,
+    *,
+    agency_id: int,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    locale: str,
+    limit: int | None = None,
+    format: str | None = None,
+    preset: str | None = None,
+    early_tolerance_sec: int | None = None,
+    late_tolerance_sec: int | None = None,
+    late: int | None = None,
+    early: EarlyTolerance = None,
+    threshold_sec: int | None = None,
+    include_sparse: bool = False,
+    include_retired: bool = False,
+    include_zero_delay: bool = False,
+    order: str | None = None,
+    sort: str | None = None,
+    lang: str | None = None,
+) -> ReportResponse | StreamingResponse:
+    """``GET /reports/{report_type}``'s whole computation, for a caller that
+    has resolved the request's parameters itself: a frozen snapshot stores
+    exactly what the endpoint would serve. Each argument means what the
+    endpoint's parameter of the same name means; the endpoint also bounds
+    ``limit``, ``late`` and the ``sort``/``order``/``lang`` values, which a
+    caller of this function checks itself."""
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
 
@@ -1289,18 +1614,26 @@ async def get_report(
         raise HTTPException(status_code=400, detail="early and early_tolerance_sec set the same tolerance; pass one")
     if late is not None and report_type in _SCOPE_LATE_TYPES:
         late_tolerance_sec = late
+    early_tolerance: EarlyTolerance = early_tolerance_sec
     if early is not None and report_type in _EARLY_TOLERANCE_TYPES:
-        early_tolerance_sec = early
+        early_tolerance = early
 
-    if preset is not None:
-        if early_tolerance_sec is not None or late_tolerance_sec is not None:
+    if preset is not None and report_type not in _EARLY_TOLERANCE_TYPES:
+        _preset_window(preset, early_tolerance, late_tolerance_sec)
+        # The default overrides nothing, so it stays accepted everywhere. Any
+        # other preset is an on-time window, which worst_5min (whose late
+        # tolerance is its own over-5-minute cutoff) and the reports without
+        # a tolerance would otherwise misread or reject under another name.
+        if preset != DEFAULT_PRESET:
             raise HTTPException(
-                status_code=400, detail="preset cannot be combined with early_tolerance_sec/late_tolerance_sec"
+                status_code=400,
+                detail=f"preset '{preset}' only applies to the on_time/route_table/council_summary reports",
             )
-        if preset not in ON_TIME_PRESETS:
-            raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
-        early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
-    if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
+    if report_type in _EARLY_TOLERANCE_TYPES:
+        # The one place a report's on-time window is resolved, so the rows
+        # and the definition beside them read the same pair.
+        early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early_tolerance, late_tolerance_sec)
+    elif early_tolerance is not None:
         raise HTTPException(
             status_code=400,
             detail="early_tolerance_sec only applies to the on_time/route_table/council_summary reports",
@@ -1330,7 +1663,18 @@ async def get_report(
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
-    definition = resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec)
+    definition, schedule = await report_definition(
+        conn,
+        ch,
+        agency_id,
+        ctx,
+        report_type,
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+        csv=format == "csv",
+        # The council report states the figures its verdict reads instead.
+        read_feed_quality=report_type != "council_summary",
+    )
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
         if format == "csv"
@@ -1349,6 +1693,7 @@ async def get_report(
     left_out_rows = dict.fromkeys(left_out, 0)
     table_sort: str | None = None
     table_order: RouteTableOrder | None = None
+    reference: dict | None = None
 
     def listed(route_rows: list) -> list:
         """pipeline.route_catalog.route_list over this request, recording each
@@ -1379,7 +1724,14 @@ async def get_report(
         rows_total = listed_total(table)
         rows = [(*r, on_time_pct_low_confidence(r[2], r[5]), on_time_pct_margin_pp(r[2], r[5])) for r in listed(table)]
         left_out_rows.update(left_out_counts(table, left_out))
-        intent = {"query_type": "route_table", "sort": table_sort, "order": table_order, "service": _service_label(ctx)}
+        reference = await _listed_references(agency_id, ctx, conn, rows, early_tolerance_sec, late_tolerance_sec)
+        intent = {
+            "query_type": "route_table",
+            "sort": table_sort,
+            "order": table_order,
+            "service": _service_label(ctx),
+            "early_departure_sec": definition.early_departure_sec,
+        }
     elif report_type in _RANKING_TYPES:
         sort_order = "asc" if report_type == "ranking_best" else "desc"
         ranked = await compute_ranking(
@@ -1410,10 +1762,13 @@ async def get_report(
         # Appends `low_confidence` (95% Wilson interval too wide to trust the
         # percentage) and `margin_pp` (that interval's half-width) as a
         # display-layer annotation — doesn't change compute_on_time's own
-        # 5-tuple contract, so pooling callers (pipeline.reports.suggest) and
-        # the Ask tools' columns are unaffected. See pipeline/stats.py.
+        # 5-tuple contract, so the Ask tools' columns are unaffected. See
+        # annotate_on_time_pct_confidence.
         rows = [(*r, on_time_pct_margin_pp(r[2], r[4])) for r in annotate_on_time_pct_confidence(listed(rated))]
         intent = {"query_type": "on_time", "sort_order": sort_order, "service": _service_label(ctx)}
+        # The on-time list's CSV writes no reference, so it reads none.
+        if format != "csv":
+            reference = await _listed_references(agency_id, ctx, conn, rows, early_tolerance_sec, late_tolerance_sec)
     elif report_type == "worst_5min":
         rows = await compute_worst_5min(
             agency_id, ctx, conn, ch=ch, limit=n_fetch, late_tolerance_sec=late_tolerance_sec
@@ -1447,9 +1802,9 @@ async def get_report(
         # agg_schedule_revision_daily coverage at all (its ingest strategy
         # never joins static data, or its RT rows carry no static_version_id
         # yet).
-        # Skipped entirely for the CSV export above, which has no chart to
-        # annotate.
-        revision_boundaries = await get_schedule_revision_boundaries(conn, agency_id, ctx.from_date, ctx.to_date)
+        # Drawn from the read the definition's timetables came from; the CSV
+        # export above has no chart to annotate, so it skips them.
+        revision_boundaries = schedule.boundaries()
         text = format_trend_text(days, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
@@ -1487,6 +1842,7 @@ async def get_report(
             scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "council_summary":
+        assert late_tolerance_sec is not None  # resolved with the window above
         agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
         agency_name = agency_row["agency_name"] if agency_row else str(agency_id)
         payload = await compute_council_summary(
@@ -1504,14 +1860,31 @@ async def get_report(
             payload["planned_trips"],
             payload["executed_trips"],
             payload["service_delivered_pct"],
+            payload["early_departure_pct"],
         )
+        gate = payload["comparability"]
+        # The figures the verdict judges, from the board's cached row, so the
+        # document states one coverage and one clamp share; without a verdict,
+        # this agency's own, read the board's way.
+        quality = (
+            feed_quality_of(agency_id, gate, observed=gate["reason"] != "no_data")
+            if gate
+            else await compute_agency_feed_quality(conn, agency_id, ctx.from_date, ctx.to_date)
+        )
+        definition = definition.model_copy(update={"feed_quality": None if quality is None else [quality]})
         if format == "csv":
             # The CSV's caveat rows stay Japanese-only (see _csv_response's own
             # docstring), matching format_definition_csv_line's existing
             # convention -- unlike the JSON `text` body below, which honors
-            # the request's locale.
+            # the request's locale. The verdict's reason stays its code, which
+            # the caveat rows put in words; no verdict leaves its columns blank.
+            verdict = ("", "", "", "", "")
+            if gate:
+                comparable = "はい" if gate["comparable"] else "いいえ"
+                verdict = (comparable, gate["reason"] or "", gate["coverage_pct"], gate["ci_low"], gate["ci_high"])
+            csv_row = (*row, *verdict)
             footnotes = format_council_summary_footnotes(definition, payload, locale="ja")
-            return _csv_response(report_type, [row], ctx, definition, extra_footnotes=footnotes, credit=credit)
+            return _csv_response(report_type, [csv_row], ctx, definition, extra_footnotes=footnotes, credit=credit)
         text = format_council_summary_text(payload, definition, agency_name, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(
             report_type=report_type,
@@ -1525,6 +1898,7 @@ async def get_report(
             covered_days=payload["covered_days"],
             window_days=payload["window_days"],
             delivered_missing=payload["delivered_missing"],
+            comparability=CouncilComparability(**gate, thresholds=COMPARABILITY_THRESHOLDS) if gate else None,
         )
     elif report_type == "delay_certificate":
         threshold = DEFAULT_DELAY_CERTIFICATE_THRESHOLD_SEC if threshold_sec is None else threshold_sec
@@ -1541,11 +1915,13 @@ async def get_report(
             # Only tells an empty list's two causes apart, so a failed probe
             # leaves that unknown rather than failing a complete response.
             try:
-                observed = await delay_certificate_observed(agency_id, ctx, ch)
+                observed = await delay_certificate_observed(agency_id, ctx, conn, ch)
             except Exception:
                 _log.warning("delay_certificate: observed probe failed for agency %s", agency_id, exc_info=True)
                 observed = None
-        text = format_delay_certificate_text(rows, threshold, rows_total, locale=locale, observed=observed)
+        text = format_delay_certificate_text(
+            rows, threshold, rows_total, locale=locale, observed=observed, definition=definition
+        )
         return ReportResponse(
             report_type=report_type,
             rendered_at=datetime.now(timezone.utc),
@@ -1561,7 +1937,7 @@ async def get_report(
         raise HTTPException(status_code=500, detail="unreachable")
 
     if format == "csv":
-        return _csv_response(report_type, rows, ctx, definition, credit=credit)
+        return _csv_response(report_type, rows, ctx, definition, credit=credit, reference=reference)
 
     text = format_result(intent["query_type"], rows, intent, locale=locale)
     return ReportResponse(
@@ -1578,4 +1954,5 @@ async def get_report(
         zero_delay_rows=left_out_rows.get(ZERO_DELAY),
         sort=table_sort if report_type == "route_table" else None,
         order=table_order if report_type == "route_table" else None,
+        reference=RouteReferences.model_validate(reference) if reference is not None else None,
     )

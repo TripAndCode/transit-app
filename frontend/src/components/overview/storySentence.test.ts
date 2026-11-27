@@ -4,6 +4,7 @@ import {
   FLAT_MAX_DELTA_MIN,
   FLAT_MAX_DELTA_PCT,
   latestDayStanding,
+  referenceJudgement,
   storyVerdict,
   topRoutesShare,
 } from "./storySentence";
@@ -13,8 +14,7 @@ function fakeT(key: string, opts?: Record<string, unknown>) {
   return opts ? `${key}:${JSON.stringify(opts)}` : key;
 }
 
-/** A seven-day comparison window, the headline's usual one, over a 2.9-minute
- *  window before it. */
+/** A seven-day comparison window over a 2.9-minute window before it. */
 function h(delta_min: number | null, delta_pct: number | null, baseline = 2.9) {
   return {
     avg_min: delta_min == null ? baseline : baseline + delta_min,
@@ -190,5 +190,44 @@ describe("topRoutesShare", () => {
   it("has nothing to say without top routes", () => {
     expect(topRoutesShare({ top_routes: [], rest_share_pct: 0, rest_route_count: 0 })).toBeNull();
     expect(topRoutesShare(null)).toBeNull();
+  });
+});
+
+/** A 90-day reference at `against` minutes, the headline at `against + delta`. */
+function judged(delta: number, against = 3.0) {
+  const avg = Math.round((against + delta) * 100) / 100;
+  const deltaMin = Math.round(delta * 100) / 100;
+  const deltaPct = against !== 0 ? Math.round((deltaMin / against) * 1000) / 10 : null;
+  return referenceJudgement(avg, { avg_min: against, delta_min: deltaMin, delta_pct: deltaPct });
+}
+
+describe("referenceJudgement", () => {
+  it("calls a longer average delay worse than the reference", () => {
+    expect(judged(0.6)).toBe("worse");
+  });
+
+  it("calls a shorter average delay better than the reference", () => {
+    expect(judged(-0.6)).toBe("better");
+  });
+
+  it("calls a change inside the verdict's own tolerance about the same", () => {
+    expect(judged(FLAT_MAX_DELTA_MIN - 0.01, 0.5)).toBe("flat");
+    expect(judged(0.4, 9.0)).toBe("flat");
+    expect(FLAT_MAX_DELTA_PCT).toBe(5);
+  });
+
+  it("judges by minutes alone against a reference of 0 min", () => {
+    expect(judged(0.2, 0)).toBe("worse");
+    expect(judged(0.05, 0)).toBe("flat");
+  });
+
+  it("judges nothing when either average runs early, where lower is no longer better", () => {
+    expect(judged(-0.6, 0.3)).toBeNull();
+    expect(judged(0.6, -0.4)).toBeNull();
+  });
+
+  it("judges nothing without both figures", () => {
+    expect(referenceJudgement(null, { avg_min: 3.0, delta_min: null, delta_pct: null })).toBeNull();
+    expect(referenceJudgement(3.0, { avg_min: null, delta_min: null, delta_pct: null })).toBeNull();
   });
 });

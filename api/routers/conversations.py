@@ -4,25 +4,31 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import asyncpg
 import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, clamp_range_ctx
 from api.security import User, csrf_guard, require_llm_approved
+from pipeline.flags import aflag
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
+from pipeline.query.ask_ops import CARD_SIGNED_IN, CARD_SIGNED_OUT, FOLLOWUP
 from pipeline.query.chat import _chat_str, ch_failure_str
-from pipeline.query.followup_context import select_context_row
+from pipeline.query.followup_context import context_route_codes, fetch_route_labels, select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
-from pipeline.query.tools import dispatch, render_tool_result
+from pipeline.query.query_log import log_query
+from pipeline.query.tools import canonical_tool_name, dispatch, render_tool_result
+from pipeline.reports.definition import DefinitionMeta
 
 _log = logging.getLogger(__name__)
 
@@ -199,7 +205,7 @@ async def list_conversations(
 
 
 @router.post("/conversations", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def create_conversation(
     request: Request,
     body: CreateConversation,
@@ -230,7 +236,7 @@ async def get_conversation(
 
 
 @router.patch("/conversations/{conversation_id}", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def update_conversation(
     request: Request,
     conversation_id: str,
@@ -248,7 +254,7 @@ async def update_conversation(
 
 
 @router.delete("/conversations/{conversation_id}")
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def delete_conversation(
     request: Request,
     conversation_id: str,
@@ -274,7 +280,7 @@ async def list_messages(
 
 
 @router.post("/conversations/migrate-anon")
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def migrate_anon_endpoint(
     request: Request,
     body: MigrateAnon,
@@ -294,8 +300,83 @@ async def migrate_anon_endpoint(
     return {"inserted": inserted}
 
 
+def _elapsed_ms(started: float) -> int:
+    return round((time.monotonic() - started) * 1000)
+
+
+async def _write_usage(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    stage: str,
+    tool: str | None,
+    success: bool,
+    latency_ms: int,
+    numeric_guard_triggered: bool | None,
+) -> None:
+    await log_query(
+        conn,
+        agency_id,
+        "",
+        stage,
+        canonical_tool_name(tool) if tool is not None else None,
+        success,
+        numeric_guard_triggered=numeric_guard_triggered,
+        latency_ms=latency_ms,
+    )
+
+
+async def _log_usage(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    stage: str,
+    tool: str | None,
+    success: bool,
+    latency_ms: int,
+    *,
+    numeric_guard_triggered: bool | None = None,
+) -> None:
+    """Record one notebook dispatch or follow-up in ``ask_query_log``.
+
+    Never raises: bookkeeping must not change a response. The row stores the
+    canonical tool name only (never client text, a card's arguments or the
+    user's question) and the *latency_ms* the caller measured around the work
+    itself. Call it outside any transaction of the request, since a failed
+    INSERT aborts the transaction it runs in."""
+    try:
+        if await aflag("ask_query_log_enabled"):
+            await _write_usage(conn, agency_id, stage, tool, success, latency_ms, numeric_guard_triggered)
+    except Exception as exc:
+        _log.warning("ask usage log failed (%s) -- ignored", exc.__class__.__name__)
+
+
+async def _log_usage_pooled(
+    pool: asyncpg.Pool,
+    agency_id: int,
+    stage: str,
+    tool: str | None,
+    success: bool,
+    latency_ms: int,
+    *,
+    numeric_guard_triggered: bool | None = None,
+) -> None:
+    """:func:`_log_usage` for a caller holding no connection: it borrows one
+    only after the kill switch is read, and a failure to borrow is swallowed
+    like any other bookkeeping failure."""
+    try:
+        if await aflag("ask_query_log_enabled"):
+            async with pool.acquire(timeout=1.0) as conn:
+                await _write_usage(conn, agency_id, stage, tool, success, latency_ms, numeric_guard_triggered)
+    except Exception as exc:
+        _log.warning("ask usage log failed (%s) -- ignored", exc.__class__.__name__)
+
+
+def _card_succeeded(card: dict[str, Any]) -> bool:
+    result = card["result"]
+    return result is not None and result["kind"] != "empty"
+
+
 @router.post("/conversations/{conversation_id}/messages", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def append_message_endpoint(
     request: Request,
     conversation_id: str,
@@ -340,128 +421,226 @@ async def append_message_endpoint(
 
     ctx_obj = _ctx_from_stored_filters(conv["filter_ctx"])
 
-    # Wrap user-msg + cache upsert + dispatch + assistant-msg in one transaction.
-    # Without it, a concurrent DELETE of this conversation would FK-cascade-delete
-    # the user_msg row mid-flight, producing a 500 instead of a clean 404.
-    async with conn.transaction():
-        user_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="user",
-            tool=None,
-            args=None,
-            signature_hash=None,
-            result=None,
-            rendered_summary=user_summary,
-        )
+    # User message + card in one transaction. Without it, a concurrent DELETE of
+    # this conversation would FK-cascade-delete the user_msg row mid-flight,
+    # producing a 500 instead of a clean 404.
+    # None until a dispatch starts: a failed user-message write is not a
+    # dispatch. A returned result counts as a success only once the thread's
+    # transaction has committed.
+    outcome: bool | None = None
+    latency_ms = 0
+    try:
+        async with conn.transaction():
+            user_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="user",
+                tool=None,
+                args=None,
+                signature_hash=None,
+                result=None,
+                rendered_summary=user_summary,
+            )
+            started = time.monotonic()
+            try:
+                card = await _run_card(
+                    conn, resolved_tool, resolved_args, ctx_obj, agency_id, locale, ch, cache_question=user_summary
+                )
+            except Exception:
+                latency_ms = _elapsed_ms(started)
+                outcome = False
+                raise
+            latency_ms = _elapsed_ms(started)
+            dispatched = _card_succeeded(card)
+            outcome = False
+            assistant_msg = await _conv.append_message(conn, conversation_id, role="assistant", **card)
+        if dispatched:
+            outcome = True
+    finally:
+        if outcome is not None:
+            await _log_usage(conn, agency_id, CARD_SIGNED_IN, resolved_tool, outcome, latency_ms)
+    return {"user": user_msg, "assistant": assistant_msg}
 
-        # Canonicalize + cache upsert (always bumps hit_count for chip/builder paths)
-        try:
-            can_args = canonicalize(resolved_tool, resolved_args)
-        except ValueError:
-            can_args = dict(resolved_args)
-        sig_hash = signature_hash(resolved_tool, can_args)
-        try:
-            # Nested transaction (asyncpg emits a SAVEPOINT here since we're
-            # already inside conn.transaction()). Any Postgres error raised by
-            # dispatch() below — not just the UndefinedTableError case — would
-            # otherwise abort the OUTER transaction, poisoning `conn` so the
-            # append_message() calls in the except branches below raise
-            # asyncpg.exceptions.InFailedSQLTransactionError instead of writing
-            # the intended graceful tool_error/service_unavailable message.
-            # The savepoint confines that abort to the upsert+dispatch scope,
-            # leaving the outer transaction (holding user_msg) writable.
+
+async def _run_card(
+    conn: asyncpg.Connection,
+    tool: str,
+    args: dict[str, Any],
+    ctx_obj: RangeCtx,
+    agency_id: int,
+    locale: str,
+    ch: AsyncClient,
+    *,
+    cache_question: str | None,
+) -> dict[str, Any]:
+    """Dispatch one notebook card and return its assistant message's fields,
+    as a signed-in thread stores them and a signed-out one keeps them in the
+    browser: the answer, the conditions it ran under and its method stamp
+    (:attr:`pipeline.query.results.ToolResult.definition`). A failed dispatch
+    is a message with no result and no stamp. *cache_question*, when given,
+    is recorded in the intent cache under the card's signature, and the
+    dispatch then runs in a savepoint of the caller's transaction; without it,
+    nothing is written and no transaction is opened."""
+    try:
+        can_args = canonicalize(tool, args)
+    except ValueError:
+        can_args = dict(args)
+    sig_hash = signature_hash(tool, can_args)
+
+    def failed(rendered: str) -> dict[str, Any]:
+        return {
+            "tool": tool,
+            "args": can_args,
+            "signature_hash": sig_hash,
+            "result": None,
+            "rendered_summary": rendered,
+        }
+
+    try:
+        if cache_question is None:
+            # Nothing to write: no transaction is held open across the
+            # dispatch, which can be a long ClickHouse scan.
+            result = await dispatch(tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
+        else:
+            # A savepoint inside the caller's transaction: any Postgres error
+            # raised here -- not just the UndefinedTableError case -- would
+            # otherwise abort that transaction, so the message written for
+            # the failure would raise InFailedSQLTransactionError instead.
             async with conn.transaction():
                 await _intent_cache.upsert(
                     conn,
                     sig_hash,
-                    IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
+                    IntentSignature(tool=tool, args=args, confidence=1.0),
                     can_args,
                     agency_id,
-                    question=user_summary,
+                    question=cache_question,
                 )
-                result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
-        except HTTPException as exc:
-            if exc.status_code != 503:
-                raise
-            _log.warning("Tool %s unavailable: %s", resolved_tool, exc.detail)
-            rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=resolved_tool,
-                args=can_args,
-                signature_hash=sig_hash,
-                result=None,
-                rendered_summary=rendered,
-            )
-            return {"user": user_msg, "assistant": assistant_msg}
-        except clickhouse_connect.driver.exceptions.Error as exc:
-            _log.exception("Tool %s failed: ClickHouse query error", resolved_tool)
-            rendered = ch_failure_str(exc, locale, name=resolved_tool)
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=resolved_tool,
-                args=can_args,
-                signature_hash=sig_hash,
-                result=None,
-                rendered_summary=rendered,
-            )
-            return {"user": user_msg, "assistant": assistant_msg}
-        except asyncpg.exceptions.UndefinedTableError:
-            # A missing agg_* table (migration/analyze behind) must propagate to
-            # FastAPI's registered aggregate_not_ready_handler (api/main.py +
-            # api/aggregate_errors.py) so the frontend gets the machine-readable
-            # {"code": "aggregate_not_ready"} 503 it reacts to — not a persisted
-            # tool_error that masks it. Every Ask/chat dispatch path lets this
-            # error propagate the same way (api/routers/ask.py,
-            # pipeline/query/chat.py). Propagating out of the outer
-            # `conn.transaction()` also rolls back user_msg, so the exchange is
-            # not half-written.
+                result = await dispatch(tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
+    except HTTPException as exc:
+        if exc.status_code != 503:
             raise
-        except Exception:
-            # Never interpolate raw exception text into a persisted message —
-            # it can carry internal details (SQL fragments, relation names,
-            # endpoint URLs) that would resurface every time this conversation
-            # is reloaded. Full detail still goes to the server-side log.
-            _log.exception("Tool %s failed", resolved_tool)
-            rendered = _chat_str("tool_error", locale, name=resolved_tool)
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=resolved_tool,
-                args=can_args,
-                signature_hash=sig_hash,
-                result=None,
-                rendered_summary=rendered,
-            )
-            return {"user": user_msg, "assistant": assistant_msg}
+        _log.warning("Tool %s unavailable: %s", tool, exc.detail)
+        return failed(_chat_str("service_unavailable", locale, name=tool))
+    except clickhouse_connect.driver.exceptions.Error as exc:
+        _log.exception("Tool %s failed: ClickHouse query error", tool)
+        return failed(ch_failure_str(exc, locale, name=tool))
+    except asyncpg.exceptions.UndefinedTableError:
+        # A missing agg_* table (migration/analyze behind) must propagate to
+        # FastAPI's registered aggregate_not_ready_handler (api/main.py +
+        # api/aggregate_errors.py) so the frontend gets the machine-readable
+        # {"code": "aggregate_not_ready"} 503 it reacts to -- not a persisted
+        # tool_error that masks it. Propagating out of the caller's
+        # transaction also rolls back its user message, so the exchange is
+        # not half-written.
+        raise
+    except Exception:
+        # Never interpolate raw exception text into a message -- it can carry
+        # internal details (SQL fragments, relation names, endpoint URLs) that
+        # would resurface every time this conversation is reloaded. Full
+        # detail still goes to the server-side log.
+        _log.exception("Tool %s failed", tool)
+        return failed(_chat_str("tool_error", locale, name=tool))
 
-        rendered = render_tool_result(result, locale=locale)
-        result_dict = {
+    return {
+        "tool": tool,
+        "args": can_args,
+        "signature_hash": sig_hash,
+        "result": {
             "kind": result.kind,
             "summary": result.summary,
             "rows": result.rows,
             "columns": result.columns,
             "series": result.series,
             "pairs": result.pairs,
-        }
-        assistant_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="assistant",
-            tool=resolved_tool,
-            args=can_args,
-            signature_hash=sig_hash,
-            result=result_dict,
-            rendered_summary=rendered,
-            conditions={"dow": ctx_obj.dow, "time_band": ctx_obj.time_band, "service": ctx_obj.service},
-        )
-    return {"user": user_msg, "assistant": assistant_msg}
+        },
+        "rendered_summary": render_tool_result(result, locale=locale),
+        "conditions": _card_conditions(ctx_obj),
+        "definition": result.definition,
+    }
+
+
+def _card_conditions(ctx: RangeCtx) -> dict[str, Any]:
+    """The scope a card's dispatch ran under, as its message records it: the
+    thread's resolved period and routes beside its dow/time_band/service. A
+    card's own ``from_date``/``to_date`` args override the period at dispatch
+    (``pipeline.query.tools._apply_date_overrides``), so a reader of this
+    record lets them win too."""
+    return {
+        "dow": ctx.dow,
+        "time_band": ctx.time_band,
+        "service": ctx.service,
+        "from_date": ctx.from_date.isoformat(),
+        "to_date": ctx.to_date.isoformat(),
+        "routes": list(ctx.routes),
+    }
+
+
+_MAX_CARD_ARGS_BYTES = 8192
+
+
+class RunCard(BaseModel):
+    tool: str = Field(max_length=64)
+    args: dict[str, Any] = Field(default_factory=dict)
+    filter_ctx: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("args")
+    @classmethod
+    def _bounded_args(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(v).encode()) > _MAX_CARD_ARGS_BYTES:
+            raise ValueError(f"args exceeds {_MAX_CARD_ARGS_BYTES} bytes serialized")
+        return v
+
+    @field_validator("filter_ctx")
+    @classmethod
+    def _bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_filter_ctx(v)
+
+
+class CardAnswer(BaseModel):
+    """A notebook card's assistant message fields, as a signed-in thread
+    stores them; ``definition`` is the method stamp of its figures, None when
+    no report computes them or the dispatch failed."""
+
+    tool: str
+    args: dict[str, Any]
+    signature_hash: str
+    result: dict[str, Any] | None = None
+    rendered_summary: str
+    conditions: dict[str, Any] | None = None
+    definition: DefinitionMeta | None = None
+
+    @field_serializer("result")
+    def _result_as_stored(self, result: dict[str, Any] | None) -> Any:
+        # Pydantic dumps a Decimal inside an untyped dict as a string; the
+        # stored message holds it as a JSON number, and the browser's copy
+        # must chart the same.
+        return jsonable_encoder(result)
+
+
+@router.post("/ask/card", response_model=CardAnswer)
+@limiter.limit(DEFAULT_LIMIT)
+async def run_card_endpoint(
+    request: Request,
+    body: RunCard,
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+    locale: str = Depends(get_locale),
+) -> CardAnswer:
+    """Answer one notebook card for a signed-out thread, which lives only in
+    the browser: nothing is stored, and the card comes back with the fields a
+    signed-in thread stores, its method stamp included, scoped by
+    *filter_ctx* exactly as a stored thread's filters scope its cards."""
+    csrf_guard(request)
+    ctx_obj = _ctx_from_stored_filters(body.filter_ctx)
+    started = time.monotonic()
+    try:
+        card = await _run_card(conn, body.tool, body.args, ctx_obj, agency_id, locale, ch, cache_question=None)
+    except Exception:
+        await _log_usage(conn, agency_id, CARD_SIGNED_OUT, body.tool, False, _elapsed_ms(started))
+        raise
+    await _log_usage(conn, agency_id, CARD_SIGNED_OUT, body.tool, _card_succeeded(card), _elapsed_ms(started))
+    return CardAnswer(**card)
 
 
 # ─── LLM follow-up (kill-switch gated) ────────────────────────────────────────
@@ -485,7 +664,7 @@ class FollowupBody(BaseModel):
 
 
 @router.post("/conversations/{conversation_id}/followup", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def followup_endpoint(
     request: Request,
     conversation_id: str,
@@ -497,8 +676,10 @@ async def followup_endpoint(
     """LLM-grounded follow-up on a prior assistant result.
 
     Disabled by default; flip ``ASK_FOLLOWUP_ENABLED=true`` to enable. The
-    follow-up calls the LLM with the prior message's structured result as the
-    sole grounding context — no tool dispatch, no external retrieval.
+    follow-up calls the LLM with the prior message's structured result, plus
+    the display name of every route code that result or its args refer to
+    (resolved here from ``static_routes``), as its sole grounding context —
+    no tool dispatch, no external retrieval.
 
     Auth: requires a signed-in, admin-approved caller (``users.llm_approved``).
     Anonymous callers never have a ``users.llm_approved`` row, so they're
@@ -524,12 +705,12 @@ async def followup_endpoint(
             detail="authed followup requires context_message_id",
         )
 
-    # Two short-lived connections acquired around the LLM call, rather than
-    # one held across it via ``Depends(get_conn)``: ``answer_followup`` waits
-    # on a provider for seconds, and a pool connection parked for that long
-    # is one no other request can use. The reads here and the writes below
-    # share no transaction — the writes open their own — so nothing needs a
-    # single connection to span both.
+    # Short-lived connections acquired around the LLM call, rather than one
+    # held across it via ``Depends(get_conn)``: ``answer_followup`` waits on a
+    # provider for seconds, and a pool connection parked for that long is one
+    # no other request can use. The reads here and the writes below share no
+    # transaction — the writes open their own — so nothing needs a single
+    # connection to span both.
     async with request.app.state.pool.acquire() as conn:
         # Ownership check (also confirms the conversation exists).
         await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
@@ -542,42 +723,76 @@ async def followup_endpoint(
         except (_conv.PermissionDenied, LookupError):
             raise HTTPException(status_code=404, detail="context message not found") from None
 
-    if ctx_msg.get("role") != "assistant":
-        raise HTTPException(status_code=400, detail="context must be an assistant message")
+        if ctx_msg.get("role") != "assistant":
+            raise HTTPException(status_code=400, detail="context must be an assistant message")
 
-    answer, err = await _followup.answer_followup(
+        context_result = select_context_row(ctx_msg.get("result"), body.context_row_index)
+        # Route names only enrich the answer, so a failed lookup answers
+        # without them rather than failing the follow-up.
+        try:
+            route_labels = await fetch_route_labels(
+                conn, agency_id, context_route_codes(ctx_msg.get("args"), context_result)
+            )
+        except Exception:
+            _log.warning("follow-up route-name lookup failed; answering without names", exc_info=True)
+            route_labels = {}
+
+    started = time.monotonic()
+    result = await _followup.answer_followup(
         question=body.question,
         context_tool=ctx_msg.get("tool"),
         context_args=ctx_msg.get("args"),
-        context_result=select_context_row(ctx_msg.get("result"), body.context_row_index),
+        context_result=context_result,
         locale=locale,
         llm_approved=user.llm_approved,
+        route_labels=route_labels,
     )
-    _raise_for_followup_error(err)
+    latency_ms = _elapsed_ms(started)
+    answer, err, guard = result
+    if err is not None:
+        # Input the model never saw says nothing about follow-up usage.
+        if err not in ("empty", "too_long"):
+            await _log_usage_pooled(
+                request.app.state.pool,
+                agency_id,
+                FOLLOWUP,
+                ctx_msg.get("tool"),
+                False,
+                latency_ms,
+                numeric_guard_triggered=guard,
+            )
+        _raise_for_followup_error(err)
 
     # Append both messages atomically so a mid-flight cancel doesn't leave
     # a dangling user message in the thread.
     async with request.app.state.pool.acquire() as conn:
-        async with conn.transaction():
-            user_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="user",
-                tool=None,
-                args=None,
-                signature_hash=None,
-                result=None,
-                rendered_summary=body.question,
-            )
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=None,
-                args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
-                signature_hash=None,
-                result=None,
-                rendered_summary=answer,
+        committed = False
+        try:
+            async with conn.transaction():
+                user_msg = await _conv.append_message(
+                    conn,
+                    conversation_id,
+                    role="user",
+                    tool=None,
+                    args=None,
+                    signature_hash=None,
+                    result=None,
+                    rendered_summary=body.question,
+                )
+                assistant_msg = await _conv.append_message(
+                    conn,
+                    conversation_id,
+                    role="assistant",
+                    tool=None,
+                    args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
+                    signature_hash=None,
+                    result=None,
+                    rendered_summary=answer,
+                )
+            committed = True
+        finally:
+            await _log_usage(
+                conn, agency_id, FOLLOWUP, ctx_msg.get("tool"), committed, latency_ms, numeric_guard_triggered=guard
             )
     return {"user": user_msg, "assistant": assistant_msg}
 

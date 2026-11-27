@@ -1,7 +1,9 @@
 import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 
-/** The rail's destinations, in the order it lists them. */
-export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports"] as const;
+/** The rail's destinations, in the order it lists them, plus Bus Town, which
+ *  has no rail stop: the command palette and the phone's More sheet reach it,
+ *  and its own in-page back-link leads out to Pulse, not in. */
+export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports", "bus-town"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
 type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
@@ -9,8 +11,9 @@ type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
  *  way that list was ordered. */
 export const ROUTES_REPORT_TYPES = ["ranking", "ranking_best", "on_time", "worst_5min"] as const satisfies readonly ReportTypeId[];
 export const TIME_REPORT_TYPES = ["trend", "dow_weekday", "dow_weekend", "route_forecast"] as const satisfies readonly ReportTypeId[];
-export const WHY_REPORT_TYPES = ["dwell_run"] as const satisfies readonly ReportTypeId[];
-export const COMPARE_REPORT_TYPES = ["compare_ranking"] as const satisfies readonly ReportTypeId[];
+/** The one report each single-report screen shows, in full, with no list. */
+export const WHY_REPORT = "dwell_run" satisfies ReportTypeId;
+export const COMPARE_REPORT = "compare_ranking" satisfies ReportTypeId;
 export const SAVED_REPORT_TYPES = ["council_summary", "delay_certificate"] as const satisfies readonly ReportTypeId[];
 
 /** The figures the Routes table sorts by, in the order its control lists
@@ -49,6 +52,13 @@ function isRouteTableSort(value: string | null): value is RouteTableSort {
   return (ROUTE_TABLE_SORTS as readonly (string | null)[]).includes(value);
 }
 
+/** Which way the sorted figure runs down the Routes table. A high on-time
+ *  rate is good and every other figure's high end needs attention, so the two
+ *  read opposite ways for the same order. */
+export function routeTableSortDirection({ sort, order }: RouteTableView): "ascending" | "descending" {
+  return (sort !== "on_time") === (order === "worst") ? "descending" : "ascending";
+}
+
 /** The sort and order a Routes URL asks the table for. A `report` naming one
  *  of the route lists, or a `sort` naming one, opens the table the way that
  *  list was ordered, so a link from before the table keeps its meaning;
@@ -82,37 +92,72 @@ export function pickReport(
   return requested != null && reportTypes.includes(requested) ? requested : fallback;
 }
 
-/** Compare's two boards, picked by `by`. */
+/** Routes' two views, picked by `by`: the sortable table, and every
+ *  route's monthly report card. */
+export const ROUTES_MODES = [
+  { mode: "table", labelKey: "report_card.mode_table" },
+  { mode: "report_cards", labelKey: "report_card.mode_cards" },
+] as const;
+export type RoutesMode = (typeof ROUTES_MODES)[number]["mode"];
+
+/** `by=report_cards` is the report card list; every other `by` is the table. */
+export function routesMode(by: string | null): RoutesMode {
+  return by === "report_cards" ? "report_cards" : "table";
+}
+
+/** Compare's four views, picked by `by`: the two boards, every operator's
+ *  stops by planned departures, and the hub transfers defined for the agency. */
 export const COMPARE_MODES = [
   { mode: "periods", labelKey: "compare.mode_periods" },
   { mode: "agencies", labelKey: "compare.mode_agencies" },
+  { mode: "supply", labelKey: "compare.mode_supply" },
+  { mode: "transfers", labelKey: "compare.mode_transfers" },
 ] as const;
 export type CompareMode = (typeof COMPARE_MODES)[number]["mode"];
 
-/** `by=agencies` is the agencies board; every other `by` compares periods. */
+/** `by=agencies` is the agencies board, `by=supply` the planned departures
+ *  map, `by=transfers` the hub transfers board; every other `by` compares
+ *  periods. */
 export function compareMode(by: string | null): CompareMode {
-  return by === "agencies" ? "agencies" : "periods";
+  return by === "agencies" || by === "supply" || by === "transfers" ? by : "periods";
 }
 
-/** Reports' three views, and the `doc` each opens with. */
+/** Reports' four views, and the `doc` each opens with. */
 export const REPORTS_VIEWS = [
   { view: "summary", labelKey: "saved.view_summary", extra: {} },
   { view: "saved", labelKey: "saved.view_saved", extra: { doc: "saved" } },
   { view: "reports", labelKey: "saved.view_reports", extra: { doc: "council" } },
+  { view: "revisions", labelKey: "saved.view_revisions", extra: { doc: "revisions" } },
 ] as const satisfies readonly { view: string; labelKey: string; extra: Record<string, string> }[];
 export type ReportsView = (typeof REPORTS_VIEWS)[number]["view"];
 
 /** An export document's `report` or `doc` opens the documents view,
- *  `doc=saved` the saved analyses, and anything else the period summary. */
+ *  `doc=saved` the saved analyses, `doc=revisions` the timetable revisions,
+ *  and anything else the period summary. */
 export function reportsView(doc: string | null, report: string | null): ReportsView {
   if ((SAVED_REPORT_TYPES as readonly string[]).includes(report ?? "")) return "reports";
   if (doc === "council" || doc === "certificate") return "reports";
+  if (doc === "revisions") return "revisions";
   return doc === "saved" ? "saved" : "summary";
 }
 
+/** Why's two views, picked by `by`: dwell against running time, and the
+ *  segments that stay slower than the timetable. */
+export const WHY_MODES = [
+  { mode: "dwell_run", labelKey: "reports.type.dwell_run" },
+  { mode: "segments", labelKey: "why.mode_segments" },
+] as const;
+export type WhyMode = (typeof WHY_MODES)[number]["mode"];
+
+/** `by=segments` is the slow segments map; every other `by` is dwell and run. */
+export function whyMode(by: string | null): WhyMode {
+  return by === "segments" ? "segments" : "dwell_run";
+}
+
 /** Where each report type lives. Reports' own documents are picked by
- *  `doc`, the Routes table's lists by `sort` (and `order`), and every other
- *  screen opens the type by `report`. */
+ *  `doc`, the Routes table's lists by `sort` (and `order`), and Time opens
+ *  its types by `report`. Why and Compare each show their one report under
+ *  one of their views, so a link to either names the screen and its `by`. */
 const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<string, string> }> = {
   ranking: { dest: "routes", extra: { sort: "avg" } },
   ranking_best: { dest: "routes", extra: { sort: "avg", order: "best" } },
@@ -122,8 +167,8 @@ const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<strin
   dow_weekday: { dest: "time", extra: { report: "dow_weekday" } },
   dow_weekend: { dest: "time", extra: { report: "dow_weekend" } },
   route_forecast: { dest: "time", extra: { report: "route_forecast" } },
-  dwell_run: { dest: "why", extra: { report: "dwell_run" } },
-  compare_ranking: { dest: "compare", extra: { by: "periods", report: "compare_ranking" } },
+  dwell_run: { dest: "why", extra: { by: "dwell_run" } },
+  compare_ranking: { dest: "compare", extra: { by: "periods" } },
   council_summary: { dest: "reports", extra: { doc: "council" } },
   delay_certificate: { dest: "reports", extra: { doc: "certificate" } },
 };

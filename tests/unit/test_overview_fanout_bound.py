@@ -60,9 +60,10 @@ def stages(monkeypatch):
     started: list[str] = []
     gathered = {
         "_headline_stats": (2.5, 40),
+        "_reference": {"avg_min": 2.0},
         "_movers": [],
         "_concentration": None,
-        "_top_delayed_routes": [],
+        "_top_delayed": {},
         "_peak_hour_by_dow": None,
         "_service_day_split": ([], []),
         "_daily_sparkline": ([], None),
@@ -83,18 +84,19 @@ async def test_fanout_never_holds_more_than_the_limit(stages):
 
     # The latest-date and left-out reads ahead of the fan-out share one, and
     # every stage takes its own.
-    assert pool.acquires == 11
+    assert pool.acquires == 10
     assert pool.peak <= ov.OVERVIEW_FANOUT_LIMIT
     assert pool.peak == ov.OVERVIEW_FANOUT_LIMIT, "the bound is a ceiling, not a serialiser"
     assert pool.active == 0
     assert payload["headline"]["avg_min"] == 2.5
+    assert payload["headline"]["reference"] == {"avg_min": 2.0, "delta_min": 0.5, "delta_pct": 25.0}
 
 
 @pytest.mark.asyncio
-async def test_the_hour_profiles_take_the_first_slots(stages):
-    """The three `_peak_hour_by_dow` reads dominate a cold load, so under the
-    bound they must not queue behind stages that finish quickly."""
+async def test_the_hour_profile_takes_the_first_slot(stages):
+    """The `_peak_hour_by_dow` read dominates a cold load, so under the bound
+    it must not queue behind stages that finish quickly."""
     ctx = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24))
     await ov.compute_overview_summary(7, ctx, None, pool=_FakePool())
 
-    assert stages[:3] == ["_peak_hour_by_dow"] * 3
+    assert stages[0] == "_peak_hour_by_dow"

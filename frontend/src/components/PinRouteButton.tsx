@@ -12,11 +12,10 @@ export function PinRouteButton({ agencyId, code }: { agencyId: number; code: str
   return (
     <button
       type="button"
-      className="btn-ghost"
+      className="btn btn--secondary btn--sm"
       aria-pressed={pinned}
       disabled={full}
       onClick={() => togglePinnedRoute(agencyId, code)}
-      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
     >
       <Pin size={14} strokeWidth={1.75} aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
       {full ? t("nav.pin_route_full", { max: MAX_PINNED_ROUTES }) : t("nav.pin_route")}

@@ -1,12 +1,16 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
+import { ApiError } from "../api/client";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
+import * as snapshots from "../api/snapshots";
+import * as adminHook from "../api/useIsAdmin";
+import * as timetableFitApi from "../components/analysis/timetableFitApi";
 import { ScopeRouteContext } from "../api/scope";
 import { RouteAnalysisTab } from "./RouteAnalysisTab";
 import { readAnalyses } from "../components/analysis/savedAnalyses";
@@ -50,6 +54,64 @@ function renderTab(initialPath: string) {
 describe("RouteAnalysisTab", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("names the page's own route in the snapshot it asks for, where the route is the path", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/routes/R1?from=2026-09-24&to=2026-10-23"]}>
+        <Routes>
+          <Route
+            path="/agencies/:agencyId/routes/:routeCode"
+            element={
+              <ScopeRouteContext value="R1">
+                <RouteAnalysisTab />
+              </ScopeRouteContext>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    expect(new URLSearchParams(create.mock.calls[0][0].query).get("routes")).toBe("R1");
+  });
+
+  it("shows the route's report card to an admin alone", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const path = "/agencies/1/route-analysis?routes=R1&from=2026-09-24&to=2026-10-23";
+    renderTab(path);
+    expect(screen.queryByRole("region", { name: "Report card" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    renderTab(path);
+    expect(screen.getByRole("region", { name: "Report card" })).toBeInTheDocument();
+  });
+
+  it("lets an admin freeze the route's page as it is asked for, and shows everyone else no new control", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    const path = "/agencies/1/route-analysis?routes=R1&from=2026-09-24&to=2026-10-23&late=120&variant=S2";
+    renderTab(path);
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    renderTab(path);
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    expect(create).toHaveBeenCalledTimes(1);
+    const spec = create.mock.calls[0][0];
+    expect(spec).toMatchObject({ screen: "route_page", agencyId: 1 });
+    expect(Object.fromEntries(new URLSearchParams(spec.query))).toMatchObject({
+      routes: "R1", from: "2026-09-24", to: "2026-10-23", late: "120", shape: "S2",
+    });
   });
 
   it("prompts to choose a route and pattern when no single route is selected", () => {
@@ -117,6 +179,43 @@ describe("RouteAnalysisTab", () => {
     expect(screen.getByText("Delay by stop")).toBeInTheDocument();
   });
 
+  it("gives the page header its one-time mount sheen, not the stop-delay section header", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: shape([{ stop_sequence: 1, stop_name: "Stop A", lon: 140.7, lat: 40.8, avg_min: 2.4, samples: 10 }]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    const headers = document.querySelectorAll(".focus-header");
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toHaveClass("route-header-sheen");
+    expect(headers[1]).not.toHaveClass("route-header-sheen");
+  });
+
+  it("judges the route's own targets beside its figures, asking for that route alone", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    const standards = vi.spyOn(hooks, "usePerformanceStandards").mockReturnValue({
+      data: {
+        rows: [
+          { route_code: "R1", metric_type: "on_time_pct", threshold_value: 85, bonus_malus_rate: 0, actual_value: 80.4, achievement_rate: 80.4 / 85, estimated_bonus_deduction: 0, meets: false, not_judged: null },
+        ],
+        ctx: { from: "2026-04-01", to: "2026-04-01", dow: "all", time_band: "all", service: "all", routes: [] },
+        disclaimer: "simulation only",
+        on_time_definition: null,
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    expect(standards).toHaveBeenCalledWith(1, expect.anything(), true, "R1");
+    expect(screen.getByText("Below standard")).toBeInTheDocument();
+    expect(screen.getByText("80.4%")).toBeInTheDocument();
+  });
+
   it("titles the page by its route, asks its question beneath, and leads back to Routes", () => {
     mockSupportHooks();
     vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue(
@@ -172,7 +271,7 @@ describe("RouteAnalysisTab", () => {
     } as never);
     renderTab("/agencies/1/route-analysis?routes=R1&from=2026-09-01&to=2026-09-28");
     fireEvent.click(screen.getByRole("button", { name: "Save analysis" }));
-    expect(readAnalyses()[0].title).toBe("R1, 9/1 – 9/28, every day, all hours, within 1 min");
+    expect(readAnalyses()[0].title).toBe("R1, 9/1 – 9/28, every day, all hours, within 5 min");
   });
 });
 
@@ -252,6 +351,7 @@ describe("RouteAnalysisTab sub-tab state", () => {
     renderWithSubTab("&sub_tab=garbage");
     expect(tab("Along the route")).toHaveAttribute("aria-selected", "true");
     expect(tab("Map")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByText(/The line is each stop's mean/)).toBeInTheDocument();
   });
 
   it("restores the map sub-tab from the URL without a click", async () => {
@@ -285,7 +385,20 @@ describe("RouteAnalysisTab sub-tab state", () => {
 
     // Wraps rather than dead-ending at the edge, per the tabs pattern.
     fireEvent.keyDown(tab("Along the route"), { key: "ArrowLeft" });
-    expect(tab("Stop table")).toHaveFocus();
+    expect(tab("Timetable fit")).toHaveFocus();
+  });
+
+  it("restores the timetable fit sub-tab from the URL, for the page's route", () => {
+    const fit = vi.spyOn(timetableFitApi, "useTimetableFit").mockReturnValue({
+      data: undefined,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderWithSubTab("&sub_tab=timetableFit");
+    expect(tab("Timetable fit")).toHaveAttribute("aria-selected", "true");
+    expect(fit).toHaveBeenCalledWith(1, expect.objectContaining({ routes: ["R1"] }), "R1");
+    // The delay line's caveat stays with the delay line.
+    expect(screen.queryByText(/The line is each stop's mean/)).not.toBeInTheDocument();
   });
 });
 
@@ -449,9 +562,9 @@ describe("RouteAnalysisTab where delay grows", () => {
     { shape_id: "in", first_stop_name: "観音新町三丁目", last_stop_name: "広島駅", stop_count: 5, samples: 250, share_pct: 25 },
   ];
 
-  function renderDossier(search = "") {
+  function renderDossier(search = "", previousWindow?: object) {
     mockSupportHooks();
-    const useRouteShape = vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+    const current = {
       data: {
         ...shape(STOPS),
         shape_id: "out",
@@ -465,7 +578,9 @@ describe("RouteAnalysisTab where delay grows", () => {
       isPending: false,
       error: null,
       refetch: vi.fn(),
-    } as never);
+    };
+    const useRouteShape = vi.spyOn(hooks, "useRouteShape").mockImplementation(((...args: Parameters<typeof hooks.useRouteShape>) =>
+      previousWindow && args[2].from === "2026-08-25" ? previousWindow : current) as never);
     renderTab(`/agencies/1/route-analysis?routes=R1${search}`);
     return useRouteShape;
   }
@@ -533,10 +648,123 @@ describe("RouteAnalysisTab where delay grows", () => {
     expect(previousCall?.[3]).toBe("in");
   });
 
+  it("says a comparison window before the retention floor has no data, without an error or a retry", () => {
+    const refused = new ApiError(422, JSON.stringify({ detail: "x", code: "range_not_retained", floor: "2026-09-01" }));
+    renderDossier("&from=2026-09-24&to=2026-10-23&compare=1", {
+      data: undefined, isPending: false, isFetching: false, error: refused, refetch: vi.fn(),
+    });
+    expect(screen.getByText("No comparison data available")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeEnabled();
+  });
+
   it("compares with the previous window on the variant shown", () => {
     const useRouteShape = renderDossier("&from=2026-09-24&to=2026-10-23&compare=1");
     const previousCall = useRouteShape.mock.calls.find((call) => call[2].from === "2026-08-25");
     expect(previousCall?.[2]).toMatchObject({ from: "2026-08-25", to: "2026-09-23" });
     expect(previousCall?.[3]).toBe("out");
+  });
+
+  describe("scope bar", () => {
+    function Probe() {
+      const [params] = useSearchParams();
+      return <div data-testid="params">{params.toString()}</div>;
+    }
+
+    const ROUTE_SHAPE_APPLIED = {
+      from: true, to: true, dow: true, time_band: true, service: true, routes: true,
+      hour: false, stop: false, dir: false, late: false, early: false,
+    };
+    // The on-time list's own conditions; the route's on-time rate is read from it.
+    const ON_TIME_APPLIED = {
+      from: true, to: true, dow: true, time_band: true, service: true, routes: true,
+      hour: false, stop: false, dir: false, late: true, early: true,
+    };
+    // An agency with no on-time target: its standards use the dates alone.
+    const STANDARDS_APPLIED = {
+      from: true, to: true, dow: false, time_band: false, service: false, routes: false,
+      hour: false, stop: false, dir: false, late: false, early: false,
+    };
+
+    const SHAPE_ANSWERED = {
+      data: { ...shape([]), scope_applied: ROUTE_SHAPE_APPLIED }, isPending: false, error: null, refetch: vi.fn(),
+    };
+
+    function renderRoutePage(search: string, routeShape: () => unknown = () => SHAPE_ANSWERED) {
+      mockSupportHooks();
+      vi.spyOn(hooks, "useRouteShape").mockImplementation((() => routeShape()) as never);
+      vi.spyOn(hooks, "useReport").mockImplementation(((_id: number | null, type: string) => ({
+        data: type === "on_time" ? { report_type: "on_time", rows: [], definition: { late_tolerance_sec: 300, early_tolerance_sec: 60 }, scope_applied: ON_TIME_APPLIED } : undefined,
+        isPending: false, error: null, refetch: vi.fn(),
+      })) as never);
+      vi.spyOn(hooks, "usePerformanceStandards").mockReturnValue({
+        data: { scope_applied: STANDARDS_APPLIED, rows: [], ctx: {}, disclaimer: "", on_time_definition: null },
+        error: null, refetch: vi.fn(),
+      } as never);
+      const tree = () => (
+        <MemoryRouter initialEntries={[`/agencies/1/routes/R1${search}`]}>
+          <Routes>
+            <Route
+              path="/agencies/:agencyId/routes/:routeCode"
+              element={
+                <ScopeRouteContext value="R1">
+                  <RouteAnalysisTab />
+                  <Probe />
+                </ScopeRouteContext>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      );
+      const { rerender } = renderWithProviders(tree());
+      return () => rerender(tree());
+    }
+
+    const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+    it("opens an old link's conditions in the scope bar, its own route not marked as a change", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23&dow=weekday&time_band=morning");
+      const bar = within(region());
+      expect(bar.getByRole("button", { name: "Days weekdays" })).toHaveClass("scope-bar__control--changed");
+      expect(bar.getByRole("button", { name: "Time Morning (05–09)" })).toHaveClass("scope-bar__control--changed");
+      expect(bar.getByRole("button", { name: "Routes R1" })).not.toHaveClass("scope-bar__control--changed");
+      // The routes control stages a pick behind its own Apply, which stays
+      // disabled until the pick differs from what the screen shows.
+      fireEvent.click(bar.getByRole("button", { name: "Routes R1" }));
+      const picker = screen.getByRole("dialog", { name: "Routes" });
+      expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
+    });
+
+    it("hides only what no section of the page uses", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1&late=120");
+      const bar = within(region());
+      expect(bar.getByRole("button", { name: "On time within 2 min" })).toBeInTheDocument();
+      expect(bar.queryByRole("button", { name: /^Stop/ })).toBeNull();
+    });
+
+    it("counts a section that failed as using nothing, so the others still hide what went unused", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => ({
+        data: undefined, isPending: false, error: new Error("route-shape failed"), refetch: vi.fn(),
+      }));
+      expect(within(region()).queryByRole("button", { name: /^Stop/ })).toBeNull();
+    });
+
+    it("keeps hiding an unused condition while a section reloads", () => {
+      let shapeResult: unknown = SHAPE_ANSWERED;
+      const rerender = renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => shapeResult);
+      expect(within(region()).queryByRole("button", { name: /^Stop/ })).toBeNull();
+      shapeResult = { data: undefined, isPending: true, error: null, refetch: vi.fn() };
+      rerender();
+      expect(within(region()).queryByRole("button", { name: /^Stop/ })).toBeNull();
+    });
+
+    it("writes a changed time band as the canonical param", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23");
+      fireEvent.click(screen.getByRole("button", { name: "Time All day" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Evening (17–20)" }));
+      const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
+      expect(params.get("time_band")).toBe("evening");
+      expect(params.has("routes")).toBe(false);
+    });
   });
 });

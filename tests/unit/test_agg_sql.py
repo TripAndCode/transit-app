@@ -8,11 +8,13 @@ and module constants are interpolated with the values their helpers produce.
 import pytest
 
 from pipeline import agg_sql
-from pipeline.db import hms_to_sec_sql
+from pipeline.clickhouse import LIVE_SOURCED
+from pipeline.db import hms_to_sec_sql, stop_event_filter_ch
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.service_day import service_date_ch, service_day_offset_ch, service_day_seconds_sql
+from pipeline.static_archive import FILED_DATE_SQL
 
 DATES = " AND <DATE-FILTER>"
 
@@ -44,10 +46,16 @@ def test_the_date_filter_is_the_only_part_that_varies_by_run(name):
     assert build(DATES).replace(DATES, "") == build("")
 
 
-@pytest.mark.parametrize("name", CH_BUILDERS)
-def test_service_date_is_the_shared_service_day_expression(name):
+def test_feed_health_counts_each_reading_on_its_captures_service_day():
+    assert service_date_ch() in agg_sql.feed_health_ch_sql("")
+
+
+@pytest.mark.parametrize("name", ["service_delivered", "schedule_revision", "route_headway_daily"])
+def test_a_stop_event_builder_files_each_row_under_its_trips_service_day(name):
     build, _ = CH_BUILDERS[name]
-    assert service_date_ch() in build("")
+    sql = build("")
+    assert FILED_DATE_SQL in sql
+    assert service_date_ch("u.captured_at") not in sql.replace(FILED_DATE_SQL, "")
 
 
 def test_headway_daily_places_the_schedule_on_the_service_day_before_the_delay():
@@ -60,23 +68,35 @@ def test_feed_health_counts_clamped_rows_with_the_server_side_bound():
     assert "countIf(abs(dep_delay) > {max_delay:Int32})" in agg_sql.feed_health_ch_sql("")
 
 
-def test_headway_daily_bounds_the_delay_with_server_side_parameters():
+def test_feed_health_splits_every_row_by_the_one_live_source_rule():
+    """Archive and live rows are told apart by the rule promotion and repair
+    use, so the two counts always add up to total_rows."""
+    sql = agg_sql.feed_health_ch_sql("")
+    assert f"countIf(NOT {LIVE_SOURCED}) AS archive_rows" in sql
+    assert f"countIf({LIVE_SOURCED}) AS live_rows" in sql
+
+
+def test_headway_daily_reads_the_rows_every_stop_event_dedup_reads():
     sql = agg_sql.route_headway_daily_ch_sql("")
-    assert "BETWEEN {min_delay:Int32} AND {max_delay:Int32}" in sql
+    assert stop_event_filter_ch("u.stop_id IS NOT NULL") in sql
 
 
 PG_BUILDERS = {
     "route_headway": lambda: agg_sql.route_headway_sql(),
-    "dwell_run": lambda: agg_sql.dwell_run_sql(),
+    "dwell_run": lambda: agg_sql.dwell_run_sql(scoped=False),
+    "dwell_run scoped": lambda: agg_sql.dwell_run_sql(scoped=True),
+    "segment_runtime": lambda: agg_sql.segment_runtime_sql(scoped=False),
+    "segment_runtime scoped": lambda: agg_sql.segment_runtime_sql(scoped=True),
     "static_version_summary": lambda: agg_sql.STATIC_VERSION_SUMMARY_SQL,
 }
 
 
 @pytest.mark.parametrize("name", PG_BUILDERS)
-def test_postgres_statements_bind_the_agency_by_name(name):
+def test_postgres_statements_bind_their_parameters_by_name(name):
     sql = PG_BUILDERS[name]()
     assert "%(agency_id)s" in sql
-    assert sql.replace("%(agency_id)s", "").count("%") == 0
+    assert ("%(rebuild_dates)s" in sql) is name.endswith(" scoped")
+    assert sql.replace("%(agency_id)s", "").replace("%(rebuild_dates)s", "").count("%") == 0
 
 
 def test_route_headway_reads_the_dominant_service_and_the_high_frequency_bound():
@@ -87,7 +107,7 @@ def test_route_headway_reads_the_dominant_service_and_the_high_frequency_bound()
 
 
 def test_dwell_run_buckets_with_the_shared_histogram_bounds():
-    sql = agg_sql.dwell_run_sql()
+    sql = agg_sql.dwell_run_sql(scoped=False)
     assert bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH) in sql
     assert bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH) in sql
     assert hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH) in sql
@@ -95,7 +115,7 @@ def test_dwell_run_buckets_with_the_shared_histogram_bounds():
 
 
 def test_dwell_run_places_scheduled_times_on_the_service_day():
-    sql = agg_sql.dwell_run_sql()
+    sql = agg_sql.dwell_run_sql(scoped=False)
     assert service_day_seconds_sql(hms_to_sec_sql("d.sched_arrival_time")) + " AS sched_arr_sec" in sql
     assert service_day_seconds_sql(hms_to_sec_sql("d.sched_departure_time")) + " AS sched_dep_sec" in sql
 

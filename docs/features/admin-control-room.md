@@ -16,6 +16,11 @@ Endpoint: `GET /api/admin/board`. Reads `agencies`, `agg_meta`, and
 `agg_feed_health` for the collector tiles and freshness heatmap, plus
 `pipeline_runs` for the day's run timeline (empty, not an error, when any of
 these tables is absent or unreadable — each panel degrades on its own).
+Heatmap rows carry their realtime feed's `upstream_host`
+(`api.admin_board.upstream_host`) and arrive grouped by it; the page draws one
+group per host, so agencies sharing a vendor host share one block, and a newest
+day missing for every agency of a multi-agency host is stated once as that
+host's.
 Its staleness alerts come from `pipeline.health.aggregate_freshness`, the
 check `GET /api/admin/ops` reads, so the board and Ops always name the same
 agencies as behind; agencies never analyzed share one alert. The board holds
@@ -29,6 +34,16 @@ checkout at the path `OPS_STATUS_REPO` names (see `README.md` and
 
 `POST /api/admin/runs` triggers a manual run and writes `pipeline_runs`
 (see `api/admin_runs.py`).
+
+An analyze run that rebuilds `agg_route_daily_dist`, the table the headline is
+read from, in full because its method version or fingerprint moved (`make
+analyze-all` after a `METHOD_VERSIONS` bump to it, or `FULL=1`) carries the
+agency's headline before and after it: the council summary's on-time rate and
+average delay, under the default on-time definition, over the service dates
+the agency had built when the run began.
+The run row keeps it (`pipeline_runs.rebuild_headline`); the bar's tooltip
+shows it, and a list under the timeline names each such run of the day.
+`pipeline/rebuild_headline.py` owns which runs count and why those dates.
 
 Alert center: every admin page's header carries a bell (`AlertCenter`) over
 the same board snapshot, with an unread count and a popover of its alerts
@@ -56,10 +71,14 @@ Endpoints:
   3s while an operator's run is in flight, every 30s while only another job
   (usually the cron sweep) holds an agency, and not at all otherwise.
 - `GET /api/admin/agencies/{agency_id}/diagnostics` — the drawer's full
-  bundle: freshness, RT field coverage, static version timeline, clamp
-  history, weather station, and the two operator-edited policy tables.
+  bundle: freshness, RT field coverage, the monthly feed-quality scorecard,
+  static version timeline, clamp history, weather station, and the two
+  operator-edited policy tables.
 - `PATCH /api/admin/agencies/{agency_id}/standards` and
   `PATCH /api/admin/agencies/{agency_id}/weights` — edit the policy tables.
+  A standard's metric is `ewt_sec`, `vehicle_km_delivered_pct`,
+  `on_time_pct` or `service_delivered_pct`; the last two take a percentage
+  from 0 to 100.
 - `POST /api/admin/agencies/{agency_id}/probe` — on-demand RT coverage
   probe.
 - `POST /api/admin/agencies/{agency_id}/reanalyze` — single-agency ingest +
@@ -105,12 +124,48 @@ as one a migration adds to the static tables, reaches a timetable whose
 source has not changed. The page's buttons have no such option.
 
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
-`rt_field_coverage_probes`, `agg_feed_health`, `static_trips`,
+`rt_field_coverage_probes`, `agg_feed_health`, `feed_quality_monthly`, `static_trips`,
 `static_calendar`, `static_calendar_dates`, `agg_static_version_summary`,
 `agency_weather_stations`, `route_performance_standards`,
 `ridership_weights`. The two editors write `route_performance_standards`
 and `ridership_weights`; every write additionally records an
 `admin_audit` entry.
+
+### Feed-quality scorecard
+
+The drawer's 月次フィード品質 section reads `feed_quality_monthly`, which
+analyze keeps per agency and month (`pipeline/feed_quality.py`;
+`DELAY_ANALYSIS.md` defines each figure). It shows the newest month in full,
+with its days and the day its trips and stop events are counted through, then
+the last six months' trips reported,
+stop events, median message age, implausible share and grade, newest first. A
+missing figure prints as a dash with its reason, never as 0. Trips reported
+and the implausible share are the agencies board's own figures over the same
+days.
+
+The newest month's figures include the share of polls whose message was more
+than 65 s old when captured. Above them sits the month's A–F grade, with each
+criterion it misses and the figure that criterion was judged on (for field
+coverage, each field that fell short, from `grade_failing_fields`), and, for a
+month without a grade, each criterion whose figure is missing and why. The
+diagnostics endpoint computes the grade from the stored figures as it reads them
+(`pipeline/feed_quality_grade.py`); the thresholds are in `docs/methodology.md`.
+No other endpoint carries the grade: `tests/unit/test_agency_feed_quality.py`
+fails if any other route's declared `response_model` schema has a grade, or if
+that route stops requiring an admin. It stays admin-only
+until operators have had the methodology's advance notice and right of reply.
+
+Below the other figures, the newest month states the daily GTFS-RT validator's
+counts: the days validated of the month's window, the days the validator could
+not run, and each rule that fired with its occurrences, polls and days. A month
+with no validated day reads not validated, never no findings. The counts are
+recorded, never graded. They come from `rt_validation_daily`, which the ML
+store ingest fills (`docs/features/ml-forecast.md`).
+
+After them come poll success, the feed's outage minutes with the longest, and
+the collector's outage minutes, labelled as ours so an operator is not read as
+answerable for our downtime; the six-month trend carries all three. None is
+graded. `docs/methodology.md` defines them (`pipeline/poll_outages.py`).
 
 ### RT field-coverage verdicts
 
@@ -175,37 +230,40 @@ Endpoints:
 - `GET /api/admin/users/{uid}/sessions` and
   `DELETE /api/admin/users/{uid}/sessions/{sid_prefix}` — list and revoke
   active sessions, identified by a display-safe hash prefix.
-- `GET /api/admin/api-keys`, `POST /api/admin/api-keys`,
-  `DELETE /api/admin/api-keys/{key_id}` — API keys scoped to one user.
-- `POST /api/admin/invites` — invite a new user. The invite applies when
-  sign-in creates the account, so an email that already has one is refused
-  with 409 `account_exists`.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
-and one at a time), `oauth_identities`, `user_llm_keys` (read-only,
-for the drawer's provider indicator), `api_keys`, `user_invites`. Every
-mutation records an `admin_audit` entry.
+and one at a time), `oauth_identities`, `ask_conversations` (deleted on
+delete). Every mutation records an `admin_audit` entry.
+
+Sign-in is for administrators only, and there is no invite. An admin is an
+address listed in `ADMIN_EMAILS`, created or promoted at its first OAuth
+sign-in, or the break-glass local account (`DEFAULT_ADMIN_USERNAME` /
+`DEFAULT_ADMIN_PASSWORD`). An existing account made admin here can sign in
+too. Any other OAuth identity is refused with `not_admin` before anything is
+written.
 
 `DELETE /api/admin/users/{uid}` is a soft-delete. It anonymizes the row,
-sets `users.deleted_at`, revokes the user's API keys and replaces the owner
-address recorded on them. A deleted user is terminal. A single or bulk PATCH
-that includes one, a second DELETE, or a key issued to one each get a 409.
+sets `users.deleted_at`, and deletes the user's `ask_conversations` (their
+Notebook investigations), cascading to `ask_conversation_messages`. A deleted
+user is terminal. A single or bulk PATCH that includes one, or a second DELETE,
+each get a 409.
 The list and drawer label the row Deleted and offer no Resume control.
 
 The drawer's "Usage (last 30 days)" section reads
 `GET /api/admin/users/{uid}/activity?days=30` (`days` 1–365): per route
 template and agency, the requests and errors summed from
-`user_activity_daily`. The API counts every authenticated request to a gated
-`/api/*` route into that table (the sign-in flow, `/api/config` and the
-who-am-I read `GET /api/me` are not counted) (`api/activity.py`, flushed every 30 s), attributing
-API-key requests to the key's owner. It stores route templates and days
+`user_activity_daily`. `UsageCountMiddleware` (`api/middleware/usage.py`)
+counts every finished `/api/` request that matched a route, except the
+sign-in flow, `/api/config`, the who-am-I read (`GET`/`HEAD` `/api/me`) and a
+method the matched route doesn't serve (a 405); a session user lands here
+(`api/activity.py`, flushed every 30 s). It stores route templates and days
 only — never raw paths, query text, or finer timestamps.
 
 ## Ops
 
 Route: `/admin/ops`, backed by `AdminOpsPage`.
 
-Endpoint: `GET /api/admin/ops` — a read-only health snapshot with two
+Endpoint: `GET /api/admin/ops` — a read-only health snapshot with three
 sub-checks, each degrading on its own (the response is still 200, and the
 page shows that check as unknown rather than as healthy):
 - migration status (`pipeline.health.migration_status`): the on-disk
@@ -216,10 +274,22 @@ page shows that check as unknown rather than as healthy):
   its last analyze time (`agg_meta`), the newest completed day in ClickHouse
   `updates`, how many days its newest `agg_route_daily` date trails that day
   and whether that makes it stale, and its recent clamp rate
-  (`agg_feed_health`).
+  (`agg_feed_health`);
+- the last deploy (`pipeline.deploys.latest_deploy`): the newest row of
+  `deploys`, which `gtfs_pipeline.py schema-up` writes once it has brought a
+  release's schema up. A row names the commit the image was built from
+  (`GIT_SHA`, else `RAILWAY_GIT_COMMIT_SHA`; NULL when neither holds a commit
+  hash) and the migrations that run applied. A rerun that applies nothing for
+  the same commit adds no row, so a restart doesn't count as a release.
+  `deploys_ok` separates "none recorded yet" (null, true) from a failed
+  lookup (null, false). `make migrate`, which `scripts/dev_upgrade.py` runs,
+  records nothing; only `schema-up` does.
 
-The page shows a status strip for the two checks and a per-agency table
-(agency, last analyzed, freshness, data through, implausible %).
+The page shows a status strip for the migration and freshness checks, a line
+under it for the last deploy (when its schema step ran, its commit linked to GitHub's
+compare view against `main`, which lists what has merged since, and how many
+migrations it applied), and a per-agency table (agency, last analyzed,
+freshness, data through, implausible %).
 
 ## Architecture
 
@@ -248,9 +318,8 @@ timeline merging `admin_audit` (every admin mutation across this whole
 surface, written through `api.admin_audit.record_admin_action`) with the
 login/login-failure rows of `login_events` (mapped to `login.ok`/
 `login.fail`). Admin mutations are recorded directly into `admin_audit`; the
-other `login_events` kinds (a user's own logout, account creation and invite
-use, and a role granted by seeding or `ADMIN_EMAILS`) are not part of this
-timeline.
+other `login_events` kinds (a user's own logout, account creation, and a role
+granted by seeding or `ADMIN_EMAILS`) are not part of this timeline.
 
 ## Feature flags
 
@@ -274,27 +343,93 @@ invalidate the flag cache immediately. See `pipeline/flags.py` for the
 registry, precedence, and cache TTL, and `README.md`'s kill-switch section
 for the full key list.
 
-`login_required` is the sign-in gate (`api/middleware/login_gate.py`): on,
-every `/api/*` route except the sign-in flow, `/api/config` and a read of
-`/api/me` (who-am-I, `null` when signed out) refuses a signed-out caller while
-SSO is configured. Turning it off reopens the app to
-signed-out visitors; it is the recovery switch when OAuth is down (see
-`docs/deploy-railway.md`).
+No flag closes the reader pages: they work signed out. Each admin route
+carries its own `require_admin` dependency, and
+`tests/unit/test_admin_route_guard.py` keeps every `/api/admin/*` route behind
+it.
+
+## Transfer pairs
+
+Route: `/admin/transfers`, backed by `AdminTransfersPage`.
+
+Endpoints:
+- `GET /api/admin/transfer-pairs` — every pair, inactive ones included.
+- `POST /api/admin/transfer-pairs` — create a pair; refused with 409 past
+  `MAX_TRANSFER_PAIRS`.
+- `PATCH /api/admin/transfer-pairs/{id}` — replace a pair's whole definition.
+- `DELETE /api/admin/transfer-pairs/{id}` — delete a pair.
+
+A pair names, for each side, an agency, a route code, an optional direction and
+that operator's own stop ids, plus the walk between them and the day types it
+is read on. A write is refused with 422 unless both agencies are live and the
+loaded timetables have both routes and every stop id. Nothing matches a place
+across operators.
+
+Tables: reads and writes `transfer_pairs`. Every write records an `admin_audit`
+entry in its own transaction (`transfer_pair.create`, `.update`, `.delete`,
+with the row before and after). The Transfers board under Compare reads the
+active pairs through `/api/{agency_id}/transfer-pairs`
+(`api/routers/transfers.py`, `pipeline/reports/transfers.py`).
+
+## Snapshots
+
+No page of its own: an admin takes a snapshot from the Export menu of the
+council report, the Routes table or a route's page, or by printing the council
+report, and lists or deletes them through the API ([snapshots.md](snapshots.md)).
+
+Endpoints:
+- `POST /api/admin/snapshots` — compute the named screen's responses for the
+  given scope and store them; answers the id and its `/s/{id}` page.
+- `GET /api/admin/snapshots` — newest first, without the payloads.
+- `DELETE /api/admin/snapshots/{id}` — remove one for good.
+
+Tables: reads and writes `snapshots`. A create records `snapshot.create` and a
+delete `snapshot.delete` in `admin_audit`, each with the screen, agency,
+scope and method version, never the stored figures.
 
 ## Ask ops
 
 Route: `/admin/ask`, backed by `AdminAskOpsPage`.
 
 Endpoints:
-- `GET /api/admin/ask/queries` — paged query log.
-- `GET /api/admin/ask/funnel` — stage/success counts.
-- `POST /api/admin/ask/promote` — promote one Stage-3 ("rag") query's
-  cached intent into the RAG index ahead of the scheduled batch job's own
-  hit-count/quiet-days gate. The suggestion it publishes is that query's own
-  question text, the one the admin reviewed.
-- `GET /api/admin/ask/eval` — latest local eval artifact, or `null` when
-  nothing has produced one yet.
+- `GET /api/admin/ask/queries` — paged query log. Notebook card and follow-up
+  rows are left out unless the `route` filter asks for `card_signed_in`,
+  `card_signed_out` or `followup`, as the funnel leaves them out.
+- `GET /api/admin/ask/funnel` — stage/success counts for the router; notebook
+  card dispatches and follow-ups are not part of it.
+- `GET /api/admin/ask/tools` — the notebook's usage signal: per tool, the card
+  dispatches signed in and signed out, the follow-ups that used its result as
+  context, the failures among them, the mean latency of its card dispatches and
+  the mean latency of its follow-ups, over the trailing `DEFAULT_RANGE_DAYS`
+  JST days (`from`/`to`/`agency_id` narrow it). The page titles its table with
+  the window the response reports and shows it above the query log. A NULL tool
+  covers card names no handler answers to and follow-ups on an answer that came
+  from no tool.
 
-Tables: reads `ask_query_log`; `promote` additionally reads/writes
-`ask_intent_cache` and `rag_chunks` (via `pipeline.query.intent_promotion`)
-and records an `admin_audit` entry.
+Tables: reads `ask_query_log`. Notebook rows carry no user id, conversation id,
+arguments or text; whether a card ran signed in or out is the only fact kept
+about its caller, and a follow-up row carries only its context tool, latency and
+numeric-guard verdict. They fall under the table's 90-day
+retention (`pipeline/retention.py`).
+
+## Usage
+
+Route: `/admin/usage`, backed by `AdminUsagePage`.
+
+Endpoint: `GET /api/admin/usage` (`days` 1–400, default 30; optional
+`agency_id`, 1 to the int4 maximum) — requests per route template per day over the trailing `days`
+JST days ending today, split by whether the caller was signed out or signed
+in. The response gives the window (`from`/`to`), the per-route
+totals (`route`, `method`, `signed_out`, `signed_in`, `errors`,
+ordered by total requests descending), and the per-day totals, zero-filled for
+every day in the window. Either source table missing (a deployment behind on
+migrations) degrades to an empty contribution rather than a 500.
+
+Tables: `signed_out` reads `anonymous_activity_daily`; `signed_in` reads
+`user_activity_daily`, summed over every user. This is the
+reader signal from `docs/features/audience.md`: readers never sign in, so
+`anonymous_activity_daily` is the only server-side count of how much the
+notebook itself is used, and it holds no caller identity at all, only route
+templates and counts. A signed-out caller can put any agency id in the path,
+so a signed-out request that failed is counted under no agency; the `agency_id`
+filter therefore leaves out signed-out errors.

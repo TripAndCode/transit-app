@@ -26,6 +26,7 @@ import os
 import pathlib
 import re
 import subprocess
+import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date as CalendarDate
@@ -41,7 +42,7 @@ from pydantic import BaseModel, Field
 
 from api.clickhouse import max_captured_at, table_holding
 from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import limiter, tier_limit, user_key
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter, user_key
 from api.range import (
     MAX_RANGE_DAYS,
     RangeCtx,
@@ -55,23 +56,34 @@ from api.range import (
     time_band_clause_ch_for,
 )
 from api.scope_applied import ALL_SIX, scope_applied
-from api.security import User, csrf_guard, require_user_when_sign_in_exists
+from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
+from pipeline import retained_reads
 from pipeline.cache import async_lru_cache
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table
 from pipeline.day_types import DayTypes, load_day_types
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_dedup_ch_sql
+from pipeline.db import (
+    build_dedup_ch_sql,
+    departure_ch,
+    latest_departure_ch,
+    observation_filter_ch,
+    stop_event_filter_ch,
+)
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
+from pipeline.live_filing import Filing, filing
+from pipeline.recorded_floor import retention_floor_async
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
+from pipeline.retained_reads import RangeNotRetained
 from pipeline.service_day import (
     clock_to_sec,
-    service_date_ch,
+    filed_between_ch,
     service_date_of,
     service_day_offset,
     service_day_start_utc,
 )
 from pipeline.service_hours import load_service_hours
+from pipeline.static_archive import Stamp, observation_rows
 
 _log = logging.getLogger(__name__)
 
@@ -222,35 +234,85 @@ async def _latest_route_observation(
     make a miss cheap: route_code sits behind captured_at in the ClickHouse
     sort key, so proving a route has no rows in the window still reads the
     agency's whole window.
+
+    Each table is asked first of its polls as stored, which the sort key
+    answers at once when the route has one. Only on a miss is it asked of
+    the filed polls (`pipeline.live_filing`), so a route whose polls carry
+    none of their own is found where filing names it; deciding how to file
+    the window scans all of it, as the miss already did. Filing gives a
+    route only to a poll with none, so a poll that has the route as stored
+    has it filed too. A later poll only filing gives the route can then be
+    passed over for an earlier one stored with it, which moves the day read,
+    never what it shows: the trips and the stop profile file their own rows.
     """
     if not await route_exists(conn, agency_id, route_code):
         return None
+    # The window is anchored on the agency's own data, not named by the
+    # request, so a stalled agency's would reach before its retention floor:
+    # it starts no earlier than the floor's second day, whose captures, with
+    # the day either side they can file under, are all retained.
+    floor = await retention_floor_async(conn, agency_id)
     for table in (LIVE_TABLE, UPDATES_TABLE):
         agency_latest = await max_captured_at(ch, agency_id, table=table)
         if agency_latest is None:
             continue
-        result = await ch.query(
-            f"SELECT captured_at FROM {table} "
-            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-            "  AND captured_at >= {bound:DateTime64} "
-            "ORDER BY captured_at DESC LIMIT 1",
-            parameters={"agency_id": agency_id, "route": route_code, "bound": agency_latest - timedelta(days=30)},
-        )
+        bound = agency_latest - timedelta(days=30)
+        if floor is not None:
+            bound = max(bound, service_day_start_utc(floor + timedelta(days=1)))
+            if bound > agency_latest:
+                continue
+        params = {"agency_id": agency_id, "route": route_code, "bound": bound}
+        result = await ch.query(_latest_route_observation_sql(table, Stamp.INGESTED), parameters=params)
+        if not result.result_rows:
+            try:
+                filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
+            except RangeNotRetained:
+                # A prune raised the floor after it was read above: the
+                # window the request never named now reaches below it.
+                continue
+            if filed.stamp.refiles:
+                result = await ch.query(
+                    _latest_route_observation_sql(table, filed.stamp), parameters={**params, **filed.params}
+                )
         if result.result_rows:
             return _as_utc(result.result_rows[0][0])
     return None
 
 
+def _latest_route_observation_sql(table: str, stamp: Stamp) -> str:
+    """The latest capture of the route bound as `route` since `bound` in
+    *table*, each poll filed under *stamp*. Refitting can give a poll with no
+    route this one, so a read that refiles (Stamp.refiles) also reads those and tests the route on
+    the filed poll."""
+    if not stamp.refiles:
+        return (
+            f"SELECT captured_at FROM {checked_table(table)} "
+            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+            "  AND captured_at >= {bound:DateTime64} "
+            "ORDER BY captured_at DESC LIMIT 1"
+        )
+    raw = (
+        "u.agency_id = {agency_id:UInt16} AND (u.route_code = {route:String} OR u.route_code IS NULL) "
+        "AND u.captured_at >= {bound:DateTime64}"
+    )
+    rows = observation_rows(raw, stamp, table, "u.route_code = {route:String}", live_form=True)
+    return f"SELECT u.captured_at {rows} ORDER BY u.captured_at DESC LIMIT 1"
+
+
 # A poll can report several future stops for one trip. The lowest sequence in
-# the newest poll is the nearest reported stop and wins the final tie. Module
-# level (like `_HEATMAP_CLUSTER_PROJECTION_SQL` below) so its shape, including
-# the plausibility clamp, is unit-testable without ClickHouse. Clamped the
-# same way `pipeline.db.build_dedup_ch_sql` clamps every averaged surface
-# (`pipeline.db.MAX_PLAUSIBLE_DELAY_SEC`) even though this endpoint reports
-# a single current value, not an average: a frozen feed can report the same
+# the newest poll is the nearest reported stop and wins the final tie. A
+# builder (like `build_route_trips_sql` below) so its shape, including the
+# plausibility clamp, is unit-testable without ClickHouse. Clamped the same way
+# `pipeline.db.build_dedup_ch_sql` clamps every averaged surface
+# (`pipeline.db.observation_filter_ch`) even though this endpoint reports a
+# single current value, not an average: a frozen feed can report the same
 # implausible reading either way -- map and aggregates must agree on
-# plausibility.
-_LIVE_DELAYS_DEDUP_SQL = f"""
+# plausibility. Each poll is filed under *stamp* (`pipeline.live_filing`), so
+# the service day's schedule is the timetable in force on it, not whichever
+# was loaded when the poll arrived.
+def live_delays_sql(stamp: Stamp) -> str:
+    window = "u.captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE"
+    return f"""
     SELECT trip_id, winner.1 AS route_code, winner.2 AS service_type,
         winner.3 AS scheduled_time, winner.4 AS dep_delay,
         winner.5 AS stop_id, winner.6 AS stop_sequence, captured_at
@@ -264,11 +326,7 @@ _LIVE_DELAYS_DEDUP_SQL = f"""
                 (u.captured_at, u.file_name, -toInt32(u.stop_sequence))
             ) AS winner,
             max(u.captured_at) AS captured_at
-        FROM updates_live AS u
-        WHERE u.agency_id = {{agency_id:UInt16}}
-          AND u.dep_delay IS NOT NULL
-          AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-          AND u.captured_at >= {{latest_ts:DateTime64}} - INTERVAL 5 MINUTE
+        {observation_rows(observation_filter_ch(window), stamp, LIVE_TABLE, live_form=True)}
         GROUP BY u.trip_id
     ) AS grouped
     ORDER BY trip_id
@@ -276,8 +334,25 @@ _LIVE_DELAYS_DEDUP_SQL = f"""
 """
 
 
+async def _live_filing(
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    agency_id: int,
+    since: datetime,
+    latest: datetime,
+    *,
+    table: str = LIVE_TABLE,
+) -> Filing:
+    """How a read of *table*'s rows captured from *since* to *latest* files
+    them. A row is filed under its capture's service date or the day either
+    side (`pipeline.service_day.filed_date_ch`), so the read reaches those."""
+    day = timedelta(days=1)
+    first, last = service_date_of(since) - day, service_date_of(latest) + day
+    return await filing(conn, ch, agency_id, first, last, table=table, since=since)
+
+
 @router.get("/delays/live", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -296,9 +371,10 @@ async def live_delays(
     if latest_ts is None:
         return {"latest_captured_at": None, "rows": [], "truncated": False}
 
+    filed = await _live_filing(conn, ch, agency_id, latest_ts - timedelta(minutes=5), latest_ts)
     rows_result = await ch.query(
-        _LIVE_DELAYS_DEDUP_SQL,
-        parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit + 1},
+        live_delays_sql(filed.stamp),
+        parameters={"agency_id": agency_id, "latest_ts": latest_ts, "limit": limit + 1, **filed.params},
     )
     truncated = len(rows_result.result_rows) > limit
     out_rows = []
@@ -378,23 +454,35 @@ async def live_delays(
     }
 
 
+# Monotonic time of each agency's last successful manual poll, per process.
+# A poll inside the cooldown answers from the data that poll already wrote.
+_LAST_LIVE_POLL: dict[int, float] = {}
+LIVE_POLL_COOLDOWN_S = 30.0
+
+
 @router.post("/delays/refresh", response_model=None)
 @limiter.limit("5/minute", key_func=user_key)
 async def refresh_live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
-    _user: User | None = Depends(require_user_when_sign_in_exists),
 ) -> dict[str, Any]:
     """Fetch the agency's current GTFS-RT feed and persist it before reading.
 
-    A write against the live table, so while sign-in exists it needs a
-    signed-in caller and is metered per account: an anonymous loop against it
-    would otherwise re-poll the collector on every request. In anonymous-only
-    mode it stays open under the per-address limit.
+    Open to every visitor. Three things bound how often it reaches the
+    collector: a per-caller rate limit (per address, or per account when
+    signed in); a per-agency cooldown, inside which a poll returns
+    ``{"status": "recent"}`` without fetching, because the feed cannot have
+    moved far since the last successful one; and the ingest advisory lock,
+    which refuses (409) a poll that would overlap another refresh or the
+    scheduled ingest. Only a successful poll starts the cooldown, so a
+    refused or failed one can be retried at once.
     """
     from pipeline.ingest import StaticTimetableMissing
 
     csrf_guard(request)
+    last = _LAST_LIVE_POLL.get(agency_id)
+    if last is not None and time.monotonic() - last < LIVE_POLL_COOLDOWN_S:
+        return {"status": "recent", "inserted": 0}
     try:
         inserted = await asyncio.to_thread(_ingest_live_agency, agency_id)
     except HTTPException:
@@ -405,11 +493,12 @@ async def refresh_live_delays(
     except Exception as exc:
         _log.exception("manual live refresh failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Live feed refresh failed") from exc
+    _LAST_LIVE_POLL[agency_id] = time.monotonic()
     return {"status": "updated", "inserted": inserted}
 
 
 @router.get("/delays/live-progress", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def live_trip_progress(
     request: Request,
     trip_id: str = Query(min_length=1, max_length=300),
@@ -440,36 +529,38 @@ async def live_trip_progress(
     # Restrict this endpoint to trips in the same five-minute live window as
     # /delays/live. Besides matching the UI contract, this prevents arbitrary
     # trip IDs from triggering a wider history scan.
+    filed = await _live_filing(conn, ch, agency_id, latest_ts - timedelta(hours=6), latest_ts)
+    params = {"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts, **filed.params}
+    active = (
+        "u.agency_id = {agency_id:UInt16} AND u.trip_id = {trip_id:String} "
+        "AND u.dep_delay IS NOT NULL AND u.captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE"
+    )
     active_result = await ch.query(
-        "SELECT argMax(route_code, (captured_at, file_name)) AS route_code "
-        "FROM updates_live WHERE agency_id = {agency_id:UInt16} AND trip_id = {trip_id:String} "
-        "AND dep_delay IS NOT NULL AND captured_at >= {latest_ts:DateTime64} - INTERVAL 5 MINUTE",
-        parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
+        "SELECT argMax(u.route_code, (u.captured_at, u.file_name)) AS route_code "
+        + observation_rows(active, filed.stamp, LIVE_TABLE, live_form=True),
+        parameters=params,
     )
     if not active_result.result_rows or not active_result.result_rows[0][0]:
         return empty
     route_code = active_result.result_rows[0][0]
 
+    trail = "u.trip_id = {trip_id:String} AND u.captured_at >= {latest_ts:DateTime64} - INTERVAL 6 HOUR"
     progress_result = await ch.query(
         f"""
         SELECT captured_at, file_name, winner.1 AS stop_sequence, winner.2 AS stop_id,
                winner.3 AS scheduled_time, winner.4 AS dep_delay
         FROM (
-            SELECT captured_at, file_name,
+            SELECT u.captured_at AS captured_at, u.file_name AS file_name,
                    argMin(
-                       tuple(stop_sequence, stop_id, scheduled_time, dep_delay),
-                       toInt32(stop_sequence)
+                       tuple(u.stop_sequence, u.stop_id, u.scheduled_time, u.dep_delay),
+                       toInt32(u.stop_sequence)
                    ) AS winner
-            FROM updates_live
-            WHERE agency_id = {{agency_id:UInt16}} AND trip_id = {{trip_id:String}}
-              AND dep_delay IS NOT NULL
-              AND dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-              AND captured_at >= {{latest_ts:DateTime64}} - INTERVAL 6 HOUR
-            GROUP BY captured_at, file_name
+            {observation_rows(observation_filter_ch(trail), filed.stamp, LIVE_TABLE, live_form=True)}
+            GROUP BY u.captured_at, u.file_name
         ) AS snapshots
         ORDER BY captured_at, file_name
         """,
-        parameters={"agency_id": agency_id, "trip_id": trip_id, "latest_ts": latest_ts},
+        parameters=params,
     )
 
     # A vehicle can remain at the same nearest reported stop for several
@@ -535,7 +626,7 @@ async def live_trip_progress(
 
 
 @router.get("/route-shape", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def route_shape(
     request: Request,
     route: str = Query(min_length=1, max_length=300),
@@ -563,6 +654,22 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
+    return await render_route_shape(conn, ch, agency_id, route, ctx, locale=locale, shape=shape)
+
+
+async def render_route_shape(
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    agency_id: int,
+    route: str,
+    ctx: RangeCtx,
+    *,
+    locale: str,
+    shape: str | None = None,
+) -> dict[str, Any]:
+    """``GET /route-shape``'s whole response, for a caller that resolved the
+    request itself: a route page's snapshot stores exactly what the page's
+    delay by stop was served."""
     body = await compute_route_shape(conn, ch, agency_id, str(route), ctx, locale=locale, shape=shape)
     return {**body, "scope_applied": _ROUTE_SHAPE_SCOPE}
 
@@ -573,18 +680,22 @@ async def route_shape(
 # also in `updates`, but promotion copies rather than moves it. The
 # observations' own service_type is a raw GTFS service id, or empty for one
 # that matched no scheduled trip, so it splits nothing here: a route is one row.
-_TODAY_ROUTES_SQL = (
-    "SELECT route_code, "
-    "sum(dep_delay) AS sum_delay_sec, max(dep_delay) AS worst_delay_sec, "
-    "uniqExact(trip_id) AS trips_observed, count() AS samples, "
-    "max(last_captured_at) AS last_seen_at FROM ("
-    + build_dedup_ch_sql(
-        table=LIVE_TABLE,
-        include_captured_at=True,
-        extra_where="u.captured_at >= {day_start:DateTime64} AND u.captured_at < {day_end:DateTime64}",
+def today_routes_sql(stamp: Stamp) -> str:
+    return (
+        "SELECT route_code, "
+        "sum(dep_delay) AS sum_delay_sec, max(dep_delay) AS worst_delay_sec, "
+        "uniqExact(trip_id) AS trips_observed, count() AS samples, "
+        "max(last_captured_at) AS last_seen_at FROM ("
+        + build_dedup_ch_sql(
+            table=LIVE_TABLE,
+            include_captured_at=True,
+            extra_where=filed_between_ch("{day:Date}", "{day:Date}"),
+            stamp=stamp,
+            live_form=True,
+        )
+        + ") AS deduped WHERE route_code IS NOT NULL GROUP BY route_code"
     )
-    + ") AS deduped WHERE route_code IS NOT NULL GROUP BY route_code"
-)
+
 
 # Eight weeks hold eight of every weekday, so even the rarest timetable class
 # (a Saturday, or a Sunday or public holiday) has about eight days to pool,
@@ -670,7 +781,7 @@ async def fetch_today_baselines(
 # them, and the next request's key differs if the load changed the class of
 # any lookback date. The TTL, the report caches', bounds how long a newly
 # analyzed day takes to reach the baseline.
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _closed_day_baselines(
     conn: asyncpg.Connection, agency_id: int, today: CalendarDate, day_types: DayTypes
 ) -> dict[str, dict[str, Any]]:
@@ -728,7 +839,7 @@ def build_today_routes(
 
 
 @router.get("/today/route-summary", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def today_route_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -762,12 +873,13 @@ async def today_route_summary(
     have filed a partial row for today's service date, which is no closed day.
     """
     today = current_service_date()
+    filed = await filing(conn, ch, agency_id, today, today, table=LIVE_TABLE)
     result = await ch.query(
-        _TODAY_ROUTES_SQL,
+        today_routes_sql(filed.stamp),
         parameters={
             "agency_id": agency_id,
-            "day_start": service_day_start_utc(today),
-            "day_end": service_day_start_utc(today + timedelta(days=1)),
+            "day": today,
+            **filed.params,
         },
     )
     today_rows = [dict(zip(result.column_names, r, strict=True)) for r in result.result_rows]
@@ -819,7 +931,7 @@ class ServiceHoursResponse(BaseModel):
 
 
 @router.get("/today/service-hours", response_model=ServiceHoursResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def today_service_hours(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -907,7 +1019,7 @@ def resolve_route_trips_date(requested: CalendarDate | None, latest_observed: Ca
 
 
 def build_route_trips_sql(
-    time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS, *, table: str = UPDATES_TABLE
+    time_band: TimeBand, limit: int = MAX_ROUTE_TRIPS, *, table: str = UPDATES_TABLE, stamp: Stamp
 ) -> tuple[str, dict]:
     """Rendered per-stop dedup query for one route on one service day, plus its params.
 
@@ -917,27 +1029,26 @@ def build_route_trips_sql(
     captured_at tie could silently mix a scheduled time from one physical row
     with a delay from another. They are unpacked by position in the outer
     SELECT, which is also the order `build_route_trips` unpacks each row in.
+    A stop whose winning row withdraws its departure (a CANCELED trip or a
+    SKIPPED stop, `pipeline.db.departure_ch`) has no delay and no row.
 
     The trip cap is applied here rather than after the fetch: the response
     carries stops per trip, so a route with many trips would otherwise ship
     and materialise every one of them only to drop the tail. One trip beyond
     the cap is selected so the caller can still tell that a tail existed
     without counting the whole day.
+
+    Each poll is filed under *stamp* (:func:`_route_rows`).
     """
-    table = checked_table(table)
     band_frag, band_params = time_band_clause_ch_for(time_band)
-    band_clause = "" if band_frag == "1" else f"\n              AND {band_frag}"
     sql = f"""
         WITH grouped AS (
             SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
-                argMax(tuple(u.scheduled_time, u.dep_delay, u.stop_id, u.scheduled_sec),
+                argMax(tuple(u.scheduled_time, {departure_ch()}, u.stop_id, u.scheduled_sec),
                     (u.captured_at, u.file_name)) AS winner
-            FROM {table} AS u
-            WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
-              AND u.dep_delay IS NOT NULL
-              AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-              AND {service_date_ch("u.captured_at")} = {{target_date:Date}}{band_clause}
+            {_route_rows("target_date", stamp, table, "" if band_frag == "1" else band_frag)}
             GROUP BY u.trip_id, u.stop_sequence
+            HAVING tupleElement(winner, 2) IS NOT NULL
         ),
         kept AS (
             SELECT trip_id
@@ -1057,7 +1168,7 @@ def attach_headsigns(trips: list[RouteTripRow], headsigns: dict[str, str | None]
 
 
 @router.get("/today/route/{route_code}/trips", response_model=RouteTripsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def route_trips(
     request: Request,
     route_code: str = Path(min_length=1, max_length=300),
@@ -1081,7 +1192,11 @@ async def route_trips(
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
     # just a bounded-but-still-huge scan. See `_latest_route_observation` for
     # the full existence-check and bound rationale.
-    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
+    # Its own computation (pipeline.retained_reads.checked): a floor raised during
+    # the probe re-runs it from the new floor. The day it picks is then read as
+    # the request's own, so a floor that passes that day during the main read is
+    # refused like any other.
+    latest_ts = await retained_reads.checked(lambda: _latest_route_observation(conn, ch, agency_id, route_code), conn)
     empty = RouteTripsResponse(
         date=None, time_band=time_band, truncated=False, trips=[], scope_applied=_ROUTE_TRIPS_SCOPE
     )
@@ -1095,7 +1210,9 @@ async def route_trips(
     if target_date is None:
         return empty
 
-    sql, band_params = build_route_trips_sql(time_band, table=await table_holding(ch, agency_id, target_date))
+    table = await table_holding(ch, agency_id, target_date)
+    filed = await filing(conn, ch, agency_id, target_date, target_date, table=table)
+    sql, band_params = build_route_trips_sql(time_band, table=table, stamp=filed.stamp)
     dedup_result = await ch.query(
         sql,
         parameters={
@@ -1103,6 +1220,7 @@ async def route_trips(
             "route": route_code,
             "target_date": target_date,
             **band_params,
+            **filed.params,
         },
     )
     trips, truncated = build_route_trips(dedup_result.result_rows)
@@ -1165,28 +1283,43 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
     }
 
 
-def build_route_stop_profile_sql(table: str) -> str:
+def _route_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = "") -> str:
+    """The FROM clause of one route's plausible departures, and the polls
+    withdrawing one (`pipeline.db.stop_event_filter_ch`), filed under the
+    service day bound as *day_param*, read from *table*, each poll filed under *stamp*
+    (`pipeline.static_archive.observation_rows`), and tested by *filed_where*.
+    Refitting can give a poll with no route this one, so a read that refiles also
+    reads those and tests the route, and *filed_where*, on the filed poll;
+    any other tests them on the poll as stored."""
+    on_day = filed_between_ch(f"{{{day_param}:Date}}", f"{{{day_param}:Date}}")
+    if not stamp.refiles:
+        raw = " AND ".join(part for part in ("u.route_code = {route:String}", on_day, filed_where) if part)
+        return observation_rows(stop_event_filter_ch(raw), stamp, table, live_form=True)
+    raw = f"(u.route_code = {{route:String}} OR u.route_code IS NULL) AND {on_day}"
+    filed = " AND ".join(part for part in ("u.route_code = {route:String}", filed_where) if part)
+    return observation_rows(stop_event_filter_ch(raw), stamp, table, filed, live_form=True)
+
+
+def build_route_stop_profile_sql(table: str, stamp: Stamp) -> str:
     """Latest delay per (trip, stop) for one route on one service day, read from
-    *table* (`api.clickhouse.table_holding` picks it for the day).
+    *table* (`api.clickhouse.table_holding` picks it for the day), each poll
+    filed under *stamp* (:func:`_route_rows`).
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring);
-    one non-key column is read off the winning row, so one argMax suffices.
+    one non-key column is read off the winning row, so one argMax
+    (`pipeline.db.latest_departure_ch`) suffices.
     """
-    table = checked_table(table)
     return f"""
     SELECT u.trip_id, u.stop_sequence,
-        argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-    FROM {table} AS u
-    WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
-      AND u.dep_delay IS NOT NULL
-      AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-      AND {service_date_ch("u.captured_at")} = {{day:Date}}
+        {latest_departure_ch()} AS dep_delay
+    {_route_rows("day", stamp, table)}
     GROUP BY u.trip_id, u.stop_sequence
+    HAVING dep_delay IS NOT NULL
 """
 
 
 @router.get("/today/route/{route_code}/stop-profile", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def route_stop_profile(
     request: Request,
     route_code: str = Path(min_length=1, max_length=300),
@@ -1204,16 +1337,22 @@ async def route_stop_profile(
     # `_latest_route_observation` for the full rationale (same
     # fabricated-route-code / unbounded-scan vulnerability, same fix, shared
     # with route_trips above).
-    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
+    # Its own computation (pipeline.retained_reads.checked): a floor raised during
+    # the probe re-runs it from the new floor. The day it picks is then read as
+    # the request's own, so a floor that passes that day during the main read is
+    # refused like any other.
+    latest_ts = await retained_reads.checked(lambda: _latest_route_observation(conn, ch, agency_id, route_code), conn)
     if latest_ts is None:
         return {"date": None, "stops": []}
     # The service day of the latest observation: the query files captured_at by
     # service date (pipeline.service_day), and the day picks the table.
     day = service_date_of(latest_ts)
 
+    table = await table_holding(ch, agency_id, day)
+    filed = await filing(conn, ch, agency_id, day, day, table=table)
     dedup_result = await ch.query(
-        build_route_stop_profile_sql(await table_holding(ch, agency_id, day)),
-        parameters={"agency_id": agency_id, "route": route_code, "day": day},
+        build_route_stop_profile_sql(table, filed.stamp),
+        parameters={"agency_id": agency_id, "route": route_code, "day": day, **filed.params},
     )
     dedup_rows = list(dedup_result.result_rows)
 
@@ -1378,7 +1517,7 @@ _HEATMAP_CLUSTER_PROJECTION_SQL = """
 
 
 @router.get("/delays/heatmap", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def delay_heatmap(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -1513,7 +1652,7 @@ def timeline_day_in_range(day: CalendarDate, today: CalendarDate) -> bool:
 
 
 @router.get("/delays/timeline", response_model=DelayTimelineResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def delay_timeline(
     request: Request,
     date_: str | None = Query(default=None, alias="date"),

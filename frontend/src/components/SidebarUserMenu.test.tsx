@@ -11,7 +11,7 @@ import { SidebarUserMenu } from "./SidebarUserMenu";
 import * as auth from "../api/auth";
 import * as config from "../api/config";
 
-function renderMenu(onOpenSettings = vi.fn()) {
+function renderMenu() {
   // retry: false — without a real backend, /api/me and /api/config fail
   // immediately in this test environment; default retries would otherwise
   // keep isLoading true past findByRole's timeout.
@@ -21,13 +21,12 @@ function renderMenu(onOpenSettings = vi.fn()) {
       <I18nextProvider i18n={i18n}>
         <ToastProvider>
           <MemoryRouter>
-            <SidebarUserMenu onOpenSettings={onOpenSettings} />
+            <SidebarUserMenu />
           </MemoryRouter>
         </ToastProvider>
       </I18nextProvider>
     </QueryClientProvider>
   );
-  return { onOpenSettings };
 }
 
 /** Unloads Japanese, as it is before a visitor first switches to it, and
@@ -193,14 +192,11 @@ describe("SidebarUserMenu", () => {
     expect(screen.queryByRole("menuitem", { name: /dark|light|theme/i })).toBeNull();
   });
 
-  it("calls onOpenSettings and closes the popover when the settings menu item is clicked", async () => {
+  it("has no settings control -- there is no stored credential left to manage", async () => {
     const user = userEvent.setup();
-    const { onOpenSettings } = renderMenu();
-    const trigger = await screen.findByRole("button", { name: "Account menu" });
-    await user.click(trigger);
-    await user.click(screen.getByRole("menuitem", { name: "Settings" }));
-    expect(onOpenSettings).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("menu")).toBeNull();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    expect(screen.queryByRole("menuitem", { name: /settings/i })).toBeNull();
   });
 
   it("does not render a sign-in row when the backend reports auth disabled (the default in tests, no server)", async () => {
@@ -208,7 +204,16 @@ describe("SidebarUserMenu", () => {
     renderMenu();
     const trigger = await screen.findByRole("button", { name: "Account menu" });
     await user.click(trigger);
-    expect(screen.queryByRole("menuitem", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Admin sign-in" })).toBeNull();
+  });
+
+  it("offers a signed-out visitor the admin sign-in when the backend has sign-in", async () => {
+    vi.spyOn(config, "useConfig").mockReturnValue({ data: { auth_enabled: true }, isLoading: false } as never);
+    vi.spyOn(auth, "useSession").mockReturnValue({ data: null, isLoading: false } as never);
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    expect(screen.getByRole("menuitem", { name: "Admin sign-in" })).toHaveAttribute("href", "/login");
   });
 
   it("shows both languages under a visible label, the current one checked", async () => {
@@ -269,6 +274,16 @@ describe("SidebarUserMenu", () => {
     renderMenu();
     await user.click(await screen.findByRole("button", { name: "Account menu" }));
     expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("account.logout_error"));
+  });
+
+  it("leaves the trigger and an unselected row with no inline background, so the CSS hover fill can paint, while the selected row keeps its inline accent highlight", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const trigger = await screen.findByRole("button", { name: "Account menu" });
+    expect(trigger.style.background).toBe("");
+    await user.click(trigger);
+    expect(screen.getByRole("menuitemradio", { name: /日本語/ }).style.background).toBe("");
+    expect(screen.getByRole("menuitemradio", { name: "System" }).style.background).toBe("var(--accent-soft)");
   });
 
   it("offers no sign-out to a guest", async () => {

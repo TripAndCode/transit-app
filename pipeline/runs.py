@@ -1,9 +1,10 @@
 """One row per pipeline job, so the control board can show what actually ran.
 
-``pipeline_runs`` records ingest, promotion, analyze, weather, static-load and
-RT coverage-probe jobs from both entry points -- the CLI (``gtfs_pipeline.py``)
-and the cron fallback endpoint -- including the jobs that never did any work
-because another process held the ingest/analyze advisory lock. A run that
+``pipeline_runs`` records ingest, promotion, analyze, weather, static-load
+and RT coverage-probe jobs from both entry points -- the CLI
+(``gtfs_pipeline.py``) and the cron fallback endpoint -- and the `updates`
+retention prune, which only the CLI runs. It records the jobs that never did
+any work because another process held the ingest/analyze advisory lock too. A run that
 was skipped is the most interesting row on the board: it is the only
 evidence that a scheduled job was displaced, and nothing else in the system
 keeps it.
@@ -30,6 +31,7 @@ sits on such a boundary.
 
 from __future__ import annotations
 
+import json
 import logging
 import traceback
 from contextlib import contextmanager
@@ -45,7 +47,7 @@ logger = logging.getLogger(__name__)
 #: Mirrors the ``kind`` CHECK constraint. Validated before the statement is
 #: built so a typo fails here, where the caller's stack still says which job
 #: it was, rather than as a constraint violation swallowed by the guard below.
-RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static", "update", "probe")
+RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static", "update", "probe", "retention")
 
 #: Mirrors the ``status`` CHECK constraint. ``unchanged`` closes a job that
 #: ran and found nothing newer to do (a timetable check that loaded no zip).
@@ -68,13 +70,15 @@ _FINISH_RUN_SQL = """
     WHERE run_id = %s
 """
 
+_RECORD_REBUILD_HEADLINE_SQL = "UPDATE pipeline_runs SET rebuild_headline = %s::jsonb WHERE run_id = %s"
+
 #: The job kinds that run holding the ingest/analyze advisory lock
 #: (pipeline/locks.py). The lock is session-level, so it dies with the process
 #: that took it: while it is held, its holder is alive and may still be the
 #: one working on an old ``running`` row of one of these kinds. An ``update``
 #: umbrella spends most of its life inside the ingest + analyze sweep, so it
 #: is spared on the same terms as the steps it is waiting on.
-LOCKED_RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "update")
+LOCKED_RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "update", "retention")
 
 #: Closes rows whose process died before it could. ``finished_at`` is the
 #: reap moment rather than the cutoff: the row records when the run was given
@@ -115,12 +119,17 @@ class RunHandle:
     column stays NULL, which the board reads as "this job kind has no row
     count", not as zero rows. ``status`` is what a block that exits normally
     closes with: ``ok``, or ``unchanged`` for a job that found nothing newer
-    to do.
+    to do, or ``error`` with ``error`` saying why, for a job whose work
+    returned but whose result failed a check. ``rebuild_headline`` is an
+    analyze run's headline before and after a rebuild
+    (:mod:`pipeline.rebuild_headline`), when it made one.
     """
 
     run_id: int | None
     rows: int | None = None
     status: str = "ok"
+    error: str | None = None
+    rebuild_headline: dict | None = None
 
 
 def _rollback(conn) -> None:
@@ -192,6 +201,21 @@ def finish_run(
         _rollback(conn)
 
 
+def record_rebuild_headline(conn, run_id: int | None, headline: dict) -> None:
+    """Store *headline* on its run. A statement of its own, after the row is
+    closed, so a document that cannot be written costs only itself and never
+    the run's status."""
+    if run_id is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_RECORD_REBUILD_HEADLINE_SQL, (json.dumps(headline), run_id))
+        conn.commit()
+    except Exception:
+        logger.warning("pipeline_runs: could not record the rebuild headline of run %s", run_id, exc_info=True)
+        _rollback(conn)
+
+
 @contextmanager
 def record_run(
     conn,
@@ -220,7 +244,9 @@ def record_run(
         _rollback(conn)
         finish_run(conn, handle.run_id, "error", rows=handle.rows, error=_describe(exc))
         raise
-    finish_run(conn, handle.run_id, handle.status, rows=handle.rows)
+    finish_run(conn, handle.run_id, handle.status, rows=handle.rows, error=handle.error)
+    if handle.rebuild_headline is not None:
+        record_rebuild_headline(conn, handle.run_id, handle.rebuild_headline)
 
 
 def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: datetime | None = None) -> int:

@@ -15,10 +15,11 @@ populate them, as recorded in the ``rt_field_coverage_probes`` registry.
 ``ingest_strategy == 'static_join'`` alone means a feed's wire shape
 matches an already-verified agency's; it does NOT mean the feed populates
 these optional fields the same way (see ``field_coverage``'s docstring).
-Every reader that trusts these fields calls ``rt_field_coverage_confirmed``
-below, or ``rt_field_coverage_gap`` when it must also say why the gate is
-closed, rather than re-deriving the check inline, so a newly added reader
-can't silently skip half the gate.
+Every reader that trusts these fields calls ``rt_field_coverage_gap`` below
+(the full gate), ``rt_field_coverage_confirmed_agencies`` to gate a list of
+agencies at once, or ``rt_field_gap`` when it reads one of the fields alone,
+rather than re-deriving the check inline, so a newly added reader can't
+silently skip half the gate.
 
 Verifying a feed is an operational act, not a code change: run
 ``scripts/probe_rt_field_coverage.py --url <realtime_url> --agency-id <id>
@@ -32,14 +33,16 @@ its expiry.
 """
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import Any, Literal
+from datetime import date, datetime, timezone
+from typing import Any, Literal, NamedTuple, get_args
 from zoneinfo import ZoneInfo
 
+from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
+from pipeline.service_day import filed_date_of, service_day_moment_utc, service_day_offset
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
-from pipeline.strategies._time import parse_departure_time
+from pipeline.strategies._time import Status, parse_departure_time
 
 _log = logging.getLogger(__name__)
 
@@ -53,17 +56,41 @@ REQUIRES_STATIC_TIMETABLE = True
 _MISS_WARN_FRACTION = 0.5
 _MISS_WARN_MIN_ROWS = 20
 
+# A stop time of a trip: its stop_sequence, stop_id and raw departure_time.
+_StopTime = tuple[int, str | None, str | None]
+
+
+class StopTimeUpdate(NamedTuple):
+    """One decoded StopTimeUpdate; see :func:`decode_trip_updates`."""
+
+    stop_sequence: int | None
+    dep_delay: int | None
+    stop_id: str | None
+    arr_delay: int | None
+    schedule_relationship: int | None
+
+
+class TripUpdate(NamedTuple):
+    """One decoded TripUpdate naming a trip; see :func:`decode_trip_updates`."""
+
+    trip_id: str
+    route_id: str | None
+    schedule_relationship: int | None
+    stop_time_updates: list[StopTimeUpdate]
+
+
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
 # schedule_relationship_*/feed_timestamp -- necessary but not sufficient
 # trust; the per-agency probe registry below is the other half of the gate.
-# Shared (via this module, and via rt_field_coverage_confirmed below) by
+# Shared (via this module, and via rt_field_coverage_confirmed_agencies below) by
 # every reader that needs this check so they can't drift apart if a second
 # ingest strategy is ever confirmed.
 RT_INGEST_STRATEGIES = frozenset({"static_join"})
 
 # The strategies whose rows carry the static_version_id of the timetable
-# they were ingested against (static_join's lookup in static_trips);
-# aomori_regex writes none, so its rows join whatever timetable is loaded.
+# loaded when each poll arrived; analyze refiles a row under the one in force
+# on its service date (pipeline.timetable_in_force). aomori_regex writes none,
+# so its rows join whatever timetable is loaded.
 VERSION_STAMPING_STRATEGIES = frozenset({"static_join"})
 
 # The RT-optional per-stop_time_update fields whose population is verified
@@ -72,12 +99,8 @@ VERSION_STAMPING_STRATEGIES = frozenset({"static_join"})
 # delivered, dwell/running time, schedule-realism padding, headway quality)
 # collectively need all four, and a partial verdict means the feed was never
 # fully vetted, not that the unrecorded fields are fine.
-RT_COVERAGE_FIELDS = (
-    "stop_id",
-    "arr_delay",
-    "schedule_relationship_trip",
-    "schedule_relationship_stop",
-)
+RtCoverageField = Literal["stop_id", "arr_delay", "schedule_relationship_trip", "schedule_relationship_stop"]
+RT_COVERAGE_FIELDS: tuple[RtCoverageField, ...] = get_args(RtCoverageField)
 
 # How long a recorded probe verdict is trusted before it must be re-run. A
 # feed's field population is a property of a vendor deployment that can
@@ -134,9 +157,9 @@ async def rt_field_coverage_confirmed_agencies(conn, agency_ids) -> set[int]:
     """The subset of *agency_ids* holding a live, complete RT field-coverage
     verdict, resolved in one round trip.
 
-    Batch form of ``rt_field_coverage_confirmed`` for a reader that gates a
-    whole list of agencies at once; both run the same registry query, so a
-    per-agency and a batch caller can never disagree about one agency.
+    Used by a reader that gates a whole list of agencies at once; a reader of
+    one agency gates on ``rt_field_coverage_gap``, which reaches the same
+    verdict.
     """
     ids = list(agency_ids)
     if not ids:
@@ -149,23 +172,6 @@ async def rt_field_coverage_confirmed_agencies(conn, agency_ids) -> set[int]:
         len(RT_COVERAGE_FIELDS),
     )
     return {r["agency_id"] for r in rows}
-
-
-async def rt_field_coverage_confirmed(agency_id: int, conn) -> bool:
-    """True only when *agency_id* both uses an ingest strategy that CAN
-    populate the RT-optional fields (``RT_INGEST_STRATEGIES``) AND has a
-    live, complete verdict in the ``rt_field_coverage_probes`` registry --
-    an ``ingest_strategy`` match alone means a feed's wire shape merely
-    matches a confirmed agency's, not that this agency's own live feed has
-    been probed and found to actually populate these fields.
-
-    The single canonical home for this per-agency check -- every reader that
-    needs it (e.g. dwell time/running time, schedule-realism padding, headway
-    quality) imports and calls this directly rather than re-implementing it,
-    so a newly added reader can't accidentally trust ``ingest_strategy``
-    alone.
-    """
-    return agency_id in await rt_field_coverage_confirmed_agencies(conn, [agency_id])
 
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -193,19 +199,25 @@ class CoverageGap:
         }
 
 
-def coverage_gap(ingest_strategy: str | None, rows: Iterable[Mapping[str, Any]], now: datetime) -> CoverageGap | None:
-    """Why ``rt_field_coverage_confirmed`` says no, or None when it says yes.
+def coverage_gap(
+    ingest_strategy: str | None,
+    rows: Iterable[Mapping[str, Any]],
+    now: datetime,
+    fields: tuple[RtCoverageField, ...] = RT_COVERAGE_FIELDS,
+) -> CoverageGap | None:
+    """Why the gate is closed for an agency, or None when it is open.
 
     *rows* are the agency's ``rt_field_coverage_probes`` rows and *now* the
     database's clock, the one ``expires_at`` is judged by in the gate's SQL.
-    None exactly when every ``RT_COVERAGE_FIELDS`` field holds a live,
-    affirmative verdict, which is the gate's own rule. A live refutation is
+    None exactly when every one of *fields* holds a live, affirmative
+    verdict; the gate's own rule names every ``RT_COVERAGE_FIELDS`` field,
+    and a reader of one field alone may name only it. A live refutation is
     reported ahead of a lapsed field: re-checking the lapsed one cannot open
     the gate while the refutation stands.
     """
     if ingest_strategy not in RT_INGEST_STRATEGIES:
         return CoverageGap("feed_unsupported", None)
-    by_field = {r["field_name"]: r for r in rows if r["field_name"] in RT_COVERAGE_FIELDS}
+    by_field = {r["field_name"]: r for r in rows if r["field_name"] in fields}
     if not by_field:
         return CoverageGap("never_probed", None)
     last_checked = max(r["probed_at"] for r in by_field.values()).astimezone(_JST).date()
@@ -215,35 +227,71 @@ def coverage_gap(ingest_strategy: str | None, rows: Iterable[Mapping[str, Any]],
 
     if any(live(r) and not r["confirmed"] for r in by_field.values()):
         return CoverageGap("probe_refuted", last_checked)
-    if len(by_field) == len(RT_COVERAGE_FIELDS) and all(live(r) and r["confirmed"] for r in by_field.values()):
+    if len(by_field) == len(fields) and all(live(r) and r["confirmed"] for r in by_field.values()):
         return None
     return CoverageGap("probe_expired", last_checked)
 
 
-_COVERAGE_STATE_SQL = """
-    SELECT a.ingest_strategy, now() AS now,
+_COVERAGE_STATES_SQL = """
+    SELECT a.agency_id, a.ingest_strategy, now() AS now,
            p.field_name, p.confirmed, p.probed_at, p.expires_at
     FROM agencies a
     LEFT JOIN rt_field_coverage_probes p ON p.agency_id = a.agency_id
-    WHERE a.agency_id = $1
+    WHERE a.agency_id = ANY($1::int[])
 """
+
+
+@dataclass(frozen=True)
+class CoverageState:
+    """What the coverage gate judges for one agency: its ingest strategy, its
+    ``rt_field_coverage_probes`` rows, and the database's clock they are
+    judged by."""
+
+    ingest_strategy: str | None
+    probes: list[Mapping[str, Any]]
+    now: datetime
+
+    def gap(self, fields: tuple[RtCoverageField, ...] = RT_COVERAGE_FIELDS) -> CoverageGap | None:
+        return coverage_gap(self.ingest_strategy, self.probes, self.now, fields)
+
+
+async def rt_field_coverage_states(conn, agency_ids: Iterable[int]) -> dict[int, CoverageState]:
+    """The :class:`CoverageState` of each of *agency_ids*, in one round trip.
+    An id with no agency row is left out."""
+    ids = list(agency_ids)
+    if not ids:
+        return {}
+    states: dict[int, CoverageState] = {}
+    for r in await conn.fetch(_COVERAGE_STATES_SQL, ids):
+        state = states.setdefault(r["agency_id"], CoverageState(r["ingest_strategy"], [], r["now"]))
+        if r["field_name"] is not None:
+            state.probes.append(r)
+    return states
 
 
 async def rt_field_coverage_gap(agency_id: int, conn) -> CoverageGap | None:
     """``coverage_gap`` for *agency_id*, read in one round trip.
 
-    A reader that has to say why it is empty gates on this instead of
-    ``rt_field_coverage_confirmed``: it is None exactly when that gate is
-    open, so the two cannot disagree about whether to show the data.
+    None exactly when *agency_id* is in ``rt_field_coverage_confirmed_agencies``,
+    so a per-agency and a batch reader cannot disagree about whether to show
+    the data, and a reader that is empty can say why.
     """
-    rows = await conn.fetch(_COVERAGE_STATE_SQL, agency_id)
-    if not rows:
+    state = (await rt_field_coverage_states(conn, [agency_id])).get(agency_id)
+    if state is None:
         return coverage_gap(None, [], datetime.now().astimezone())
-    probes = [r for r in rows if r["field_name"] is not None]
-    return coverage_gap(rows[0]["ingest_strategy"], probes, rows[0]["now"])
+    return state.gap()
 
 
-def assess_field_coverage(cov: dict) -> dict[str, bool] | None:
+async def rt_field_gap(agency_id: int, conn, field: RtCoverageField) -> CoverageGap | None:
+    """``coverage_gap`` for *agency_id* judged on *field* alone, for a reader
+    that needs that one optional field and none of the others."""
+    state = (await rt_field_coverage_states(conn, [agency_id])).get(agency_id)
+    if state is None:
+        return coverage_gap(None, [], datetime.now().astimezone(), (field,))
+    return state.gap((field,))
+
+
+def assess_field_coverage(cov: dict) -> dict[RtCoverageField, bool] | None:
     """Turn a ``field_coverage`` result into a per-field confirm/refute
     verdict keyed by ``RT_COVERAGE_FIELDS`` name.
 
@@ -279,7 +327,7 @@ async def record_field_coverage_probe(
     cov: dict,
     source_feed: str,
     ttl_days: int | None = DEFAULT_PROBE_TTL_DAYS,
-) -> dict[str, bool]:
+) -> dict[RtCoverageField, bool]:
     """Persist one probe run's per-field verdicts for *agency_id*, and
     return them.
 
@@ -335,21 +383,10 @@ async def invalidate_field_coverage_probes(conn, agency_id: int) -> int:
     return int(tag.rsplit(" ", 1)[-1])
 
 
-def _decode_rows(pb_bytes: bytes):
-    """Yield (trip_id, rt_route_id, stop_sequence, dep_delay, stop_id, arr_delay,
-    schedule_relationship_trip, schedule_relationship_stop) per stop_time_update.
-
-    stop_id (StopTimeUpdate field 4), arr_delay (StopTimeUpdate.arrival's delay,
-    field 2 -> field 1), schedule_relationship_trip (TripDescriptor field 4),
-    and schedule_relationship_stop (StopTimeUpdate field 5) are populated by
-    Hiroshima-style feeds (this strategy's agencies); confirmed absent from
-    Aomori's feed (see pipeline/strategies/aomori_regex.py), so no fallback
-    decoding for it is needed here.
-
-    stop_sequence is None when the update has none that fits its column (see
-    ``_uint16``); ``field_coverage`` still counts such updates, and
-    ``parse_feed`` drops them.
-    """
+def decode_trip_updates(pb_bytes: bytes) -> Iterator[TripUpdate]:
+    """Yield each TripUpdate of the feed that names a trip, decoded as
+    ``_decode_rows`` describes. The one wire reading of a TripUpdates feed
+    for this strategy, which offline tools share with ingest."""
     try:
         top = _fields(pb_bytes)
     except Exception:
@@ -370,6 +407,7 @@ def _decode_rows(pb_bytes: bytes):
                 sched_rel_trip = trip[4][0]
         if not trip_id:
             continue
+        updates = []
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)
             stop_seq = _uint16(stu.get(1, [None])[0])
@@ -382,8 +420,33 @@ def _decode_rows(pb_bytes: bytes):
             if 3 in stu:
                 dep = _fields(stu[3][0])
                 dep_delay = _int32(dep.get(1, [None])[0])
-            sched_rel_stop = stu.get(5, [None])[0]
+            updates.append(StopTimeUpdate(stop_seq, dep_delay, stop_id, arr_delay, stu.get(5, [None])[0]))
+        yield TripUpdate(trip_id, rt_route_id, sched_rel_trip, updates)
+
+
+def _stop_rows(trip_updates):
+    """``_decode_rows``' tuples of *trip_updates* (``decode_trip_updates``)."""
+    for trip_id, rt_route_id, sched_rel_trip, updates in trip_updates:
+        for stop_seq, dep_delay, stop_id, arr_delay, sched_rel_stop in updates:
             yield (trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop)
+
+
+def _decode_rows(pb_bytes: bytes):
+    """Yield (trip_id, rt_route_id, stop_sequence, dep_delay, stop_id, arr_delay,
+    schedule_relationship_trip, schedule_relationship_stop) per stop_time_update.
+
+    stop_id (StopTimeUpdate field 4), arr_delay (StopTimeUpdate.arrival's delay,
+    field 2 -> field 1), schedule_relationship_trip (TripDescriptor field 4),
+    and schedule_relationship_stop (StopTimeUpdate field 5) are populated by
+    Hiroshima-style feeds (this strategy's agencies); confirmed absent from
+    Aomori's feed (see pipeline/strategies/aomori_regex.py), so no fallback
+    decoding for it is needed here.
+
+    stop_sequence is None when the update has none that fits its column (see
+    ``_uint16``); ``field_coverage`` still counts such updates, and
+    ``parse_feed`` drops them.
+    """
+    yield from _stop_rows(decode_trip_updates(pb_bytes))
 
 
 def field_coverage(pb_bytes: bytes) -> dict:
@@ -398,7 +461,7 @@ def field_coverage(pb_bytes: bytes) -> dict:
     exists, which is the point: every reader that trusts an RT-optional
     field gates "is this optional field populated" on a live verdict in the
     ``rt_field_coverage_probes`` registry (this module, via
-    ``rt_field_coverage_confirmed``), not on ``ingest_strategy ==
+    ``rt_field_coverage_gap``), not on ``ingest_strategy ==
     'static_join'`` alone -- sharing this strategy's opaque-trip_id JOIN
     mechanism only means a feed's wire shape matches an already-verified
     agency's (see ``tests/pipeline/test_static_join.py::
@@ -443,15 +506,33 @@ def parse_feed(
                 route_code, stop_sequence, dep_delay, stop_id, arr_delay,
                 schedule_relationship_trip, schedule_relationship_stop,
                 feed_timestamp, scheduled_sec, static_version_id).
+
+    A CANCELED trip that stores no stop row, because it lists no
+    StopTimeUpdate or none with a usable stop_sequence, is stored as one
+    withdrawal per stop the loaded timetable schedules it at and it has not
+    left yet (``_stops_to_come``): each row has the stop's stop_sequence,
+    stop_id and schedule, the trip's route, service and version as a
+    prediction of that stop stores them, the CANCELED status and no delay. So
+    each such stop's latest report withdraws a departure the feed predicted
+    for it before (pipeline.db.latest_departure_ch), and a stop already left
+    keeps its reports: a CANCELED trip will not run the rest of its trip. A
+    trip with no stop still to come, or that the timetable lists no stop for,
+    gets one trip-level row instead
+    (pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE), which keeps the
+    cancellation with no stop or delay. It stores its trip's last scheduled
+    departure as its own scheduled_sec (``_last_departure``), so it is filed
+    under its trip's day like the trip's stops.
     """
-    decoded = list(_decode_rows(pb_bytes))
+    trip_updates = list(decode_trip_updates(pb_bytes))
+    decoded = list(_stop_rows(trip_updates))
     raw_rows = [r for r in decoded if r[2] is not None]
     if len(raw_rows) < len(decoded):
         _log.warning(
             f"[static_join] agency={agency_id} {len(decoded) - len(raw_rows)} stop_time_updates "
             "had no usable stop_sequence (dropped)"
         )
-    if not raw_rows:
+    cancelled = [(tu.trip_id, tu.route_id) for tu in trip_updates if is_stopless_cancellation(tu)]
+    if not raw_rows and not cancelled:
         return []
 
     feed_timestamp = decode_feed_timestamp(pb_bytes)
@@ -507,12 +588,31 @@ def parse_feed(
                 (agency_id, routeless_trips),
             )
             static_routes = dict(cur.fetchall())
+        cancelled_trips: dict[str, tuple[str | None, str | None, str | None]] = {}
+        cancelled_stops: dict[str, list[_StopTime]] = {}
+        if cancelled:
+            # One read for every cancelled trip of the poll, however many: both
+            # tables are walked on their (agency_id, trip_id) key prefix, so it
+            # costs the poll's cancelled trips, never the agency's timetable.
+            cur.execute(
+                "SELECT t.trip_id, t.route_id, t.service_id, t.static_version_id, "
+                "st.stop_sequence, st.stop_id, st.departure_time "
+                "FROM static_trips t LEFT JOIN static_stop_times st "
+                "  ON st.agency_id = t.agency_id AND st.trip_id = t.trip_id "
+                "WHERE t.agency_id = %s AND t.trip_id = ANY(%s) "
+                "ORDER BY t.trip_id, st.stop_sequence",
+                (agency_id, list({trip_id for trip_id, _route in cancelled})),
+            )
+            for tid, route, svc, ver, stop_seq, stop_id, departure in cur.fetchall():
+                cancelled_trips[tid] = (route, svc, ver)
+                stops = cancelled_stops.setdefault(tid, [])
+                if _uint16(stop_seq) is not None:
+                    stops.append((stop_seq, stop_id, departure))
 
     rows = []
     miss = 0
     no_route = 0
-    extended = 0
-    bad_sched = 0
+    statuses: list[Status] = []
     for trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop in raw_rows:
         svc, sched, static_version_id = joined.get((trip_id, stop_seq), (None, None, None))
         if svc is None and sched is None:
@@ -520,53 +620,12 @@ def parse_feed(
         route_code = rt_route_id or static_routes.get(trip_id)
         if route_code is None:
             no_route += 1
-        # Single parse drives the extended-hour handling, the zero-pad, AND
-        # the raw scheduled_sec value (see pipeline.strategies._time._GTFS_TIME_RE
-        # for why: two independent parses of the same field -- a sched[:2]
-        # check for the >=24 decision and hour_str.isdigit() for padding --
-        # can disagree on malformed multi-digit input, e.g. a 3-digit hour
-        # like "125:30:00" has a fine 2-char prefix but a broken zero-pad,
-        # storing an uncastable value). GTFS's departure_time is raw, unpadded,
-        # unvalidated text -- "7:05:00" is as valid as "07:05:00" per spec,
-        # and nothing guarantees the rest is even numeric. ClickHouse's plain
-        # String column does not validate it, so analyze()'s `_analyze_visits.
-        # scheduled_time time` column is the only place format errors
-        # surface -- and once a bad value is durably stored in ClickHouse,
-        # it fails analyze() for this ENTIRE agency on every subsequent
-        # run, not just drops one row. NULL is already a first-class value
-        # on this column (every downstream read site handles it -- WHERE
-        # scheduled_time IS NOT NULL / toUInt8OrNull).
-        sched, status, scheduled_sec = parse_departure_time(sched)
-        if status == "extended":
-            # GTFS allows departure_time like "25:30:00" for trips spanning
-            # midnight as continuation of the previous service day.
-            # scheduled_time (Nullable(String), read everywhere as a
-            # same-day HH:MM[:SS]) still can't represent it, so that column
-            # stays NULL here -- but scheduled_sec (Nullable(Int32)) holds
-            # the raw seconds-since-service-day-start value (e.g. 91800 for
-            # "25:30:00"), so the row is kept instead of dropped.
-            extended += 1
-        if status == "bad":
-            bad_sched += 1
-        rows.append(
-            (
-                file_name,
-                captured_at,
-                trip_id,
-                svc,
-                sched,
-                route_code,
-                stop_seq,
-                dep_delay,
-                stop_id,
-                arr_delay,
-                sched_rel_trip,
-                sched_rel_stop,
-                feed_timestamp,
-                scheduled_sec,
-                static_version_id,
-            )
+        row, status = _stored_row(
+            *(file_name, captured_at, trip_id, svc, sched, route_code, stop_seq, dep_delay, stop_id, arr_delay),
+            *(sched_rel_trip, sched_rel_stop, feed_timestamp, static_version_id),
         )
+        rows.append(row)
+        statuses.append(status)
 
     if miss and len(rows) >= _MISS_WARN_MIN_ROWS and miss > _MISS_WARN_FRACTION * len(rows):
         _log.warning(
@@ -579,11 +638,173 @@ def parse_feed(
         _log.info(
             f"[static_join] agency={agency_id} {no_route}/{len(rows)} rows have no route_id in the feed or static_trips"
         )
+    captured = _instant(captured_at) if cancelled else None
+    for trip_id, rt_route_id in cancelled:
+        route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
+        route_code = rt_route_id or route
+        trip_stops = cancelled_stops.get(trip_id, [])
+        if not _stops_to_come(trip_stops, captured):
+            rows.append(
+                (
+                    *(file_name, captured_at, trip_id, svc, None, route_code, TRIP_LEVEL_STOP_SEQUENCE),
+                    *(None, None, None, TRIP_CANCELED, None, feed_timestamp, _last_departure(trip_stops)),
+                    static_version_id,
+                )
+            )
+        for stop_seq, stop_id, departure_time in cancellation_withdrawals(trip_stops, captured):
+            row, status = _stored_row(
+                *(file_name, captured_at, trip_id, svc, departure_time, route_code, stop_seq, None, stop_id, None),
+                *(TRIP_CANCELED, None, feed_timestamp, static_version_id),
+            )
+            rows.append(row)
+            statuses.append(status)
+    extended = statuses.count("extended")
     if extended:
         _log.info(
             f"[static_join] agency={agency_id} {extended} rows had extended-hour (>=24) departure_time "
             "(kept, scheduled_sec set)"
         )
+    bad_sched = statuses.count("bad")
     if bad_sched:
         _log.warning(f"[static_join] agency={agency_id} {bad_sched} rows had a non-numeric departure_time hour")
     return rows
+
+
+def _stored_row(
+    file_name: str,
+    captured_at: str,
+    trip_id: str,
+    service_type: str | None,
+    departure_time: str | None,
+    route_code: str | None,
+    stop_sequence: int,
+    dep_delay: int | None,
+    stop_id: str | None,
+    arr_delay: int | None,
+    schedule_relationship_trip: int | None,
+    schedule_relationship_stop: int | None,
+    feed_timestamp: int | None,
+    static_version_id: str | None,
+) -> tuple[tuple, Status]:
+    """One stop row in ``parse_feed``'s shape, its schedule taken from the
+    timetable's raw *departure_time*, and how that parsed.
+
+    One parse drives the extended-hour handling, the zero-pad and the raw
+    scheduled_sec (see pipeline.strategies._time._GTFS_TIME_RE for why: two
+    independent parses of the same field -- a sched[:2] check for the >=24
+    decision and hour_str.isdigit() for padding -- can disagree on malformed
+    multi-digit input, e.g. a 3-digit hour like "125:30:00" has a fine 2-char
+    prefix but a broken zero-pad, storing an uncastable value). GTFS's
+    departure_time is raw, unpadded, unvalidated text -- "7:05:00" is as valid
+    as "07:05:00" per spec, and nothing guarantees the rest is even numeric.
+    ClickHouse's plain String column does not validate it, so analyze()'s
+    `_analyze_visits.scheduled_time time` column is the only place format
+    errors surface -- and once a bad value is durably stored in ClickHouse, it
+    fails analyze() for this ENTIRE agency on every subsequent run, not just
+    drops one row. NULL is already a first-class value on this column (every
+    downstream read site handles it -- WHERE scheduled_time IS NOT NULL /
+    toUInt8OrNull).
+
+    GTFS allows a departure_time like "25:30:00" for a trip running past
+    midnight as part of the previous service day. scheduled_time
+    (Nullable(String), read everywhere as a same-day HH:MM[:SS]) can't hold
+    it, so that column stays NULL, but scheduled_sec (Nullable(Int32)) holds
+    the raw seconds since the service day's start (91800 for "25:30:00"), so
+    the row is kept instead of dropped.
+    """
+    scheduled_time, status, scheduled_sec = parse_departure_time(departure_time)
+    row = (
+        *(file_name, captured_at, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay),
+        *(stop_id, arr_delay, schedule_relationship_trip, schedule_relationship_stop, feed_timestamp, scheduled_sec),
+        static_version_id,
+    )
+    return row, status
+
+
+def _instant(captured_at: str) -> datetime:
+    """*captured_at* as an aware instant; a naive one is read in UTC, the
+    zone of the column it is stored in."""
+    moment = datetime.fromisoformat(captured_at)
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
+def _last_departure(stops: list[_StopTime]) -> int | None:
+    """The scheduled seconds of the last stop of *stops* that has a usable
+    departure time, which a trip-level row stores as its own: every stop
+    event is filed under, and held to, the service day its scheduled
+    departure gives (pipeline.service_day.filed_date_ch,
+    pipeline.db.timely_reading_ch), so the row lands on its trip's day.
+    None for a trip the timetable lists no timed stop for."""
+    seconds = [sec for _seq, _stop_id, departure in stops if (sec := parse_departure_time(departure)[2]) is not None]
+    return seconds[-1] if seconds else None
+
+
+def _trip_day(seconds: list[int | None], captured: datetime) -> date:
+    """The service day of a trip whose stops are scheduled at *seconds*, as a
+    poll captured at *captured* sees it: the one its first departure is filed
+    under (pipeline.service_day.filed_date_of)."""
+    return filed_date_of(captured, next((sec for sec in seconds if sec is not None), None))
+
+
+def is_stopless_cancellation(trip_update: TripUpdate) -> bool:
+    """Whether *trip_update* cancels its trip without listing a stop it can
+    store: CANCELED, and no StopTimeUpdate with a usable stop_sequence.
+    ``parse_feed`` expands such a report into the withdrawals
+    :func:`cancellation_withdrawals` names."""
+    return trip_update.schedule_relationship == TRIP_CANCELED and all(
+        u.stop_sequence is None for u in trip_update.stop_time_updates
+    )
+
+
+def cancellation_withdrawals(trip_stops: list[_StopTime], captured: datetime | None) -> list[_StopTime]:
+    """The stops of *trip_stops* (the trip's timetable, in stop_sequence
+    order) that a stopless cancellation captured at *captured* withdraws, as
+    ``parse_feed`` stores them: those still to come
+    (:func:`_stops_to_come`) whose reading files under the trip's day
+    (:func:`_filed_under_trips_day`)."""
+    return _filed_under_trips_day(_stops_to_come(trip_stops, captured), trip_stops, captured)
+
+
+def _filed_under_trips_day(
+    stops: list[_StopTime], trip_stops: list[_StopTime], captured: datetime | None
+) -> list[_StopTime]:
+    """The stops of *stops* whose own reading at *captured* files under the
+    service day of the trip *trip_stops* schedules. Every stop event is filed
+    by its own scheduled departure, so a withdrawal of a stop that files
+    under another day would share that day's stop event with a run of the
+    same trip there and could replace its last reading; a later poll, nearer
+    the stop's departure, withdraws it under the trip's day instead."""
+    if captured is None:
+        return stops
+    day = _trip_day([parse_departure_time(departure)[2] for _seq, _stop_id, departure in trip_stops], captured)
+    return [stop for stop in stops if filed_date_of(captured, parse_departure_time(stop[2])[2]) == day]
+
+
+def _stops_to_come(stops: list[_StopTime], captured: datetime | None) -> list[_StopTime]:
+    """The stops of *stops*, in stop_sequence order, after the last one the
+    trip has left by *captured*: a stop whose scheduled departure, on the
+    trip's service day, is earlier than *captured*. A stop with no usable
+    departure time is left once a stop after it is.
+
+    The trip's service day is the one its first departure is filed under
+    (pipeline.service_day.filed_date_of): a poll just before the cutover
+    cancels the next service day's run about to start, not the run of the
+    day the capture falls in. Each stop's own reading is still filed by its
+    own departure, so only the withdrawals that land on this day are stored
+    (:func:`_filed_under_trips_day`).
+
+    The schedule alone decides, not the trip's last predicted delay: a poll
+    that cancels a trip listing no stop carries no delay, and the feed's
+    earlier predictions are in ClickHouse, which ingest does not read. A
+    stop a late-running trip has not reached by its scheduled time therefore
+    counts as left, and its last prediction stands."""
+    if captured is None:
+        return stops
+    seconds = [parse_departure_time(departure)[2] for _seq, _stop_id, departure in stops]
+    day = _trip_day(seconds, captured)
+    left = [
+        i
+        for i, sec in enumerate(seconds)
+        if sec is not None and service_day_moment_utc(day, service_day_offset(sec)) < captured
+    ]
+    return stops[left[-1] + 1 :] if left else stops

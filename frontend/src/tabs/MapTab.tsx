@@ -1,9 +1,11 @@
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
-import { Link } from "react-router-dom";
+import { use, useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { routeHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
-import { FilterDock } from "./map/FilterDock";
+import { ScopeBar } from "../components/scope/ScopeBar";
+import { applyLiveScopePatch, LIVE_SCOPE_APPLIED, liveShapeScope } from "./map/liveScope";
+import { PlaybackToggle } from "./map/PlaybackToggle";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { Tooltip } from "../components/Tooltip";
 import { BottomSheet, type SnapPoint } from "../components/BottomSheet";
@@ -14,14 +16,17 @@ import * as maplibregl from "maplibre-gl";
 import type { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
-import { useScope } from "../api/scope";
+import { DataEndContext, useScope, type ScopePatch } from "../api/scope";
+import { scopeWindow, windowSide } from "../api/onTimeDefault";
+import { durationLabel, windowLabels } from "../components/scope/scopePhrases";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
 import type { LiveTrip, ServiceHoursResponse } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
-import { ApiError, apiPost } from "../api/client";
+import { ApiError, apiPost, rangeNotRetainedFloor } from "../api/client";
 import { hhmm, quietFor } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { EM_DASH, FILTER_SEPARATOR, formatJstTime, formatReportTime } from "../utils/format";
@@ -33,7 +38,8 @@ import { EmptyState } from "../components/EmptyState";
 import { MapReference } from "./map/MapReference";
 import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
-import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } from "./map/OperationsTripPanel";
+import { directionKey, directionOptions } from "./map/directionOptions";
+import { OperationsTripPanel, type ActiveRouteOption } from "./map/OperationsTripPanel";
 import { useBasemapDim } from "./map/useBasemapDim";
 import { QueueResizer } from "./map/QueueResizer";
 import { readQueueWidth, storeQueueWidth } from "./map/queueWidth";
@@ -69,29 +75,6 @@ const STALENESS_SAFETY_TICK_MS = 60_000;
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
-
-function directionKey(trip: LiveTrip): string {
-  if (trip.direction_id != null) return `direction:${trip.direction_id}`;
-  if (trip.headsign) return `headsign:${trip.headsign}`;
-  return "unknown";
-}
-
-function directionOptions(trips: LiveTrip[], t: ReturnType<typeof useTranslation>["t"]): DirectionOption[] {
-  const grouped = new Map<string, LiveTrip[]>();
-  for (const trip of trips) {
-    const key = directionKey(trip);
-    grouped.set(key, [...(grouped.get(key) ?? []), trip]);
-  }
-  return [...grouped].map(([key, rows]) => ({
-    key,
-    label: rows.find((trip) => trip.headsign)?.headsign ?? (
-      rows[0]?.direction_id != null
-        ? t("operations.trip_panel.direction_number", { direction: rows[0].direction_id })
-        : t("operations.trip_panel.unknown_direction")
-    ),
-    trips: rows.sort((a, b) => (a.scheduled_time ?? "").localeCompare(b.scheduled_time ?? "")),
-  }));
-}
 
 function freshnessFor(timestamp: string | null | undefined, now: number): Freshness {
   if (!timestamp) return "unknown";
@@ -152,25 +135,33 @@ async function refreshFeed(
   refetchAll: () => Promise<{ failed: boolean; latestCapturedAt: string | null }>,
 ): Promise<string> {
   try {
-    const { inserted } = await apiPost<{ status: string; inserted: number }>(`/api/${agencyId}/delays/refresh`, {}, { signal });
+    const poll = await apiPost<{ status: "updated" | "recent"; inserted: number }>(`/api/${agencyId}/delays/refresh`, {}, { signal });
     const { failed, latestCapturedAt } = await refetchAll();
     if (failed) return t("operations.refresh_failed");
+    if (poll.status === "recent") return t("operations.refresh_recent");
+    const { inserted } = poll;
     return inserted > 0 && latestCapturedAt
       ? t("operations.refresh_updated", { when: relativeTime(latestCapturedAt), count: inserted })
       : t("operations.refresh_unchanged");
   } catch (error) {
     const status = error instanceof ApiError ? error.status : null;
     if (status === 429) return t("operations.refresh_rate_limited");
-    if (status === 401) return t("operations.refresh_sign_in");
+    if (status === 409) return t("operations.refresh_busy");
     return t("operations.refresh_failed");
   }
 }
 
 export function MapTab() {
   const id = useAgencyId();
+  const isAdmin = useIsAdmin();
   const { t, i18n } = useTranslation();
   const { t: td } = useTranslation("design");
   const [ctx] = useScope();
+  const dataEnd = use(DataEndContext);
+  const [, setParams] = useSearchParams();
+  function updateScope(patch: ScopePatch) {
+    setParams((prev) => applyLiveScopePatch(prev, patch), { replace: true });
+  }
   const [now, setNow] = useState(Date.now);
   // The URL is the source of truth for the *current* view (so copy-link
   // reproduces it), but localStorage stays the source of truth for a fresh
@@ -205,7 +196,6 @@ export function MapTab() {
     route?: string | null;
     direction?: string | null;
     trip?: string | null;
-    routes?: string[];
   }) {
     const patch: UrlPatch = {};
     if ("route" in next) {
@@ -214,7 +204,6 @@ export function MapTab() {
     }
     if ("direction" in next) patch.direction = next.direction ?? null;
     if ("trip" in next) patch.trip = next.trip ?? null;
-    if ("routes" in next) patch.routes = next.routes ?? null;
     patchUrl(patch);
   }
   const [queueWidth, setQueueWidth] = useState(readQueueWidth);
@@ -318,14 +307,14 @@ export function MapTab() {
   const routeTrips = effectiveRoute
     ? liveRows.filter((trip) => trip.route_code === effectiveRoute)
     : [];
-  const directions = directionOptions(routeTrips, t);
+  const directions = directionOptions(routeTrips, t, isAdmin);
   const activeRouteOptions: ActiveRouteOption[] = [...activeRouteCodes].map((routeCode) => {
     const trips = liveRows.filter((trip) => trip.route_code === routeCode);
     return {
       code: routeCode,
       label: routeNames.format(routeCode),
       trips: trips.length,
-      directions: directionOptions(trips, t).length,
+      directions: directionOptions(trips, t, isAdmin).length,
       maxDelay: trips.reduce((maximum, trip) => Math.max(maximum, trip.dep_delay), 0),
     };
   }).sort((a, b) => b.maxDelay - a.maxDelay);
@@ -335,7 +324,7 @@ export function MapTab() {
   const directionTrips = directions.find((direction) => direction.key === effectiveDirection)?.trips ?? [];
   const effectiveTrip = directionTrips.find((trip) => trip.trip_id === selectedTripId) ?? directionTrips[0] ?? null;
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
-  const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
+  const shapeQuery = useRouteShape(id, effectiveRoute, liveShapeScope(ctx, dataEnd));
   const stopBoundsQuery = useStopBounds(id);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
   // The live table keeps only the last few days, so a feed stalled longer has
@@ -590,11 +579,21 @@ export function MapTab() {
   }
 
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
-  const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
-  const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
+  // The window every other screen counts, filled in from the shared default,
+  // though over a different population: each reporting trip's latest report.
+  // Its edges split the trips into late, on time and early, so the tiles and
+  // the early note never count a trip twice.
+  const onTimeWindow = scopeWindow(ctx);
+  const sideOf = (trip: LiveTrip) => windowSide(trip.dep_delay, onTimeWindow);
+  const delayedRows = liveRows.filter((trip) => sideOf(trip) === "late").sort((a, b) => b.dep_delay - a.dep_delay);
+  const onTimeCount = liveRows.filter((trip) => sideOf(trip) === "on_time").length;
+  const earlyCount = liveRows.filter((trip) => sideOf(trip) === "early").length;
+  const onTimePct = liveRows.length ? Math.round((onTimeCount / liveRows.length) * 100) : null;
+  const lateEdge = durationLabel(onTimeWindow.late_sec, t);
+  const earlyEdge = onTimeWindow.early_sec == null ? null : durationLabel(onTimeWindow.early_sec, t);
   // Names the list, not one fetch of it: a poll must not collapse rows the
   // operator has already expanded.
-  const delayedRowsResetKey = `${id ?? "none"}:${ctx.routes.join(",")}`;
+  const delayedRowsResetKey = `${id ?? "none"}:${ctx.routes.join(",")}:${onTimeWindow.late_sec}`;
   const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, delayedRowsResetKey);
 
   // A hovered vehicle always wins the card: the pointer is the more recent
@@ -620,9 +619,15 @@ export function MapTab() {
               only as "—", since a zero would claim no trip is reporting. */}
           <div className="focus-summary-strip">
             <StatTile label={td("observedLabel")} value={countsKnown ? liveRows.length : EM_DASH} />
-            <StatTile label={td("delayedLabel")} value={countsKnown ? delayedRows.length : EM_DASH} flagged={countsKnown && delayedRows.length > 0} />
+            <StatTile label={td("delayedLabel", { edge: lateEdge })} value={countsKnown ? delayedRows.length : EM_DASH} flagged={countsKnown && delayedRows.length > 0} />
             {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
           </div>
+          {onTimePct != null && (
+            <p className="focus-muted" data-testid="live-on-time-note">{td("onTimeNote", windowLabels(onTimeWindow, t))}</p>
+          )}
+          {earlyEdge != null && earlyCount > 0 && (
+            <p className="focus-muted" data-testid="live-early-note">{td("earlyNote", { count: earlyCount, edge: earlyEdge })}</p>
+          )}
           {liveQuery.data?.truncated && (
             <p className="focus-muted" data-testid="live-truncated">{td("liveTruncated", { n: liveRows.length })}</p>
           )}
@@ -630,9 +635,9 @@ export function MapTab() {
               they count -- and above the delay list, so a long list can't
               push the export below the panel's scroll. */}
           {liveRows.length > 0 && (
-            <button type="button" className="btn-ghost ops-queue__export" disabled={!!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
+            <button type="button" className="btn btn--secondary btn--sm ops-queue__export" disabled={!!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
           )}
-          {!liveQuery.isLoading && !liveQuery.error && liveRows.length > 0 && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
+          {!liveQuery.isLoading && !liveQuery.error && liveRows.length > 0 && !delayedRows.length && <p className="focus-muted">{td("noDelayed", { edge: lateEdge })}</p>}
           {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { focusTripRow(trip); }}>
               <span>{trip.route_code ? <RouteLabel code={trip.route_code} names={routeNames} compact /> : routeNames.format(null)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
@@ -641,13 +646,11 @@ export function MapTab() {
             {trip.route_code && <Link to={routeHref(String(id), trip.route_code)}>{td("openAnalysis")}</Link>}
           </div>)}
           {cappedDelayedRows.remaining > 0 && (
-            <button type="button" className="btn-ghost" onClick={cappedDelayedRows.showMore}>
+            <button type="button" className="btn btn--secondary btn--sm" onClick={cappedDelayedRows.showMore}>
               {t("common.show_more", { count: cappedDelayedRows.remaining })}
             </button>
           )}
-          {/* FirstRunTour.tsx's second coach mark anchors here -- the panel
-              where an observed trip is actually inspected. */}
-          <details className="focus-queue-inspect" data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
+          <details className="focus-queue-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
           reporting={liveRows.length > 0}
           activeRoutes={activeRouteOptions}
@@ -706,12 +709,17 @@ export function MapTab() {
         )}
       </header>
 
+      <ScopeBar source={{ scope: ctx, update: updateScope }} applied={LIVE_SCOPE_APPLIED} actions={false} figures={false} />
+
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner
           error={liveQuery.error ?? summaryQuery.error}
           onRetry={() => { void Promise.all([liveQuery.refetch(), summaryQuery.refetch()]); }}
         />
       )}
+      {/* The route overlay draws nothing on any other failure; only a period
+          before the retention floor would otherwise read as a route with no data. */}
+      {rangeNotRetainedFloor(shapeQuery.error) != null && <ErrorBanner error={shapeQuery.error} />}
 
       <div className="ops-workspace" style={{ "--ops-queue-width": `${queueWidth}px` } as CSSProperties}>
         <section className="ops-map" aria-label={t("operations.map.aria_label")}>
@@ -811,20 +819,8 @@ export function MapTab() {
           <MapReference located={locatedTrips} total={liveRows.length} t={t} />
           {/* Rendered after the overlays that cover this corner
               (.ops-map__empty, .ops-map__loading) so a control is never
-              buried behind decoration; the CSS pins that with a z-index too.
-              The `data-tour` wrapper is `display: contents` (generates no
-              box) so it can't affect FilterDock's own floating layout --
-              FirstRunTour.tsx's first coach mark anchors to it. */}
-          <div data-tour="filter-bar" style={{ display: "contents" }}>
-            <FilterDock
-              agencyId={id}
-              applied={ctx.routes}
-              onApply={(routes) => {
-                patchSelection({ routes, route: null, trip: null, direction: null });
-              }}
-              playback={{ active: playbackOn, onToggle: () => setPlaybackOn(!playbackOn) }}
-            />
-          </div>
+              buried behind decoration; the CSS pins that with a z-index too. */}
+          <PlaybackToggle active={playbackOn} onToggle={() => setPlaybackOn(!playbackOn)} />
           {playbackOn && (
             <PlaybackRail
               controller={playback}

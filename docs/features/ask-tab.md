@@ -1,6 +1,13 @@
-# Ask tab
+# Notebook (the Ask tab)
 
-Chat-first, deterministic-by-default Q&A over an agency's delay data. See
+The investigation notebook (English "Notebook" in the nav, 調査ノート everywhere in
+Japanese, which has no short form): ready-made, deterministic analyses of an agency's
+delay data, run from cards and kept as saved investigations (threads), with exports and
+per-stop evidence. It does not promise free-text question answering; an optional LLM
+follow-up exists, gated by its kill switch, `llm_enabled` and per-user approval (see
+"Who may reach the LLM"), and is never the headline. A card is an analysis; the saved
+thread is an investigation. User-facing copy says "notebook"; routes, components, endpoints, i18n keys
+(`ask.*`, `nav.ask`) and tables keep the `ask` name. See
 `README.md` ▸ "Data Flow" (the Ask-tab bullet) for the architecture summary
 this doc expands on with file-level detail.
 
@@ -12,22 +19,21 @@ this doc expands on with file-level detail.
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
   redirects a fresh/remembered agency selection to
   `/agencies/{id}/pulse`.
-  Reach the Ask tab from the rail's Ask link, the command palette's "Ask"
+  Reach the notebook from the rail's Notebook link, the command palette's "Notebook"
   entry, or the `g q` chord.
-- Entry points: Ask is not one of the seven destinations in
+- Entry points: the notebook is not one of the seven destinations in
   `SIDEBAR_NAV_ITEMS`; the rail shows it as a separate dashed link below
   them (`frontend/src/components/Sidebar.tsx`), labelled by its name alone,
   with no 「乗換」 (transfer) tag, which would read as a journey planner. The top bar
   (`frontend/src/components/TopBar.tsx`) above every agency screen carries
   a search field (`topbar.ask_placeholder`) that opens the command palette
-  (also ⌘K); the palette's "Go to" group lists Ask after the rail
+  (also ⌘K); the palette's "Go to" group lists the notebook after the rail
   destinations (`GO_TO_TARGETS` in
   `frontend/src/components/paletteNavTargets.ts`, `nav.ask` i18n key —
-  "Ask" / "質問"). That field carries `data-tour="ask-nav"`, the first-run
-  tour's third step (placed "bottom"); the bar's right side holds the data-freshness
+  "Notebook" / "調査ノート"). The bar's right side holds the data-freshness
   chip (`frontend/src/components/DataFreshness.tsx`): the agency's
   `latest_data_date` and the newest live reading, with a panel that spells
-  both out (`topbar.freshness.*`). On a phone, Ask is also one of the bottom tabs in
+  both out (`topbar.freshness.*`). On a phone, the notebook is also one of the bottom tabs in
   `frontend/src/components/Sidebar.tsx`, beside Pulse, Routes, Live and
   More.
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread
@@ -38,8 +44,7 @@ this doc expands on with file-level detail.
 What the user sees/does:
 
 - **Empty thread (landing state)** —
-  `frontend/src/tabs/ask/AskLandingCards.tsx`, headed 「よくある質問から選んで
-  調べる」 / "Pick a common question to look into": the page has no box to
+  `frontend/src/tabs/ask/AskLandingCards.tsx`, headed 「用意された分析から選ぶ」 / "Pick a ready-made analysis": the page has no box to
   type a question into, only the cards below. Each instant card's example
   answer describes the answer its default settings give (the on-time card
   lists the least on-time routes first). `buildCardTemplates()`
@@ -60,9 +65,40 @@ What the user sees/does:
   bubbles; assistant bubbles render `frontend/src/tabs/ask/RichResult.tsx`
   (table / kv / chart depending on `result.kind`), with a collapsible
   "details" JSON dump of tool/args/result.
+- **Link to the question's home** — a ranking, on-time or weekday/weekend
+  card ends with "Open on Routes / Day types & agencies", and a trend card
+  with "See the daily trend on Time" (`frontend/src/tabs/ask/cardHome.ts`):
+  the screen that answers its question in full (`analysis-tab.md` ▸ One home
+  per question).
+  - The link carries the scope the card was answered under, not the
+    thread's current filters. The card templates send no dates, so the
+    period, routes, dow, time band and service come from the message's
+    `conditions`, which `_run_card` (`api/routers/conversations.py`) records
+    from the dispatched filters. A card's own `from_date`/`to_date` win over
+    them, as they do at dispatch; a card's own route narrows the link to that
+    route; a top-N card's `service_type` replaces the service filter, mapped
+    as `_SERVICE_TYPE_MAP` maps it.
+  - A card saved before `conditions` kept the period has no link: a link to
+    the screen's default days would show other figures.
+  - Ranking links set `sparse=1`, so the Routes table ranks at
+    `MIN_GROUP_SAMPLES` (21), the floor every ranking card applies, the
+    5-minute one included, rather than its default 100. A ranking card over
+    named routes lists a retired code or a zero-delay route it names
+    (`left_out_unless_named`), so its link also sets `retired=1` and
+    `zero_delay=1`. Compare's board has no such toggle, so a weekday/weekend
+    card naming a retired route links to a board without it. A ranking card
+    keeps its order (`best_first`), and an on-time card's `threshold_min`
+    becomes the scope's late tolerance with every early departure on time,
+    which is how the tool counts it.
+  - Time's trend is daily, so a weekly or monthly trend card's link says
+    "daily" rather than promising its own granularity.
+  - The per-day-type split of one route (`compare_segments`,
+    `dimension="service_type"`) has no home and no link.
 - **Result exports** — `frontend/src/tabs/ask/ResultExports.tsx`: the
   selected step as JSON, and a CSV for each table answer (`resultTableCsv`
-  in `resultSnapshot.ts`). The CSV opens with key/value rows recording what
+  in `resultSnapshot.ts`). Both record the filters the answer ran under
+  (`historical_filter_ctx`) when its message kept them with its period, and
+  say they were not recorded for an older message. The CSV opens with key/value rows recording what
   produced it, the last being `data_source`: the agency's open-data credit
   in the UI language (`useAgencyCredit`), left out when no source covers
   the agency's feed. A blank row and the table follow.
@@ -73,15 +109,40 @@ What the user sees/does:
   `route_stop_patterns` result shows a select-a-stop prompt
   (`ask.evidence.select_to_ask`) in its place. Shown only when
   `ASK_FOLLOWUP_ENABLED` is on (`useFollowupEnabled` hook) and the
-  signed-in caller is `llm_approved` (see "Who may reach the Stage-3 LLM"
+  signed-in caller is `llm_approved` (see "Who may reach the LLM"
   below).
 - There is **no free-text primary input** in the current UI — the primary
   path is entirely the parameterized card/chip templates
   (`frontend/src/components/askCardTemplates.ts`). Free text only appears
-  in the follow-up box, plus internally via the anonymous `__build__`
-  sentinel (see below).
-- Filter bar: `frontend/src/components/FilterContextBar.tsx` scopes every
-  dispatch to the shared date/DOW/time-band/service/route context.
+  in the follow-up box.
+- Conditions: the shared scope bar (`ScopeBar`, `frontend/src/components/scope/ScopeBar.tsx`;
+  see `analysis-tab.md`'s "The scope bar" section) shows and edits the open
+  thread's `filter_ctx`, its period, days, timetable, time band and routes,
+  through `threadScope`/`patchThreadFilter` in `frontend/src/tabs/ask/filterCtx.ts`,
+  which read a stored filter through the URL scope's own parser. The bar
+  leaves out a stop, direction, hour or tolerance condition, which a thread
+  does not store, whether or not a thread is open. With no thread open the
+  bar shows the screen's URL scope whole (`notebookScope`), which keeps any
+  such condition's value and seeds the next new thread (`rangeCtxToFilterCtx`);
+  clearing one writes the URL (`splitNotebookPatch`); an edit made with no
+  thread open stays on the screen until it seeds one.
+  On an open thread each edit is saved as it is made (`useThreadFilter` in
+  `frontend/src/api/hooks.ts`) and shown at once through the conversation's
+  cached copy, which a refetch keeps while a save is pending. The saves go
+  through one coalescing saver per thread (`frontend/src/api/threadFilterSaver.ts`),
+  module state so it outlives a remount: with a save in flight, a newer edit
+  waits as the thread's single next save, replacing any earlier one, so a
+  burst of edits is at most two PATCHes, in order, ending with the latest. A
+  signed-out reader's edit is a localStorage write, made at once. A dispatch
+  awaits `flush`, which resolves once the thread's saves have landed; if the
+  last one failed it is sent again, and a second failure stops the dispatch
+  with a retry of the whole submission. While a dispatch waits, the dock and
+  the bar count as busy, so a second press sends nothing. Deleting a
+  thread drops its queued save and ignores its running one, with no error.
+  A reload or a closed tab loses at most the save still in flight. A thread stores no on-time tolerance,
+  so its bar has no tolerance token, and it carries no saved views or
+  pin; its tokens, Reset and any open popover's controls are disabled while a
+  question is being sent or waits for its thread's saves.
 
 ## Request path
 
@@ -94,27 +155,41 @@ What the user sees/does:
 `pipeline.query.tools.dispatch` directly — no router/LLM stages at all,
 since the frontend template already supplies `tool`/`args`.
 
-**Anonymous user (anonymous-only mode), same templates:** `useAppendMessage`'s anon branch
-builds a synthetic `question = "__build__ <tool> <json-args>"` and calls
-`POST /api/{agency_id}/ask` (`api/routers/ask.py: ask()`). This still
-passes through Stage 1 (regex `_RULES`) and Stage 2 (embedding NN) first
-like any other question — both normally miss against the sentinel string,
-since it looks nothing like a real question — and only when neither stage
-decides does the request fall to `pipeline.query.chat.chat_with_tools`,
-which recognizes the `__build__` prefix and short-circuits to parse
-`(tool, args)` directly, dispatching **without ever calling the LLM**
-either way.
+**Signed-out reader, same templates:** `useAppendMessage`'s anon branch
+calls `POST /api/{agency_id}/ask/card` (`api/routers/conversations.py:
+run_card_endpoint`) with `{tool, args, filter_ctx}`. It runs the same card
+dispatch as the signed-in path (`_run_card`, without the intent-cache write),
+stores nothing, and returns the assistant message's fields, which the browser
+keeps in its localStorage thread (`frontend/src/api/conversationsAnon.ts`).
 
-**Free-text / natural-language path (the 3-stage router)** — reached via
-`POST /api/{agency_id}/ask` for any question that isn't a `__build__`
-sentinel:
+**Method stamp on saved cards:** a card whose figures a report computes carries
+that report's `DefinitionMeta`, built through
+`pipeline.reports.report_stamp.report_definition` (the function
+`render_report` uses) before the figures, over the scope the tool computed:
+
+| Card tool | Report whose stamp it carries |
+|---|---|
+| `top_n` `avg_delay` / `on_time_rate` / `worst_5min` | `ranking` / `on_time` / `worst_5min` |
+| `on_time` (`on_time_rate`) | `on_time`; a `threshold_min` is the window "up to N min late", read by `compute_on_time`'s own rule |
+| `trend` (`time_series`) | `trend` as exported (`format=csv`): the daily series alone |
+| `cmp_service` (`compare_segments`, `dimension="dow"`) | `compare_ranking` |
+
+Every other tool computes figures no report does and carries no stamp. A
+signed-in card stores it in `ask_conversation_messages.definition`; a
+signed-out card keeps the copy `/ask/card` returned, which the sign-in
+migration validates as a `DefinitionMeta` and stores, or drops. A card saved
+before the column existed reads `NULL` and shows no stamp. The evidence card
+renders it with the reports' `DefinitionMetaBlock`.
+
+**Free-text / natural-language path (rules, then the LLM)** — reached via
+`POST /api/{agency_id}/ask`:
 
 1. `api/routers/ask.py: ask()` resolves `RangeCtx`, checks `is_follow_up()`
    (follow-up phrases route straight to the LLM with history) and, with no
    history, `needs_previous_turn()`, which gives the `no_history` prompt to
    the follow-ups a first turn cannot answer: a reference back ("さっき",
    "同じ条件") always; continuation ("もっと", "次の50件") unless the router
-   is on and a Stage-1 rule answers it; and refinement ("降順", "絞り込",
+   is on and a rule answers it; and refinement ("降順", "絞り込",
    "さらに", "別の") unless it names its own subject (a transit noun or
    metric such as 路線, 停留所, 遅延 or 定時率, or a route code; "その路線"
    does not count) or such a rule answers it. The rest are routed as usual, and with the router off
@@ -122,22 +197,10 @@ sentinel:
    `needs_history()` (with history, a question that points back at the
    conversation, "その路線は？", and names no route of its own also goes
    straight to the LLM; with no history it is routed as usual), then
-   calls `pipeline/query/router.py: route_or_examples(question, conn, agency_id, k=3)`.
-2. **Stage 1 — rules**: `_RULES` regex list (e.g. "遅延.*ワースト" →
+   calls `pipeline/query/router.py: match_rules(question)`.
+2. **Rules**: `_RULES` regex list (e.g. "遅延.*ワースト" →
    `top_n`). A match dispatches immediately via `pipeline.query.tools.dispatch`.
-3. **Stage 2 — embedding NN**: no rule match → embed the question with
-   `pipeline/query/embeddings.py` (`intfloat/multilingual-e5-small`,
-   384-dim) and look up nearest neighbors in `rag_chunks` via
-   `pipeline/query/rag_index.py: nearest()` (pgvector cosine distance). A
-   top match within threshold (`_EMBED_DISPATCH_THRESHOLD = 0.12`, margin
-   `0.02` over the runner-up) dispatches via that example's stored tool/args:
-   `tests/ask_eval/golden_set.jsonl` for a golden id, `ask_intent_cache` for a
-   promoted `cache_<signature>` chunk. The args are replayed only when the
-   question names the same entities (ASCII route codes, aliases and numbers,
-   plus any arg value the example spells out); otherwise it reaches Stage 3
-   with the example as a few-shot.
-4. **Stage 3 — RAG + LLM**: neither stage decided → the top-3 examples
-   (golden or promoted cache) are few-shot-injected and
+3. **LLM stage**: no rule matched →
    `pipeline/query/chat.py: chat_with_tools(...)` calls the provider ladder (`pipeline/query/llm_client.py`) with the
    tool-use surface from `pipeline/query/tools.py`. The ladder's order and
    membership are **env-configured**, not fixed: `CHAT_PROVIDERS` (comma
@@ -146,7 +209,13 @@ sentinel:
    `openai` is a supported but optional paid rung, meant to be placed
    last. The chosen tool call is dispatched the same
    way; out-of-scope questions get a friendly refusal with suggestions.
-5. All paths converge on `dispatch()` → a `_tool_*` handler in
+   The API starts with no provider key: the ladder is then empty, a request
+   that needs the LLM answers the "no AI provider is configured" message,
+   follow-ups report disabled (`POST .../followup` returns 503), and
+   `/api/config` reports `llm_enabled: false`, which hides the follow-up box.
+   The notebook's card dispatch (signed in and `/ask/card`), threads and
+   exports need no key.
+4. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
    `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
    on the **specific tool**, not uniformly on filter narrowness:
@@ -163,11 +232,31 @@ sentinel:
      (`pipeline/query/tool_queries.py`) have **no agg fast path at all** —
      they always read live `updates` via ClickHouse regardless of the
      filter.
+   - `schedule_realism` reads `agg_route_segment_runtime`
+     (`pipeline/reports/segment_runtime.py`) for an agency confirmed to send
+     arrivals, and falls back to the live `schedule_realism_segments` scan
+     for every other agency.
    Either way the result becomes a `ToolResult` →
    `render_tool_result()` produces the locale-specific summary string.
-6. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
-   log_query()` unless `ASK_QUERY_LOG_ENABLED=false` (skipped for
-   `__build__` sentinels).
+5. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
+   log_query()` unless `ASK_QUERY_LOG_ENABLED=false`.
+
+**Usage log.** Each notebook card dispatch writes one `ask_query_log` row, on
+the same kill switch: `router_stage` is `card_signed_in`
+(`POST .../conversations/{cid}/messages`) or `card_signed_out`
+(`POST .../ask/card`), `tool` is the canonical handler name (an unknown or
+aliased client name resolves to the handler's, or NULL), `success` is false for
+an empty or failed dispatch, and `latency_ms` is the dispatch's own wall time
+(a signed-in card counts as a success only once its thread's transaction has
+committed). A follow-up writes a `followup` row naming the tool of the result
+it used (NULL when that answer came from no tool), with `latency_ms` of the
+model call and the numeric-guard verdict in `numeric_guard_triggered`. The
+`question` column is empty on every notebook row: the follow-up's text stays in
+the user's own conversation. Notebook rows carry no user id, conversation id,
+arguments or text. The write
+follows the request's transaction and swallows its own failure, so logging
+cannot fail a card or lose a follow-up's answer. The admin Ask ops page reports these as per-tool
+counts over the trailing `DEFAULT_RANGE_DAYS` JST days.
 
 **Follow-up path** (LLM-grounded, kill-switch gated):
 `FollowupChipsRow` → `useFollowup` →
@@ -176,23 +265,11 @@ sentinel:
 `pipeline/query/followup.py: answer_followup()` — answers strictly from
 the prior tool result's serialized data (never re-dispatches a tool).
 
-**Other Ask-adjacent endpoints** (`api/routers/ask.py`):
+**Other Ask-adjacent endpoints:** `GET /ask/followup-enabled` (in
+`api/routers/conversations.py`) — `{enabled, max_question_chars}`, drives
+`useFollowupEnabled`.
 
-- `GET /ask/suggest` — autocomplete via embedding NN, or top hit-count
-  chunks for an empty query.
-- `GET /ask/build-schema` — metadata for a guided-builder UI form.
-- `POST /ask/edit-action` — records confirm/edit verdict on a cached
-  low-confidence interpretation (`ASK_INTENT_CACHE_ENABLED`).
-- `GET /ask/followup-enabled` (in `api/routers/conversations.py`) —
-  `{enabled, max_question_chars}`, drives `useFollowupEnabled`.
-
-`api/routers/ask_dashboard.py` (`GET /ask/dashboard/{heatmap,anomalies,movers}`,
-backed by `pipeline/dashboard_queries.py`) exists per its own docstring for
-Ask-tab analysis previews, but no current file under
-`frontend/src/tabs/ask/` or `AskTab.tsx` calls it — treat as
-unwired/consumed elsewhere rather than assuming it's live in this UI.
-
-## Who may reach the Stage-3 LLM
+## Who may reach the LLM
 
 Reaching an LLM requires a signed-in caller whose `users.llm_approved` flag an
 admin has set. The two LLM-backed surfaces enforce it in different places, for
@@ -203,17 +280,13 @@ one structural reason:
 | `POST /conversations/{id}/followup` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
 | `POST /ask` | inside `chat_with_tools`'s `_call_llm` (`pipeline/query/chat.py`), via the `llm_approved` argument the router threads in | `200` with an honest-degradation answer |
 
-The Copilot panel's `POST /copilot/insight` calls no LLM (its template is
-chosen and filled in code, `pipeline/query/copilot.py`), so it is open to every
-caller while `copilot_insight_enabled` is on.
-
 `/ask` cannot reject the whole request upfront the way the follow-up does:
-Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
-questions with no LLM at all, and those stay open to every caller the login gate admits (everyone in anonymous-only mode). So the flag
-travels into the orchestrator and short-circuits only the Stage-3 call,
-returning `error_kind="not_approved"` before any provider or BYOK key is
-touched. Anonymous callers have no user row, so the router passes
-`llm_approved=False` for them — they get Stages 1-2 and nothing more.
+The regex rules answer many
+questions with no LLM at all, and those stay open to every caller, signed in or not. So the flag
+travels into the orchestrator and short-circuits only the LLM call,
+returning `error_kind="not_approved"` before any provider is touched.
+Anonymous callers have no user row, so the router passes
+`llm_approved=False` for them — they get the rules and nothing more.
 
 Admins toggle the flag from `PATCH /api/admin/users/{uid}`, which writes an
 `llm_approved_changed` row to `login_events` whenever the value actually
@@ -221,7 +294,7 @@ changes.
 
 Approval is the whole budget control: an approved caller's LLM calls are
 bounded only by the generic per-minute limiter every route shares
-(`FREE_LIMIT`/`PRO_LIMIT` in `api/middleware/ratelimit.py`), not by any
+(`DEFAULT_LIMIT` in `api/middleware/ratelimit.py`), not by any
 per-day LLM allowance. Metering approved callers would key on the user row,
 so it is a separate mechanism to build, not a knob to turn on.
 
@@ -242,7 +315,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `frontend/src/components/paramPills/*.tsx` | Individual param controls (segmented/limit/route picker) |
 | `frontend/src/components/askCardTemplates.ts` | Declarative chip templates (tool + args + i18n keys) |
 | `frontend/src/components/ThreadSidebar.tsx` | Conversation list (anon localStorage ↔ server) |
-| `frontend/src/components/FilterContextBar.tsx` | Date/DOW/time-band/service/route filter strip |
+| `frontend/src/tabs/ask/filterCtx.ts` | A thread's `filter_ctx` as the scope the scope bar reads and writes |
 | `frontend/src/api/hooks.ts` | TanStack Query hooks for all `/ask` + `/conversations` endpoints |
 | `frontend/src/api/conversationsAnon.ts` | localStorage-backed anon conversation store |
 
@@ -250,18 +323,15 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 | File | Role |
 |---|---|
-| `api/routers/ask.py` | `POST /ask` (3-stage router entry), `/ask/suggest`, `/ask/build-schema`, `/ask/edit-action` |
+| `api/routers/ask.py` | `POST /ask` (rules, then LLM) |
 | `api/routers/conversations.py` | Conversation CRUD, `POST /messages` (primary deterministic dispatch), `POST /followup`, `GET /ask/followup-enabled`, anon-migration |
-| `api/routers/ask_dashboard.py` | `/ask/dashboard/{heatmap,anomalies,movers}` |
 
 **Backend — `pipeline/query/`**
 
 | File | Role |
 |---|---|
-| `router.py` | Stage 1 (regex `_RULES`) + Stage 2 (embedding NN) dispatch decision, or few-shot examples for Stage 3; `is_follow_up()`, `needs_previous_turn()`, `needs_history()` |
-| `embeddings.py` | `intfloat/multilingual-e5-small` wrapper for Stage 2 + RAG index build |
-| `rag_index.py` | pgvector cosine-NN reader over `rag_chunks` (`nearest()`) |
-| `chat.py` | Stage 3 orchestration, `__build__` sentinel handling, intent-cache lookup/upsert |
+| `router.py` | Regex `_RULES` dispatch decision (`match_rules()`); `is_follow_up()`, `needs_previous_turn()`, `needs_history()` |
+| `chat.py` | LLM-stage orchestration, intent-cache lookup/upsert |
 | `llm_client.py` | `CHAT_PROVIDERS`-ordered provider ladder (gemini/openai) |
 | `tools.py` | Tool specs (`TOOLS`), `dispatch()`, `render_tool_result()`, the `_LOCALES` string table |
 | `tool_queries.py` | SQL helpers backing several tool handlers |
@@ -270,15 +340,13 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `followup.py` | LLM-grounded follow-up answerer (`ASK_FOLLOWUP_ENABLED` kill switch) |
 | `labels.py` | `dow_label`/time-band display helpers |
 | `meta_tools.py` | `describe_data`-style meta tools merged into the handler map |
-| `query_log.py` | `ask_query_log` writer, gated by `ASK_QUERY_LOG_ENABLED` |
+| `query_log.py` | `ask_query_log` writer (router, card and follow-up rows), gated by `ASK_QUERY_LOG_ENABLED` |
 
 ## How to verify manually
 
 **Automated tests:**
 
-- Backend router/pipeline: `tests/query/test_router.py` (rules +
-  embedding stage), `tests/unit/test_embeddings.py`,
-  `tests/query/test_rag_index.py`, `tests/unit/test_chat_confidence.py`,
+- Backend router/pipeline: `tests/query/test_router.py` (rules),
   `tests/query/test_chat_intent_cache.py`,
   `tests/query/test_chat_null_args.py`,
   `tests/query/test_chat_error_leakage.py`,
@@ -292,22 +360,13 @@ so it is a separate mechanism to build, not a knob to turn on.
   `tests/query/test_query_log.py`, `tests/query/test_schema_linker.py`.
 - API-level: `tests/api/test_api_ask.py` (end-to-end `/ask` — rule-hit
   skip, ClickHouse-degrade, follow-up rerouting, query-log writes, CSRF),
-  `tests/api/test_ask_endpoints.py`, `tests/api/test_ask_dashboard.py`,
   `tests/api/test_conversations.py` (includes follow-up endpoint +
   kill-switch behavior).
 - Gold-set canonicalization gate: `tests/ask_eval/test_ask_eval.py` shells
   out to `scripts/ask_eval.py`, which reads
   `tests/ask_eval/gold_questions.jsonl` and checks that each entry's
   expected args are unchanged by `canonicalize` (it never reads the
-  `question` text, so it is not routing coverage). Separately,
-  `tests/ask_eval/test_baseline.py` (opt-in via `RUN_LLM_EVAL=1` + a real
-  `GEMINI_API_KEY`, hits a running dev API) replays
-  `tests/ask_eval/golden_set.jsonl` against the live 3-stage router and
-  scores tool-selection accuracy — `golden_set.jsonl` is also the file
-  `make build-rag-index` embeds into `rag_chunks` for Stage 2 (see
-  `pipeline/query/rag_index.py`, `gtfs_pipeline.py: cmd_build_rag_index`).
-  These are two different JSONL files with two different jobs — don't
-  conflate them.
+  `question` text, so it is not routing coverage).
 - Most of these need both throwaway Postgres (`:5544`) and throwaway
   ClickHouse (`:8124`) — see `AGENTS.md` ▸ Tests for the
   `RUN_CH_INTEGRATION=1` block; omitting it silently skips
@@ -318,7 +377,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 1. `cp .env.example .env`; set a real `GEMINI_API_KEY` (and optionally
    `OPENAI_API_KEY` as the paid fallback per `CHAT_PROVIDERS`) to
-   exercise Stage 3. `ASK_FOLLOWUP_ENABLED=true` ships as the
+   exercise the LLM stage; with no key the API still boots. `ASK_FOLLOWUP_ENABLED=true` ships as the
    `.env.example` local-dev default, so the follow-up box works out of the
    box for a signed-in user an admin has marked `llm_approved`; set it
    `false` to verify the kill-switch (box hidden, `POST /followup` returns
@@ -329,46 +388,35 @@ so it is a separate mechanism to build, not a knob to turn on.
    through, or every card returns an empty result:
    `make fetch-ingest` (or `make load_static` before `ingest_live`), then
    `make analyze` for the agency.
-3. Build the Stage 2 embedding index so paraphrases actually route to
-   `"embedding"` instead of always falling to Stage 3:
-   `poetry run python gtfs_pipeline.py build_rag_index --agency-id 1`
-   (or `make build-rag-index` for all agencies). Without this,
-   `rag_chunks` is empty and Stage 2 never dispatches. Every row is
-   stamped with `embedding_version` (`<model id>@<sentence-transformers
-   version>`); Stage 2 reads only rows matching the running embedder (plus
-   unstamped legacy rows) and logs a one-off "re-index required" warning
-   when other-version rows are present, so re-run the same command after
-   changing `EMBEDDING_MODEL_ID` or upgrading the library to any new version.
-4. Open the app — the default route lands on Pulse
+3. Open the app — the default route lands on Pulse
    (`/agencies/{id}/pulse`; a fresh/remembered agency selection redirects
-   there too). Click the top bar's search field (or press ⌘K), choose "Ask",
+   there too). Click the top bar's search field (or press ⌘K), choose "Notebook",
    and expect `/agencies/{id}/ask`; pressing `g` then `q` goes there directly.
-5. On the empty-thread landing view, click an instant card (e.g.
+4. On the empty-thread landing view, click an instant card (e.g.
    "Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,
    no LLM).
-6. Click a route-requiring pill (e.g. "Route delay trend"), pick a
+5. Click a route-requiring pill (e.g. "Route delay trend"), pick a
    route, then run it from the `ParamStrip` — expect a trend chart bubble.
-7. After any answer (for "Explore all stops by pattern", after selecting a
+6. After any answer (for "Explore all stops by pattern", after selecting a
    stop), type a question in the follow-up box and send it — expect a
    short LLM-generated explanation grounded only in the prior result.
-8. To exercise the 3-stage NL router directly (not reachable from the
+7. To exercise the NL router directly (not reachable from the
    current template-only UI), call the API directly:
    ```bash
    # `csrf_guard` rejects a POST with no Origin header (403 "origin required").
-   # While sign-in is required, also pass a session cookie from a signed-in
-   # browser; see the README's API example.
+   # The session cookie is needed only for an LLM-grounded answer; see the
+   # README's API example.
    curl -X POST localhost:8000/api/1/ask \
      -H 'Content-Type: application/json' \
      -H 'Origin: http://localhost:8000' \
      -H 'Cookie: sid=<your session cookie>' \
      -d '{"question":"遅延ワースト10"}'
    ```
-   Expect `router_stage: "rules"`. A paraphrase near a golden-set entry
-   should return `"embedding"`; a genuinely novel/out-of-scope question
+   Expect `router_stage: "rules"`. A genuinely novel/out-of-scope question
    should return `"llm"` (needs a working Gemini/OpenAI key) or a
    friendly refusal.
-9. Toggle `ASK_ROUTER_ENABLED=false` to force every question to Stage 3,
+8. Toggle `ASK_ROUTER_ENABLED=false` to force every question to the LLM stage,
    or `ASK_HISTORY_ENABLED=false` to disable follow-up-phrase ("もっと")
    LLM rerouting.
 
@@ -381,8 +429,8 @@ so it is a separate mechanism to build, not a knob to turn on.
   `ask.followup_*` (the follow-up box's placeholder and send label),
   `ask.evidence.*` (stop-evidence views and the follow-up box's
   selected-stop context), `ask.col.*` (table column headers),
-  `ask.build_labels.*` (anon `__build__` summary / builder-schema UI),
-  `ask.filter_bar.*` (the filter-context bar). New templates/params need
+  `ask.build_labels.*` (a card's fallback user-bubble summary / builder-schema UI).
+  New templates/params need
   matching keys in both locale files.
 - **Server-side**: `pipeline/query/tools.py`'s
   `_LOCALES: dict[tuple[str, str], str]` holds every user-facing string

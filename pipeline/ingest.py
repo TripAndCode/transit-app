@@ -10,13 +10,18 @@ import pathlib
 import re
 import struct
 import tarfile
+import zlib
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 from zoneinfo import ZoneInfo
 
+import psycopg2
 from clickhouse_connect.driver.exceptions import DataError
+from psycopg2.extensions import TRANSACTION_STATUS_INTRANS
 
+from pipeline import archive_replace
 from pipeline.clickhouse import (
     LIVE_TABLE,
     days_with_source,
@@ -26,6 +31,8 @@ from pipeline.clickhouse import (
     recent_file_name_exists,
 )
 from pipeline.db import _static_loaded
+from pipeline.locks import agency_ingest_lock
+from pipeline.retention import retention_floor
 from pipeline.strategies import get_ingest_strategy
 
 # archive_captured_at is used below; the private helpers are back-compat
@@ -35,7 +42,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
-from pipeline.url_guard import redact_url, safe_urlopen
+from pipeline.url_guard import redact_url, redact_urls_in_text, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +59,48 @@ _BATCH_ROWS = 20_000
 # YYYYMMDD path segment (e.g. tar member dir or .pb parent dir). Used to
 # derive captured_at when the filename alone doesn't carry the date.
 _DATE_DIR_RE = re.compile(r"\d{8}")
+
+
+# Bytes that do not decode fail the same way however often they are read.
+_UNDECODABLE = (IndexError, ValueError, struct.error, UnicodeDecodeError)
+# So does an archive that cannot be unpacked, and a value either store
+# refuses as data.
+_PERMANENT = (*_UNDECODABLE, tarfile.TarError, EOFError, zlib.error, DataError, psycopg2.DataError)
+
+
+@dataclass
+class IngestReport:
+    """Why the files an archive ingest left unstored failed.
+
+    A transient failure (I/O, a store's error) is one a later run over the
+    same file can get past: it records the UTC day the file's archive name
+    carries in ``transient_days``, or counts it in ``transient_unplaced``
+    when the name carries none. A permanent one (see ``_PERMANENT``) is only
+    counted, since reading the file again cannot help.
+    """
+
+    transient_days: set[date] = field(default_factory=set)
+    transient_unplaced: int = 0
+    permanent: int = 0
+    # The first transient failure on each day, as `<type>: <message>`.
+    errors: dict[date, str] = field(default_factory=dict)
+
+    def record(self, exc: BaseException, utc_day: str | None) -> None:
+        if isinstance(exc, _PERMANENT):
+            self.permanent += 1
+            return
+        try:
+            day = datetime.strptime(utc_day or "", "%Y%m%d").date()
+        except ValueError:
+            self.transient_unplaced += 1
+            return
+        self.transient_days.add(day)
+        self.errors.setdefault(day, redact_urls_in_text(f"{type(exc).__name__}: {exc}")[:300])
+
+
+def _key_day(file_key: str) -> str | None:
+    head, sep, _ = file_key.partition("/")
+    return head if sep else None
 
 
 def _date_dir(name: str) -> str:
@@ -272,7 +321,16 @@ class IngestIncomplete(Exception):
         self.n_errors = n_errors
 
 
-def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None = None, strict: bool = False) -> int:
+def ingest(
+    folder: str,
+    agency_id: int,
+    conn,
+    ch_client,
+    *,
+    now: datetime | None = None,
+    strict: bool = False,
+    report: IngestReport | None = None,
+) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
     Dispatches to the agency's ingest strategy. Returns the number of rows
@@ -287,10 +345,54 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     its last members can land on a day that has not ended yet; those are
     left unmarked for a later run, which reads them once their day closes.
 
+    A day promotion already stored from the live path is refused, unless
+    the folder holds its complete archive: then the archive's rows replace
+    the live ones (pipeline.archive_replace). The whole run holds the
+    agency's `updates` lock, which analyze takes too, so analyze never reads
+    a day between the two while the run lasts. A run that dies between them
+    leaves the day with both sources; the next run whose folder reaches near
+    that day settles it: to its archive when that folder covers it, else to
+    its live copy. A day this run cannot settle raises
+    :class:`pipeline.archive_replace.ReplacementIncomplete` once every other
+    day is settled, unless *strict* raises :class:`IngestIncomplete` first.
+
     Raises :class:`StaticTimetableMissing`, having read and marked nothing,
     when the agency's strategy needs a timetable it does not have loaded.
+
+    A caller that passes *report* learns why each skipped file failed
+    (:class:`IngestReport`), so it can tell a file worth reading again from
+    one that never will be.
     """
     strategy_name = require_timetable(agency_id, conn)
+    try:
+        with agency_ingest_lock(conn, agency_id):
+            return _ingest_folder(
+                folder,
+                agency_id,
+                conn,
+                ch_client,
+                strategy_name,
+                now=now,
+                strict=strict,
+                report=report if report is not None else IngestReport(),
+            )
+    finally:
+        # The unlock opens a transaction; the run reads only, so it ends here.
+        if conn.get_transaction_status() == TRANSACTION_STATUS_INTRANS:
+            conn.commit()
+
+
+def _ingest_folder(
+    folder: str,
+    agency_id: int,
+    conn,
+    ch_client,
+    strategy_name: str,
+    *,
+    now: datetime | None,
+    strict: bool,
+    report: IngestReport,
+) -> int:
     strategy = get_ingest_strategy(strategy_name)
 
     root = pathlib.Path(folder)
@@ -352,24 +454,60 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     today = jst_date(now or datetime.now(timezone.utc))
     unclosed: set[date] = set()
     promoted: dict[date, bool] = {}
+    floor = retention_floor(conn, agency_id)
+    utc_days = archive_replace.tarball_days(tarballs)
+    covered = archive_replace.covered_days(utc_days, today)
+    replacing = archive_replace.candidates(ch_client, agency_id, covered, floor)
+    # The JST day each admitted file's rows land on.
+    stamped: dict[str, date] = {}
+    # Every member name the folder holds, stored, refused or already in the
+    # skip-list alike: settle counts a push whose member is among them as
+    # archived (pipeline.archive_replace).
+    read_members: set[str] = {f"{_date_dir(p.parent.name)}/{p.name}" for p in pb_loose}
+    # The days a failed file could have held rows of: none of them is replaced.
+    failed_days: set[date] = set()
 
     # A member is refused, and left unmarked, when its rows would land on a
     # JST day that has not closed, or on a day already holding rows promoted
-    # from the live path: a day in `updates` has one source, so it is not
-    # stored a second time under the archive's file names. Promotion refuses
-    # the mirror case.
-    def _refused(stamp: str) -> bool:
+    # from the live path that this folder cannot replace: a day in `updates`
+    # has one source, so it is not stored a second time under the archive's
+    # file names.
+    def _refused(stamp: str, file_key: str) -> bool:
         day = _jst_day(stamp)
         if day >= today:
             if day not in unclosed:
                 unclosed.add(day)
                 logger.info(f"  {day} has not closed yet; its archive files wait for a later run")
             return True
-        if day not in promoted:
-            promoted[day] = bool(days_with_source(ch_client, agency_id, {day}, live_sourced=True))
+        if day not in replacing:
+            if day not in promoted:
+                promoted[day] = bool(days_with_source(ch_client, agency_id, {day}, live_sourced=True))
+                if promoted[day]:
+                    logger.warning(
+                        f"  {day} already holds promoted live rows and this folder lacks its complete archive; "
+                        "its archive files are skipped"
+                    )
             if promoted[day]:
-                logger.warning(f"  {day} already holds promoted live rows; its archive files are skipped")
-        return promoted[day]
+                return True
+        stamped[file_key] = day
+        return False
+
+    def _failed(file_key: str | None, utc_day: str | None) -> None:
+        """Record the days a failed file could hold rows of: the one it was
+        stamped on, else both JST days its UTC day directory spans. With
+        neither known, every day this run would replace."""
+        if file_key in stamped:
+            failed_days.add(stamped[file_key])
+            return
+        if utc_day is None:
+            failed_days.update(replacing)
+            return
+        try:
+            day = datetime.strptime(utc_day, "%Y%m%d").date()
+        except ValueError:
+            failed_days.update(replacing)
+            return
+        failed_days.update({day, day + timedelta(days=1)})
 
     # Rows accumulate here across BOTH the tarball loop and the loose-.pb
     # loop below (shared, not reset between them) and are flushed to
@@ -455,6 +593,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                         n_inserted += insert_updates(ch_client, agency_id, file_rows)
                         done.add(file_name)
                     except Exception as e2:
+                        _failed(file_name, None)
+                        report.record(e2, _key_day(file_name))
                         # Broad catch is safe here (unlike the top-level gate
                         # above): this is a single one-shot attempt per file,
                         # never itself retried, so there's no risk of
@@ -475,6 +615,9 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                 # actually landed and re-buffers whatever didn't.
                 logger.error(f"  [ERROR] inserting batch of {len(pending_files)} files: {e}")
                 n_errors += len(pending_files)
+                for file_name in pending_files:
+                    _failed(file_name, None)
+                    report.record(e, _key_day(file_name))
         finally:
             pending_rows.clear()
             pending_files.clear()
@@ -497,6 +640,7 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                         inner_dir = pathlib.Path(m.name).parent.name
                         d = _date_dir(inner_dir) or date_dir
                         members.append((m, pb_name, d))
+                    read_members.update(f"{d}/{pb}" for _, pb, d in members)
                     # Checked before `seen` is consulted, not after: a member
                     # stamped before the bound is exactly the one a bounded
                     # skip-list cannot speak for.
@@ -519,12 +663,14 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                                     continue
                                 raw = fobj.read()
                                 ts = archive_captured_at(raw, d, pb_name)
-                                if _refused(ts):
+                                if _refused(ts, f"{d}/{pb_name}"):
                                     continue
                                 rows = strategy.parse_feed(raw, ts, f"{d}/{pb_name}", agency_id, conn)
                         except Exception as e:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
                             n_errors += 1
+                            _failed(f"{d}/{pb_name}", d or None)
+                            report.record(e, d or None)
                             continue
                         _buffer_parsed(f"{d}/{pb_name}", rows)
                         if j % 300 == 0 and j > 0:
@@ -539,6 +685,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
             except Exception as e:
                 logger.error(f"  [ERROR] {e}")
                 n_errors += 1
+                _failed(None, date_dir or None)
+                report.record(e, date_dir or None)
                 conn.rollback()
             conn.commit()
 
@@ -558,12 +706,14 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
                     with _savepoint(cur, "pb_file"):
                         raw = path.read_bytes()
                         ts = archive_captured_at(raw, d, path.name)
-                        if _refused(ts):
+                        if _refused(ts, f"{d}/{path.name}"):
                             continue
                         rows = strategy.parse_feed(raw, ts, f"{d}/{path.name}", agency_id, conn)
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
+                    _failed(f"{d}/{path.name}", d or None)
+                    report.record(e, d or None)
                     continue
                 _buffer_parsed(f"{d}/{path.name}", rows)
                 if j % 500 == 0:
@@ -577,11 +727,37 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     # or marked `done` at all.
     _flush()
 
+    # A day left holding both sources by a run that died before settling it
+    # goes back to its live copy here, in the first run whose folder reaches
+    # near it, unless this run's folder covers it.
+    span = {d for u in utc_days for d in (u, u + timedelta(days=1))} | set(stamped.values())
+    residue_failure: list[str] = []
+    try:
+        unfinished = archive_replace.residue(ch_client, agency_id, span, floor, today) - replacing
+    except Exception as exc:
+        logger.exception("  could not look for days an earlier run left with both sources")
+        residue_failure.append(f"looking for unfinished days: {type(exc).__name__}: {exc}")
+        unfinished = set()
+    rolled_back, unsettled = archive_replace.settle_all(
+        ch_client, agency_id, replacing, unfinished, read=read_members, failed=failed_days
+    )
+    unsettled = residue_failure + unsettled
+    # The rows rolled back can include an earlier run's, on an unfinished day.
+    n_inserted = max(0, n_inserted - rolled_back)
+
     if n_errors:
         logger.warning(f"Skipped {n_errors} files due to parse or insert errors — see log above for detail")
+    if rolled_back:
+        logger.warning(f"Rolled back {rolled_back} archive rows of days that keep their live copy")
     logger.info(f"\nDone: {n_inserted} new rows inserted")
+    if unsettled:
+        logger.error(f"Left {len(unsettled)} day(s) holding both sources: {'; '.join(unsettled)}")
     if strict and n_errors:
         raise IngestIncomplete(n_inserted, n_errors)
+    if unsettled:
+        raise archive_replace.ReplacementIncomplete(
+            f"agency {agency_id}: days left unsettled, holding both sources: {'; '.join(unsettled)}"
+        )
     return n_inserted
 
 
@@ -652,7 +828,7 @@ def ingest_live_payload(
 
     try:
         rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
-    except (IndexError, ValueError, struct.error, UnicodeDecodeError) as exc:
+    except _UNDECODABLE as exc:
         raise PayloadDecodeError(f"{file_name}: {type(exc).__name__}: {exc}") from exc
     n_inserted = insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
     conn.commit()

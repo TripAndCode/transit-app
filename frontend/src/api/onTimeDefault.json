@@ -1,0 +1,8 @@
+{
+  "default_preset": "standard_m1_p5",
+  "early_any": "any",
+  "presets": {
+    "legacy_60s": { "early_sec": null, "late_sec": 60 },
+    "standard_m1_p5": { "early_sec": 60, "late_sec": 300 }
+  }
+}

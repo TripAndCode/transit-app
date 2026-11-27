@@ -30,7 +30,9 @@ export AWS_LOG="$TEST_BASE/aws.log"
 # means "prefix lists as empty" (0 objects), not a shim error. `AWS_EXIT_
 # <prefix>` forces a nonzero exit for that prefix, simulating a listing
 # failure, and writes `AWS_ERR_<prefix>` (or a default message) to stderr so
-# tests can assert the script captures and logs it.
+# tests can assert the script captures and logs it. `AWS_EMPTY_<prefix>=1`
+# answers the way the real CLI answers a prefix holding no objects: exit 1
+# with nothing on stdout or stderr.
 cat > "$SHIM_DIR/aws" <<'SHIM'
 #!/usr/bin/env bash
 echo "$@" >> "$AWS_LOG"
@@ -43,6 +45,10 @@ if [ "$1" = s3 ] && [ "$2" = ls ]; then
     done
     prefix="${url#s3://*/}"
     key=$(printf '%s' "$prefix" | tr -c 'A-Za-z0-9' '_')
+    empty_var="AWS_EMPTY_${key}"
+    if [ "${!empty_var:-0}" = "1" ]; then
+        exit 1
+    fi
     exit_var="AWS_EXIT_${key}"
     if [ "${!exit_var:-0}" = "1" ]; then
         err_var="AWS_ERR_${key}"
@@ -70,7 +76,9 @@ run_metrics() {
 reset_env() {
     export LS_rt_=""
     export LS_static_=""
-    unset AWS_EXIT_rt_ AWS_EXIT_static_ AWS_ERR_rt_ AWS_ERR_static_ 2>/dev/null || true
+    export LS_vp_=""
+    unset AWS_EXIT_rt_ AWS_EXIT_static_ AWS_EXIT_vp_ AWS_ERR_rt_ AWS_ERR_static_ AWS_ERR_vp_ \
+        AWS_EMPTY_rt_ AWS_EMPTY_static_ AWS_EMPTY_vp_ 2>/dev/null || true
     rm -f "$SUCCESS_MARKER" "$OUT"
 }
 
@@ -341,4 +349,61 @@ if [ "$have_python3" -eq 1 ]; then
     python3 "$OPS_STATUS_PY" --validate "$OUT" || \
         fail "a not_applicable-r2 document must satisfy scripts/ops_status.py's own contract validator: $(cat "$OUT")"
     pass "a document with r2_state=not_applicable satisfies scripts/ops_status.py's contract validator"
+fi
+
+# --- VehiclePositions (vp/) -------------------------------------------------
+
+# vp/ is listed beside rt/ and static/, reported on its own, and counted in
+# the bucket total the thresholds classify.
+reset_env
+export LS_rt_="$(obj_line 100 rt/1/20261101.tar.gz)"
+export LS_static_="$(obj_line 200 static/8/gtfs_static_20261101.zip)"
+export LS_vp_=$'2024-01-01 00:00:00         30 vp/8/20261101.tar.gz\n2024-01-01 00:00:01         40 vp/9/20261101.tar.gz'
+run_metrics
+[ "$rc" -eq 0 ] || fail "a run with vp/ objects should exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q "s3://test-bucket/vp/" "$AWS_LOG" || fail "vp/ was never listed: $(cat "$AWS_LOG")"
+grep -q '"vp_object_count":2' "$OUT" || fail "vp_object_count missing/wrong: $(cat "$OUT")"
+grep -q '"vp_bytes":70' "$OUT" || fail "vp_bytes missing/wrong: $(cat "$OUT")"
+grep -q '"r2_bytes_total":370' "$OUT" || fail "r2_bytes_total should be rt+static+vp: $(cat "$OUT")"
+grep -q '"r2_state":"healthy"' "$OUT" || fail "a low-usage run with vp/ should stay healthy: $(cat "$OUT")"
+pass "vp/ objects are reported and counted in r2_bytes_total"
+
+# A bucket that never held a VehiclePositions day: the real CLI reports the
+# empty vp/ prefix as exit 1 with no output. That is zero objects, not a
+# failed listing, so a collector with no VP feed reports exactly as before.
+reset_env
+export LS_rt_="$(obj_line 100 rt/1/20261101.tar.gz)"
+export LS_static_="$(obj_line 200 static/8/gtfs_static_20261101.zip)"
+export AWS_EMPTY_vp_=1
+run_metrics
+[ "$rc" -eq 0 ] || fail "an empty vp/ prefix should exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"r2_state":"healthy"' "$OUT" || fail "an empty vp/ prefix must not fail the listing: $(cat "$OUT")"
+grep -q '"r2_listing_result":"ok"' "$OUT" || fail "an empty vp/ prefix is a complete listing: $(cat "$OUT")"
+grep -q '"vp_object_count":0' "$OUT" || fail "an empty vp/ prefix should report 0 objects: $(cat "$OUT")"
+grep -q '"r2_bytes_total":300' "$OUT" || fail "an empty vp/ prefix should add nothing to the total: $(cat "$OUT")"
+[ -f "$SUCCESS_MARKER" ] || fail "an empty vp/ prefix withheld the success marker"
+pass "an empty vp/ prefix (exit 1, no output) is zero objects, not a failure"
+
+# A vp/ listing that errors is a failed listing, like rt/ or static/.
+reset_env
+export LS_rt_="$(obj_line 100 rt/1/20261101.tar.gz)"
+export LS_static_="$(obj_line 200 static/8/gtfs_static_20261101.zip)"
+export AWS_EXIT_vp_=1
+export AWS_ERR_vp_="An error occurred (AccessDenied) when calling the ListObjectsV2 operation"
+run_metrics
+[ "$rc" -eq 0 ] || fail "a vp/ listing failure should still exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q '"r2_state":"failed"' "$OUT" || fail "a vp/ listing error should report r2_state=failed: $(cat "$OUT")"
+grep -q '"vp_object_count":null' "$OUT" || fail "a failed vp/ listing should report null: $(cat "$OUT")"
+grep -q '"rt_bytes":100' "$OUT" || fail "rt/ should still report its real bytes: $(cat "$OUT")"
+grep -q "listing vp/ failed: .*AccessDenied" "$TEST_BASE/out.log" \
+    || fail "the vp/ listing error was not logged: $(cat "$TEST_BASE/out.log")"
+pass "a vp/ listing error reports r2_state=failed with vp numbers null"
+
+if [ "$have_python3" -eq 1 ]; then
+    reset_env
+    export LS_vp_="$(obj_line 30 vp/8/20261101.tar.gz)"
+    run_metrics
+    python3 "$OPS_STATUS_PY" --validate "$OUT" || \
+        fail "a document with vp/ details must satisfy scripts/ops_status.py's contract validator: $(cat "$OUT")"
+    pass "a document with vp/ details satisfies scripts/ops_status.py's contract validator"
 fi

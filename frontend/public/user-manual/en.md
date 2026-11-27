@@ -10,15 +10,15 @@ The screenshots were taken with real data from Aomori City Bus (青森市バス)
 
 1. [Choosing an agency](#1-choosing-an-agency)
 2. [Finding your way around](#2-finding-your-way-around)
-3. [The scope sentence: what a screen shows](#3-the-scope-sentence-what-a-screen-shows)
+3. [The scope bar: what a screen shows](#3-the-scope-bar-what-a-screen-shows)
 4. [Pulse — the period at a glance](#4-pulse--the-period-at-a-glance)
 5. [Routes — which routes run late](#5-routes--which-routes-run-late)
 6. [Time — when delay happens](#6-time--when-delay-happens)
 7. [Why — what the data can explain](#7-why--what-the-data-can-explain)
-8. [Compare — side by side](#8-compare--side-by-side)
+8. [Day types & agencies — side by side](#8-day-types--agencies--side-by-side)
 9. [Live — the trips running now](#9-live--the-trips-running-now)
 10. [Reports — documents to hand on](#10-reports--documents-to-hand-on)
-11. [Ask — questions with ready answers](#11-ask--questions-with-ready-answers)
+11. [Notebook — ready-made analyses](#11-notebook--ready-made-analyses)
 12. [Model evaluation — how the forecast model is checked](#12-model-evaluation--how-the-forecast-model-is-checked)
 13. [Glossary](#13-glossary)
 
@@ -34,7 +34,7 @@ When you open the app, it first asks which agency (bus operator) you want to loo
 - How far the data reaches is shown once, above the cards (“Data through …”). An agency whose updates stopped several days before the others reads “No updates after …”. An agency whose data has not started arriving reads “No data collected yet”.
 - Within a prefecture, agencies with data come first in name order, followed by those whose updates stopped and those with no data.
 - When there are many agencies, a “Search by agency name” box appears above the cards.
-- The language switch in the top-right corner changes the display language. The links at the bottom open Help, About this app and Sign in.
+- The language switch in the top-right corner changes the display language. The links at the bottom open Help, About this app and Admin sign-in.
 
 Click a card to open that agency’s **Pulse** screen (section 4). The app remembers your choice: the next time you open it, it goes straight to that agency’s Pulse. When only one agency is set up, this screen is skipped.
 
@@ -58,14 +58,14 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Routes** | Which routes run late or on time, and how one route looks stop by stop |
 | **Time** | When delay happens: by day, by hour and by day of the week |
 | **Why** | Where the time goes: waiting at stops or running between them |
-| **Compare** | Weekdays against weekends and holidays route by route, and agencies against each other |
+| **Day types & agencies** | Weekdays against weekends and holidays route by route, and agencies against each other |
 | **Live** | The trips running now |
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
-| **Ask** | Ready-made questions, answered as tables and charts |
+| **Notebook** | Ready-made analyses of delay, run as tables and charts, saved as investigations you can export |
 
-Under **Other** are **Help** (this manual) and **About this app**; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
+Under **Other** are **Help** (this manual) and **About this app**, plus **Send feedback** when this site offers a way to send it; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
 
-The account menu at the bottom of the sidebar (your name, or **Guest**) holds sign-in, the display **Language** and the **Appearance** (follow the system, light or dark).
+The account menu at the bottom of the sidebar (your name, or **Guest**) holds the admin sign-in, the display **Language** and the **Appearance** (follow the system, light or dark).
 
 ### My routes
 
@@ -75,30 +75,30 @@ A route you check often can go into **My routes** in the sidebar: press **Pin**,
 
 The field at the top of every agency screen, “Search routes, reports and screens”, opens a search box (shortcut ⌘K on a Mac, Ctrl+K elsewhere). Type to jump to a screen, an agency, a route, a report or a time band.
 
-Next to it, “Analyzed through …” shows the last service day the reports include. Click it to see “How fresh the data is”: how far the reports reach, when the last live reading arrived, and how many readings were set aside as implausible; the figures on screen already leave those out. Days without readings are left out, not counted as on time.
+Next to it, “Analyzed through …” shows the last service day the reports include. Click it to see “How fresh the data is”: how far the reports reach, when the last live reading arrived, and how many readings were set aside as implausible; the figures on screen already leave those out. Days without observations are left out, not counted as on time.
 
 ### On a phone
 
-On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Help and the account menu; an administrator also sees Model evaluation there.
+On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Notebook** and **More**. **More** holds the agency menu, the other screens, Help and the account menu; an administrator also sees Model evaluation there.
 
 ### Notices at the top
 
-On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
+On Pulse, Routes, Time, Why and Day types & agencies, a notice can appear above the screen:
 
 - “Data is out of date — last ingest: …” appears when no new reading has arrived for a day or more. Data collection is running behind; the app itself is working. Close the notice with ×.
 - “… implausible readings are left out of the figures. The figures shown already exclude them.” appears when 0.1% or more of the readings over the last 7 analyzed days were set aside as implausible (likely a stuck or stale feed). Below that there is no notice, and the count appears only under “How fresh the data is”. × dismisses it.
 
 ---
 
-## 3. The scope sentence: what a screen shows
+## 3. The scope bar: what a screen shows
 
-**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends/holidays), and the period summary and council report in **Reports**, open with one sentence that says what the screen is counting (the delay record for reference has none, since the date and route chosen on it are its conditions). With the default conditions it reads like this:
+**Pulse**, **Routes**, **Time**, **Why** and **Day types & agencies** (weekdays and weekends/holidays), and the period summary and council report in **Reports**, open with a bar that shows the conditions the screen is counting under (the delay record for reference has none, since the date and route chosen on it are its conditions). With the default conditions, Pulse’s bar reads like this:
 
-> Viewing all routes of (agency), (period), every day, all hours, counting on-time as within 1 min
+> Period [(period) 30 days ▾]  Days [All ▾]  Time [All day ▾]  Routes [All ▾]
 
-![The scope sentence with its period open](./03-scope-sentence.en.png)
+![The scope bar with its period open](./03-scope-bar.en.png)
 
-Each button with a ▼ is a condition. Click it to change it; the screen updates at once. A condition changed from its default shows in blue, and the period also shows how many days it covers.
+Each condition is a label followed by a button with a ▾ that shows its current value. Click the button to change it; the screen updates at once. A condition changed from its default shows in blue, and the period also shows how many days it covers. The bar shows only the conditions the screen uses (see below): a screen that counts on-time departures, such as **Routes**, also shows **On time** [within 5 min ▾].
 
 | Condition | What you can choose |
 |---|---|
@@ -106,40 +106,45 @@ Each button with a ▼ is a condition. Click it to change it; the screen updates
 | Period | “Last 7 days”, “Last 14 days”, “Last 30 days” or “Since collection began”; a span dragged across the small daily chart; or exact “From” and “To” dates |
 | Days and timetable | “All”, “Weekdays”, “Weekend” or single days of the week, and a “Timetable type” |
 | Time of day | “All hours”, or a time band such as “Morning (05–09)” or “Evening (17–20)” |
-| On-time tolerance | How late a departure can leave and still count as on time (“Counted on time up to”): 1, 3 or 5 min, each shown with the on-time share it gives |
+| On-time tolerance | How late a departure can leave and still count as on time (“Counted on time up to”): 1, 3 or 5 min (5 min by default), each shown with the on-time share it gives. Under it, “Early departures” chooses whether a departure more than 1 min early is not on time (the default) or every early departure counts as on time. The default pair is the industry standard, counting departures from 1 min early to 5 min late as on time; “Count early departures as on time” with 1 min is the legacy definition, up to 1 min late with every early departure on time |
 
 The “Timetable type” choices follow the agency’s own timetable: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. Each day counts under the timetable the agency’s schedule ran that day, so a public holiday falls under the Sunday or weekend one.
 
-By default a screen covers the 30 days up to the latest complete day with data, and the period choices end on that day too. A timetable type, and a stop, direction or early-departure allowance set by a link, join the sentence as extra conditions. On a screen that does not count on-time departures, the sentence ends before the on-time part.
+By default a screen covers the 30 days up to the latest complete day with data, and the period choices end on that day too. A timetable type, a stop, direction or early-departure allowance set by a link, and “Count early departures as on time” each add their own condition to the bar: **Timetable**, **Stop**, **Direction** and **Early**. A link or saved view that sets only one of the late and early tolerances takes the default for the other (5 min late, 1 min early).
 
-Once you change any condition from its default, **Reset** appears at the end of the sentence and returns every condition to its default.
+Once you change a condition in the bar from its default, **Reset** appears at the end of the bar and returns the conditions in the bar to their defaults. A condition the screen leaves out keeps its value, and on a route’s page the route stays.
 
 To the right of the screen's heading:
 
-- **Saved views ▾** lists the views you have saved. Each shows its conditions under its name, and the one matching the current conditions has a ✓. Pick one to switch to it, or × to delete it. “Save current conditions” fills in a name suggested from the current conditions; keep it or change it, then press “Save”. Saving needs an account: signed out, it reads “Saved views” with the hint “Sign in to save”.
-- **Show all filters** lays out the controls for every condition in a row under the sentence. It stays on until you turn it off.
+- **Saved views ▾** lists the views you have saved. Each shows its conditions under its name, and the one matching the current conditions has a ✓. Pick one to switch to it, or × to delete it. “Save current conditions” fills in a name suggested from the current conditions; keep it or change it, then press “Save”. Views are kept in this browser, so no account is needed to save one.
+- **Show all filters** lays out the controls for every condition in the bar in a row under it. It stays on until you turn it off.
 
-A condition the screen does not use is struck through, and a line under the sentence names it, for example “Not used on this screen: Days and timetable”. The weekday and weekend reports, for instance, choose their own days.
+A condition the screen does not use is left out of the bar rather than applied. The weekday and weekend reports, for instance, choose their own days, so their bar has no **Days**.
 
 Each screen keeps its own conditions while this browser tab stays open, so changing the period on **Routes** does not change it on **Time**. The conditions are also part of the page address, so a copied link opens the same view.
 
-Live, Ask, a route’s page and the agency comparison have their own filters, described in their sections.
+Live, a route’s page, the agency comparison and the notebook use the same bar and the same controls, each showing only the conditions it uses; their sections describe them. None of the four has **Saved views** or **Show all filters**.
 
 ---
 
 ## 4. Pulse — the period at a glance
 
-Pulse is the screen an agency opens on. It sums up the period in the scope sentence.
+Pulse is the screen an agency opens on. It sums up the period in the scope bar.
 
 ![Pulse](./02-pulse.en.png)
 
-- The sentence at the top gives the average delay over the latest days (usually 7), the average over the same number of days just before them, and the change between the two in minutes and percent. The tag in front of it says “+… min on the … days before”, “−… min on the … days before” or “About the same as the … days before”. It says “about the same” only for a change under 0.1 min or under 5% of the earlier average. The ⓘ icon explains the comparison.
+The first time you open Pulse, a three-step tour explains what a delay is here, what on time means, and what the screen counts. “Later” closes it for now; “Got it” or × finishes it, and it does not come back in this browser.
+
+The ⓘ beside the average delay, beside each of the three rows next to it and beside the **Routes to check** heading gives that figure’s definition in a sentence or two, with a link to this manual for more.
+
+- The sentence at the top gives the average delay over the period named in the scope bar (through its last day with data), the average over the same number of days just before it, and the change between the two in minutes and percent. The tag in front of it says “+… min on the … days before”, “−… min on the … days before” or “About the same as the … days before”. It says “about the same” only for a change under 0.1 min or under 5% of the earlier average. The ⓘ icon explains the comparison.
 - A sentence about the latest day appears when the period’s last day is among the three slowest days observed in the period, with its average and its place. A day observed less than half as often as a usual day of its type (one collected only in part) is not ranked.
-- “Average delay, last … days (…)”: the average delay in minutes, drawn over a small line of the daily values.
-- The feed’s status, under the average delay: “Reporting live”, “Feed quiet for …” or “No reports yet”, with the time of the last report.
-- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging … min or more late” (how many routes averaged at least a set number of minutes late, out of the routes observed 100 or more times over the latest days: the same number as the “… averaging … min or more late” heading of **Routes to check** below, when that heading appears). Click a row to open the card that explains it; “Averaging … min or more late” takes you to **Routes to check**.
-- **Routes to check**: of the routes observed 100 or more times over the latest days, the most delayed, grouped by how late they ran on average. A route observed fewer times is left out, since a handful of trips can swing its average. Only the top routes are listed. When a group holds more routes than are listed, its heading gives the full count and says how many are shown (“top … shown”). Each row’s “vs last week” is its change from the same number of days before (missing for a route observed too little then). Each row’s bar shows its average delay in the same five colour steps as every other screen, with the legend below the list. Click a route to open its page (section 5-6), or “See all … routes” to open the **Routes** table (section 5-3) over the same days, sorted by average delay, worst first. “No routes need attention” means none qualifies.
-- **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and how the day types compare: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. A day’s type is the timetable the agency’s schedule ran that day. A day type with too few days or observations shows “Not enough data” and is left out of the comparison. Click a card for a larger view. In **Worst hour of day**, click an hour to list the routes that ran late then.
+- “Average delay over … days (…)”: the period’s average delay in minutes, drawn over a small line of the daily values. “See the trend on Time →” opens the full trend on **Time** (section 6) for the same period and conditions.
+- “Past 90 days (…): average delay”: the average delay over the 90 days up to the day before the period starts, a guide to this agency’s usual level. It keeps the scope bar’s days of the week, time of day, timetable and routes, and is worked out the same way as the period’s average delay. When the feed missed some days, it says how many days had data. The tag beside it says “Better than the past 90 days”, “About the same as the past 90 days” or “Worse than the past 90 days”, with “about the same” by the same rule as the sentence at the top: a difference under 0.1 min, or under 5% of the past 90 days’ average. When either average is below 0 min (departures running early), it is not judged better or worse. When the feed has data on fewer than four in five of the days the conditions select (an agency collected only recently, or a long outage), or there are fewer than 100 observations, no figure is shown and the line says why. With both a time of day and routes chosen, the past 90 days are not compared. When the sentence at the top compares with “the 90 days before”, those are the same 90 days, so this line is left out. The ⓘ icon explains how it is worked out.
+- The feed’s status, under the average delay: “Reporting live”, “No reports for …” or “No reports yet”, with the time of the last report.
+- Three rows beside the average delay: “Heaviest hour”, “Share of delay in the top … routes” (the part of all delay the top routes carry) and “Averaging … min or more late” (how many routes averaged at least a set number of minutes late, out of the routes observed 100 or more times in the period). “Heaviest hour” opens **Time** (section 6) for the same period and conditions, where every hour is shown by day; “Share of delay …” opens a larger view of **Delay concentration**; “Averaging … min or more late” takes you to **Routes to check**.
+- **Routes to check**: the first five rows of the **Routes** table (section 5-3) for the period and conditions, sorted by average delay, worst first, with the same routes and figures. Only routes observed 100 or more times are listed, since a handful of trips can swing an average. Click a route to open its page (section 5-6), or “See all … routes” to open the **Routes** table over the same days and conditions, with these routes at its top. “No routes need attention” means none qualifies.
+- **Delay concentration**, **Worst hour of day** and **By service day**: whether delay sits with a few routes, which hour runs latest, and each day type’s average delay with the slowest named: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. A day’s type is the timetable the agency’s schedule ran that day; a day type with too few days or observations shows “not enough data” and is left out of the comparison. Click **Delay concentration** for a larger view. **Worst hour of day** links to **Time** (section 6), which shows every hour by day, and **By service day** to **Day types & agencies** (section 8), which compares weekdays with weekends and holidays route by route; both open for the same period and conditions.
 
 If the period has no observations, the screen says so and suggests a change to the conditions.
 
@@ -149,15 +154,15 @@ If the period has no observations, the screen says so and suggests a change to t
 
 ### 5-1. The report screens
 
-**Time**, **Why** and **Compare** (weekdays and weekends/holidays) share one layout, as do the council report and the delay record (for reference) in **Reports**. **Routes** holds every route in one table instead (5-3).
+**Time** and the council report and the delay record (for reference) in **Reports** share one layout. **Why** and **Day types & agencies** (weekdays and weekends/holidays) each show their one report across the whole page, with no list beside it, and **Routes** holds every route in one table (5-3).
 
 | Area | Where | What it holds |
 |---|---|---|
-| Scope sentence | Top | The conditions the report counts (section 3) |
+| Scope bar | Top | The conditions the report counts (section 3) |
 | Report list | Left | This screen’s reports in groups such as “Rankings” and “Punctuality”, each with a one-line description |
 | Report | Center | The chosen report: a table or charts, the period it covers (“Range: …”), and **Download CSV** where the report has rows to export |
 
-A screen opens with its first report already showing; click another in the list to switch. On a phone, the list becomes a drop-down above the report.
+A screen with a list opens with its first report already showing; click another in the list to switch. On a phone, the list becomes a drop-down above the report.
 
 If a report takes a while to count, after a few seconds it says “Still working on it…”. For a period longer than a week it says “Still working: a long period takes longer to count.” and offers **Narrow to the last 7 days of the period**.
 
@@ -185,9 +190,12 @@ The columns:
 
 - **Route**: click a name to open that route’s page (5-6). Where several routes share a name, where each runs is shown beside it.
 - **Avg (min)**: the average delay.
-- **On-time %**: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A “wide margin” mark means the rate’s 95% interval is wider than ±5 points, so the percentage is hard to trust. The interval depends on the rate as well as on the number of departures, and widens as the rate nears 50%. Point at or focus the mark to see that route’s margin in points.
+- **On-time %**: the share of departures that left within the on-time tolerance in the scope bar. Closer to 100% is better. A “wide margin” mark means the rate’s 95% interval is wider than ±5 points, so the percentage is hard to trust. The interval depends on the rate as well as on the number of departures, and widens as the rate nears 50%. Point at or focus the mark to see that route’s margin in points.
+- **Early (> 1 min)**: the share of departures that left more than 1 minute early. When the scope sets an early tolerance, it is the share that left earlier than that, and the header names it.
 - **Share over 5 min** and **Over 5 min (count)**: the departures that left more than five minutes late, as a share and as a count.
-- **Samples**: the number of observations behind the row. Fewer samples mean less certainty.
+- **Observations**: the number of observations behind the row. Fewer observations mean less certainty. It is a statistic, so it shows only once **Show statistics** above the table is ticked. The choice is remembered in this browser and applies to the tables that hide statistics: this one, the day-type reports (6-2), **Why**’s tables (7), “Headway quality” (5-5), the period summary (10-1) and shared snapshots. **Download CSV** is unchanged: the CSV always has every column. The “wide margin” and “few data” marks show either way; while the observation counts are hidden, “few data” sits on the figures they qualify.
+
+“Better”, “About the same” and “Worse” beside an on-time rate compare it with the route’s own past 90 days: the 90 days up to the day before the period starts. The past 90 days’ rate keeps the scope bar’s days of the week, timetable and routes and its on-time definition, and is worked out the same way as the table’s. Point at or focus the mark to see that rate. When the feed missed some days, it says how many days had data. A difference under 1 point reads “about the same”. An on-time rate is already a share, so unlike **Pulse**’s average delay it is not judged by a percentage of the past 90 days’ figure. A route observed fewer than 100 times in those days has no mark. When the feed has data on fewer than four in five of the days the conditions select (an agency collected only recently, or a long outage), no route is marked and the line above the table says why. With a time of day chosen, or an on-time window that is not aggregated, the past 90 days are not compared either. The ⓘ icon beside the line above the table explains how it is worked out.
 
 **Sort by** picks the figure the table is sorted by:
 
@@ -204,19 +212,28 @@ If you are not sure where to start, sort by **Average delay** to see which route
 
 ### 5-4. Which routes the table lists
 
-Routes observed fewer than 100 times in the period are left out, whatever the sort, so a route seen on only a handful of trips cannot top the table. Tick “Include routes observed fewer than 100 times” to list those routes too; their samples carry a “few data” badge.
+Routes observed fewer than 100 times in the period are left out, whatever the sort, so a route seen on only a handful of trips cannot top the table. Tick “Include routes observed fewer than 100 times” to list those routes too; they carry a “few data” badge, on their observation count, or on the figure the table is sorted by while statistics are hidden.
 
 The table also leaves out route codes the current timetable no longer runs, and routes whose feed always reports zero delay (a feed that repeats the timetable instead of reporting delay says nothing about punctuality). When it leaves any out, “Left out by default:” above the table shows a tick box per reason with how many, and ticking one brings them back. The counts stay the same whatever the sort or the number of rows shown.
 
-The table shows the top 50 routes. When more qualify, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. Under the table, a line says what counted as on time (for example “On time = no more than 1 min late (early departures count as on time).”) and what “over 5 min” counts.
+The table shows the top 50 routes. When more qualify, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. Under the table, a line says what counted as on time (with the default conditions, “On time (industry standard) = no more than 5 min late and no more than 1 min early.”) and what the early-departure rate and “over 5 min” count.
 
-**Download CSV** downloads the rows the table shows, in the table’s order.
+**Download CSV** downloads the rows the table shows, in the table’s order. Its last two columns are the past 90 days’ on-time rate and, where there is none, why.
+
+When the agency has set targets for its routes (on-time rate, excess wait, service delivered or vehicle-km delivered), “Minimum performance standard” follows the table under every sort. It gives each target’s actual figure and says “Meets standard” or “Below standard”. An on-time target is judged against the on-time rate the table shows, over the same period and filters and with the same definition of on time, which the panel names beneath it. A route observed fewer than 100 times, or one whose feed always reports zero delay, is not judged, and the panel says which, with the number of observations. A route’s own page shows its on-time rate from 21 observations, so it can show a rate its panel does not judge. Admins set the targets under **Agencies**.
+
+A service-delivered or vehicle-km target is judged on the route’s own service delivered: the share of the route’s planned trips the feed did not report as not run, never the agency’s figure or another route’s. It reads the period alone, not the table’s other filters, and a line under the table says so. Vehicle-km delivered is the same share, and is not judged where the timetable has no route shapes (shapes.txt). The panel also leaves a route unjudged, and says why, when:
+
+- the agency’s service delivered isn’t shown (the panel gives its reason, such as “this feed doesn’t report cancellations”);
+- a day in the period has no record of its planned trips by route;
+- the route has fewer than 100 planned trips in the period (the panel gives the number);
+- the route is observed fewer than 100 times, or its feed always reports zero delay.
 
 ### 5-5. Sorted by on-time rate
 
 ![On-time rate](./08-routes-ontime.en.png)
 
-Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often, and by “Minimum performance standard” when the agency has set targets for its routes.
+Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often. It shows “Excess wait” and “Long-gap rate”; its “Spacing CoV” and “Observations” columns show with **Show statistics** ticked, here and on **Why**. A route observed fewer than 100 times carries “few data” either way.
 
 ### 5-6. A route’s own page
 
@@ -224,7 +241,9 @@ Clicking a route’s name — in a report, in **Routes to check** on Pulse, or i
 
 - At the top, “Routes / (route name)” leads back to the list, and the page states its question: “Where does delay build up?”. **Pin**, to the right of the heading, adds the route to **My routes** in the sidebar (chapter 2).
 - Below it are the route’s mean delay (and its place among the agency’s routes, most delayed first), on-time rate, share over 5 minutes late and share of all lateness — the same figures as the **Routes** lists. “This route by time of day” and “Why this route runs late” open **Time** and **Why** for this route.
-- The filters under it — “Route”, “Service pattern”, “From”, “To”, “Days” and “Time” — take effect when you press **Apply**. Until then the page says “Changes not applied yet”.
+- Under the mean delay and the on-time rate are the route’s own past 90 days and a tag saying “Better than the past 90 days”, “About the same as the past 90 days” or “Worse than the past 90 days”. They are worked out as on the **Routes** table (5-3). “About the same” is judged for the on-time rate as on that table (a difference under 1 point), and for the mean delay as on **Pulse** (chapter 4: a difference under 0.1 min, or under 5% of the past 90 days’ average). A shorter mean delay and a higher on-time rate are better. When the past 90 days cannot be compared, the line under the on-time rate says why.
+- When the route has targets, “Minimum performance standard” follows, with this route’s targets alone (5-4).
+- The scope bar under it (chapter 3) sets the page’s conditions. Its **Routes** condition names this route; pick another route there and press **Apply** to move to that route’s page, or pick several to open them in the **Routes** table. A condition that nothing on the page uses, such as a stop chosen on another screen, is left out of the bar.
 - **Delay by stop** shows the mean departure delay at each stop. When the route runs more than one path, pick one under “Path”; “Other direction” switches to the path running the other way. The page says what share of the route’s observations the path holds.
 - A sentence names the segment where delay grows most, and the next largest, and the chart marks the largest. A segment’s increase is the mean change for the same trips observed at both of its stops. The segment from the first stop is left out, since most feeds report a first departure as on time.
 - Tick “Compare with the previous period” to add the same number of days just before the selected ones (for Sep 24 – Oct 23, Aug 25 – Sep 23).
@@ -232,6 +251,20 @@ Clicking a route’s name — in a report, in **Routes to check** on Pulse, or i
 - **Download CSV** downloads the stop figures. **Save analysis** keeps these conditions in this browser, to reopen from **Reports → Saved analyses** (section 10-2).
 
 The figures are means along the chosen path. They show where delay builds up; they do not by themselves establish its cause.
+
+### 5-7. Report cards
+
+For admins, a route’s page shows its **Report card**: one grade, A to F, for a calendar month, by default the newest month whose every day has closed. Pick another month above the card. **Routes → Report cards** lists every route’s grade for a month, with **Download CSV**.
+
+- A route scheduled every 12 minutes or more often (high-frequency) is graded on “Excess wait” and “Bunching”, the share of gaps under a quarter of the planned headway, and takes the worse of the two. Any other route is graded on its on-time rate and its early departures, and takes the worse.
+- “Service delivered” under 95% holds the grade at D at best, and under 90% makes it F.
+- Each figure has its own letter and a 95% interval (excess wait and bunching have none). A figure the route is not graded on is shown in grey.
+- “For the next grade” names each figure that must improve, and to what (such as “Bunching 9.0% → 5.0%”).
+- The last three months’ grades sit beside it.
+- “N/A” comes with its reason: the route was not observed that month, was observed fewer than 100 times, too few of its planned trips were observed, its on-time interval is too wide, or a figure its grade needs is missing (bunching before it was recorded, a feed that reports no cancelled trips, or fewer than 100 planned trips, under which service delivered is not judged). A missing figure never counts as a pass.
+- **Print card** prints the card alone on one page, with how its figures were calculated.
+
+The thresholds and their sources are in the methodology. The figures are computed from the operator feed’s predictions.
 
 ---
 
@@ -247,13 +280,13 @@ Time holds **Trend**, **Routes on weekdays**, **Routes on weekends and holidays*
 - The daily chart: the average delay day by day, with a dashed 7-day average and a “Schedule change” mark where a new timetable took effect. A rising line means delays are growing. Drag across the chart to narrow the period (“Drag across the chart to narrow the period”); “Reset period” undoes it.
 - **Time-band heatmap**: hours 0–23 down the side, dates along the bottom. Darker means more delay. Click a cell to narrow the screen to that day and time band.
 
-The shading has five steps, “under 1.5 min”, “1.5–2.5 min”, “2.5–3.5 min”, “3.5–5 min” and “5 min or more”, shown in each chart’s legend; the same minutes are the same colour on every screen. The time bands are the same as the scope sentence’s time-of-day choices: late night 0–5h, morning 5–9h, late morning 9–12h, midday 12–14h, afternoon 14–17h, evening 17–20h and night 20–24h.
+The shading has five steps, “under 1.5 min”, “1.5–2.5 min”, “2.5–3.5 min”, “3.5–5 min” and “5 min or more”, shown in each chart’s legend; the same minutes are the same colour on every screen. The time bands are the same as the scope bar’s time-of-day choices: late night 0–5h, morning 5–9h, late morning 9–12h, midday 12–14h, afternoon 14–17h, evening 17–20h and night 20–24h.
 
 A trend needs more than one day. For a one-day period, only the heatmap is shown, with a suggestion to pick a longer period.
 
 ### 6-2. Routes on weekdays, and on weekends and holidays
 
-Each route’s average delay (“Avg (min)”, with “Samples”) on the days the agency ran its weekday timetable, or its weekend or holiday timetable. Each day goes by the timetable the agency ran that day, so a public holiday on a weekday, or a weekday the timetable runs as a holiday (such as Obon), counts as a weekend or holiday. Compare the two to see which routes run later on weekends and holidays. These reports choose their own days, so a days or timetable condition in the scope sentence shows as not used.
+Each route’s average delay (“Avg (min)”, and “Observations” with **Show statistics** ticked; a route observed fewer than 100 times carries “few data” either way) on the days the agency ran its weekday timetable, or its weekend or holiday timetable. Each day goes by the timetable the agency ran that day, so a public holiday on a weekday, or a weekday the timetable runs as a holiday (such as Obon), counts as a weekend or holiday. Compare the two to see which routes run later on weekends and holidays. These reports choose their own days, so their scope bar has no days or timetable condition.
 
 ### 6-3. Route forecast
 
@@ -270,7 +303,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ![Why, for a feed whose arrival times can’t be taken in](./09-why.en.png)
 
-**Dwell/running time** shows, for each route, the dwell at stops (“Dwell avg”, “Dwell p50”, “Dwell p90”) and the time spent running between them (“Running avg”, “Running p50”, “Running p90”), in seconds, with the number of observations behind each. These are the times actually taken, not delays (chapter 13).
+**Dwell/running time** shows, for each route, the average dwell at stops (“Dwell avg”) and the average time spent running between them (“Running avg”), in seconds. Tick **Show statistics** to add their medians and 90th percentiles (“Dwell p50”, “Dwell p90”, “Running p50”, “Running p90”) and the number of observations behind each. An average resting on fewer than 100 observations carries “few data” either way. “Rain vs. dry average delay” shows its observation counts with **Show statistics** ticked too. These are the times actually taken, not delays (chapter 13).
 
 - Beside it are “Rain vs. dry average delay”, which compares days with and without rain, and “Headway quality”, which covers the high-frequency routes.
 - The analyses that can be shown come first. The rest are gathered under “Analyses not shown” at the end, each with one of these marks and a sentence giving the reason:
@@ -281,13 +314,23 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
   - “Not set up”: no weather station is set up for the agency.
   - “Not applicable”: the timetable has no route scheduled every 12 minutes or more often.
 - When dwell/running time can’t be shown, **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1) are offered.
-- The split cannot be narrowed to one time band. With a time band chosen, the report says so; choose “All hours” in the scope sentence to see it.
+- The split cannot be narrowed to one time band. With a time band chosen, the report says so; choose “All hours” under **Time** in the scope bar to see it.
+
+### 7-1. Slow segments
+
+Choose **Slow segments** in the switch at the top to see, on a map, how far the running time between each pair of stops (a segment) exceeds the timetable. The routes through a segment are taken together.
+
+- Choose the **Days** (weekdays, or weekends and holidays) and the **Departure time band**. The period is the newest 8 complete weeks. This view does not follow the period or routes of the scope bar.
+- A line is darker the more the newest week exceeds the timetable, and faint where there were too few runs. Segments that stayed slow are drawn wider. Click a line for its median, scheduled running time, speed and more.
+- “Segments that stayed slow” lists the segments whose median running time stayed over the timetable for several weeks in a row, up to the newest (the thresholds are in the methodology). They are listed longest-standing first, with the minutes lost per day and the weekly excess. **Download CSV** saves the same list.
+- Speed uses the straight line between the two stops, so it reads low on a winding road.
+- The values are feed-based estimates. Until the predictions are validated, segments are not ranked as bus-priority candidates. The methodology gives each definition.
 
 ---
 
-## 8. Compare — side by side
+## 8. Day types & agencies — side by side
 
-Two buttons at the top switch between **Weekdays and weekends/holidays** and **Agencies**.
+Four buttons at the top switch between **Weekdays and weekends/holidays**, **Agencies**, **Planned departures** and **Transfers**.
 
 ### 8-1. Weekdays and weekends/holidays
 
@@ -297,46 +340,69 @@ Two buttons at the top switch between **Weekdays and weekends/holidays** and **A
 
 ![Compare agencies](./10-compare-agencies.en.png)
 
-“Compare agencies” lists every agency for the dates in “From” and “To”, latest-running first (“Average delay — lower is better”). An agency whose data stopped reads “No updates after Oct 14” or similar, as on the agency picker, and comes after the agencies whose data is current. The agency selected in the sidebar carries a “Viewing” badge.
+“Compare agencies” lists every agency over the period in the scope bar above the list; click the period to change it, as in chapter 3. The comparison uses the period alone, so the bar shows only **Period**, and a condition chosen on another screen, such as routes or days of the week, is left out rather than applied. It ranks only the agencies whose data supports a comparison, latest-running first (“Average delay — lower is better”). An agency whose data stopped reads “No updates after Oct 14” or similar, as on the agency picker, and comes after the agencies whose data is current. The agency selected in the sidebar carries a “Viewing” badge.
 
-Each row shows “Avg delay (min)” with its bar, “On-time %”, “Planned trips”, “Service delivered %”, “Vehicle-km delivered %” and “Samples”. Every bar shares one axis, 6, 12, 18 or 24 minutes, whichever holds the latest-running agency. Where an agency has data for only part of the period, its own dates are shown too. Planned trips are the trips the timetable planned over the period; where a timetable plans only some of its days, the figure says so, such as “16/30 days a timetable plans”. Where Service delivered % cannot be shown, “—” is followed by the reason (“no timetable plans this period”, “this feed format cannot report cancellations”, “the feed is not yet checked for cancellations” or “this feed doesn't report cancellations”). Vehicle-km delivered % appears only where Service delivered % does. A “Behind” badge means that agency’s totals have not caught up with its latest data yet. “How to read this” explains each figure. Where ridership weights have been set up, “Weight by ridership” switches the on-time figure to a ridership-weighted one.
+Below them, under “Not ranked: the data does not support a comparison”, the other agencies are listed by name, never by their figures. An agency is ranked only when its observation coverage is at least 70%, its on-time % interval is within ±3 points and its implausible readings are at most 5%. Each unranked row says which check it fails first, with its figure, such as “Observation coverage 41.0% (below 70%)” or “On-time % interval ±3.3 points (wider than ±3)”. Observation coverage cannot be measured for a feed whose trips can't be matched to the timetable. A short period often leaves the smaller agencies unranked, because a few hundred trips cannot pin their on-time % down closely enough. Every agency’s on-time % is counted by the industry standard, from 1 min early to 5 min late. Neither how densely a feed reports nor where a timetable puts its slack is corrected for.
+
+Each row shows “Avg delay (min)” with its bar, “On-time %” with its 95% interval under it, “Observation coverage” (the trips the feed reported out of those the timetable planned), “Planned trips”, “Service delivered %”, “Vehicle-km delivered %” and “Observations”. Every bar shares one axis, 6, 12, 18 or 24 minutes, whichever holds the latest-running agency. Where an agency has data for only part of the period, its own dates are shown too. Planned trips are the trips the timetable planned over the period; where a timetable plans only some of its days, the figure says so, such as “16/30 days a timetable plans”. Where Service delivered % cannot be shown, “—” is followed by the reason (“no timetable plans this period”, “this feed format cannot report cancellations”, “the feed is not yet checked for cancellations” or “this feed doesn't report cancellations”). Vehicle-km delivered % appears only where Service delivered % does. A “Behind” badge means that agency’s totals have not caught up with its latest data yet. “How to read this” explains each figure. Where ridership weights have been set up, “Weight by ridership” switches the on-time figure to a ridership-weighted one.
 
 Click an agency’s name to open that agency’s **Live** screen.
+
+### 8-3. Planned departures
+
+A map of every operator’s stops by the departures their timetables plan, for a band of hours on a weekday, a Saturday or a Sunday & holiday (by default weekdays, 10:00 to 16:00). It reads the timetable each operator has in force on **Timetable in force on** (today when left empty), on a typical day of the day type: an ordinary day of that type early in that timetable, so a holiday timetable or a one-off service day does not stand for it. **Timetables read** lists each operator’s timetable and typical day.
+
+- **Departures per hour** shades each stop by its departures in the band divided by its hours: none, under 1, 1 to 2, 2 to 3, and 3 or more an hour.
+- **Longest gap** brings forward the stops whose longest stretch of the band without a departure is over the threshold chosen under **Highlight gaps over** (60 min by default). A band with no departure at a stop is one gap the length of the band.
+- Hours after midnight read 24:00 and later, so a band can run into the night. Click a stop for its departures, longest gap and first and last departure of the day.
+- An operator whose timetable cannot be read for the date and day type is listed under **Operators not shown** with the reason, never drawn as a stop without service. A stop the current timetable gives no position is counted below the map.
+- A trip’s last stop is not counted as a departure. Each operator’s stops are shown on their own: two operators’ stops at one place are not added together.
+
+### 8-4. Transfers
+
+For a transfer at a hub, riders leaving one route and boarding another, often of another operator, **Transfers** shows how often the planned connection held. Admins define the transfers under **Transfers** in the admin pages; the list shows those this agency arrives or departs in. **Transfer** picks one, and the day-type buttons switch between the day types it is read on. The period is the last 28 closed days. The board has no scope bar (chapter 3): the transfer, its day type and that period are its conditions.
+
+- **Connections** counts the connections planned, held, missed and not observed. A connection is held when the second bus was predicted to leave after the first was predicted to arrive, plus the walk between the stops. One with no prediction for either bus is not observed, never held or missed.
+- With enough observed connections, a line such as “A planned buffer of 7 min would have held 95% of observed weekday connections” gives the time to plan between the two buses. It is feed-based: computed from the operators' predicted times, not observed passings.
+- **Held and missed by hour of arrival** draws, for each hour, the connections planned: held, then missed, then not observed. Hours past 24 are after midnight on the same service day.
+- **Realised wait** gives the median and 90th-percentile wait, from stepping off to the departure caught, and the share within 5, 10 and 20 minutes, the waits riders said they would tolerate.
+- **Days with the most missed connections** lists the worst days.
+- **Download CSV** saves each day's counts, with the definition and the data source in its notes: a monitoring list.
+- Below 21 observed connections, the share and the buffer are not given; below 21 known waits, neither are the waits. Days a timetable does not plan are left out and counted under the figures. The definitions are in the methodology.
 
 ---
 
 ## 9. Live — the trips running now
 
-Live shows the trips reporting now, under the heading “Current observations”. It refreshes itself every 30 seconds, and **Refresh now** fetches at once. Beside it, “Last updated …” says how recent the last report is, or “Feed quiet for …” when reports have stopped.
+Live shows the trips reporting now, under the heading “Current observations”. It refreshes itself every 30 seconds, and **Refresh now** fetches at once. Beside it, “Last updated …” says how recent the last report is, or “No reports for …” when reports have stopped; if another data update is already running, **Refresh now** says so rather than reporting a failure.
 
 ![Live](./11-live.en.png)
 
 - The map opens framing all of the agency’s stops, including late at night when no vehicle is reporting.
 - The map places each trip at its last reported stop, not at a GPS position. The legend explains the marks: “Latest report”, “Report trail”, “Delayed” and “Number = overlapping trips”. Hover over a trip for its details; “Pin this trip” keeps them on screen. “Fit all trips in view” moves the map to frame every trip, and **Layers** switches the map style.
-- Filters on the map: choose a “Route” and a “Service pattern”, then press **Apply**. Each “Route” option carries its route numbers, such as “くすの木台線 (64, 64-1)”: names are shown as the feed writes them, so two routes spelt alike are told apart by their numbers.
+- The scope bar above the map, with **Routes** and **On time**, sets what Live shows (chapter 3). Click the routes to choose routes or service patterns, then press **Apply**; choosing new routes also clears the route, direction and trip selected on the map. The on-time tolerance decides which trips count as late. Live shows the trips reporting now, so it has no period; days of the week, time of day and timetable chosen on another screen are left out of the bar rather than applied.
 - **Play the day** replays the day’s observations on the map; “Back to current observations” returns to now.
-- **Trips to check**, on the right: “Observed”, “5+ min late” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips running five minutes or more late, latest first. Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
+- **Trips to check**, on the right: “Observed”, “More than 5 min late” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips later than the on-time window allows (by default more than five minutes late), most delayed first. Under the figures, a note names the on-time window the rate uses and says that it counts different trips from a period’s on-time rate, and another says how many trips left earlier than the window allows, if any did (13-2). Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
 
-When no vehicle is reporting, the map says why, going by the agency’s timetable for the day. After the last trip it says that today’s service has ended and when the last trip arrived; before the first trip it says when the first trip leaves. If the timetable has no trips for the day, late at night (00:00–05:00) it says “No vehicles are reporting right now”, which is normal. When no new report has arrived for more than ten minutes during service hours, it says when the last one came and how long ago, and that the operator’s feed may have stopped. “Observed” and “5+ min late” then read “—” rather than 0, and “Show last reported positions” draws the last reported positions on the map, labelled as not current.
-
-The first time you open Live, a three-step tour points out the filters, the trip list and the search field. “Later” closes it for now; “Got it” finishes it.
+When no vehicle is reporting, the map says why, going by the agency’s timetable for the day. After the last trip it says that today’s service has ended and when the last trip arrived; before the first trip it says when the first trip leaves. If the timetable has no trips for the day, late at night (00:00–05:00) it says “No vehicles are reporting right now”, which is normal. When no new report has arrived for more than ten minutes during service hours, it says when the last one came and how long ago, and that either the operator’s feed has stopped or the app’s own collection is behind. “Observed” and “More than 5 min late” then read “—” rather than 0, and “Show last reported positions” draws the last reported positions on the map, labelled as not current.
 
 ---
 
 ## 10. Reports — documents to hand on
 
-Three tabs along the top: **Period summary**, **Saved analyses** and **Council report & delay record**.
+Four tabs along the top: **Period summary**, **Saved analyses**, **Council report & delay record** and **Timetable revisions**.
 
-A printed page (“Print / Save as PDF”) ends with its data source: who publishes the agency’s data, with the URLs of the data and of its licence. A CSV that opens with notes (a report’s **Download CSV**, and each table’s CSV in **Ask**) carries the same credit as its last note. A CSV whose first row is the table (the period summary, a route’s page, **Live**) has no credit added, so it still loads straight into a spreadsheet or another tool.
+A printed page (“Print / Save as PDF”) ends with its data source: who publishes the agency’s data, with the URLs of the data and of its licence. A CSV that opens with notes (a report’s **Download CSV**, and each table’s CSV in the **Notebook**) carries the same credit as its last note. A CSV whose first row is the table (the period summary, a route’s page, **Live**) has no credit added, so it still loads straight into a spreadsheet or another tool.
 
 ### 10-1. Period summary
 
-How service ran over the period, on one printable page: the scope sentence, then “Mean delay over time” (a chart) and “Mean delay by service pattern” (a table, where “Open analysis →” opens that route’s page).
+How service ran over the period, on one printable page: the scope bar, then “Mean delay over time” (a chart) and “Mean delay by service pattern” (a table, where “Open analysis →” opens that route’s page; its observation counts show with **Show statistics** ticked).
 
 - Under the chart, the page names the day whose mean delay rose furthest above its 7-day average, and the routes with the most delay that day.
-- The table lists the 10 routes with the most delay. “Every route on the Routes table →” opens every route on **Routes**.
+- “The trend by day and hour on Time →”, under the chart, opens **Time** (section 6) for the same period and conditions.
+- The table lists the 10 routes with the most delay. “Every route on the Routes table →” opens every route on **Routes**, for the same period and conditions, with these 10 at the top. The chart and the table stay on this page because it is the document you print and hand on.
 - Everything the page exports is in the **Export** menu at the top right: “Download PNG”, “Download CSV” (the chart’s daily figures and the table of every route), “Create share link” and “Print / Save as PDF”.
-- At the bottom, “View filters and definitions” links to the detailed reports.
+- At the bottom, “View filters and definitions” shows the period and routes the page covers.
 
 Missing observations are not counted as on time; only the periods with observations are shown.
 
@@ -344,19 +410,22 @@ Missing observations are not counted as on time; only the periods with observati
 
 The analyses you saved with **Save analysis** on a route’s page. Click one to reopen it with the latest data; **Delete** removes it. They are kept in this browser only, so another browser or device will not show them.
 
-**Saved views** (chapter 3) are a different thing: conditions saved under “Saved views ▾” at the top of a screen while signed in are kept with your account and open from that same menu on any device. They do not appear on this tab.
+**Saved views** (chapter 3) are a different thing: conditions saved under “Saved views ▾” at the top of a screen are kept in this browser too, in their own list. They do not appear on this tab.
 
 ### 10-3. Council report & delay record
 
 The list on the left holds **Council report** and **Delay record (for reference)**.
 
-**Council report** is the period’s service, summarised for the council: five headline figures (“On time”, “Average delay”, “Observations (stop level)”, “Planned trips”, “Service delivered %”), a written summary with its notes, and **Print / Save as PDF**.
+**Council report** is the period’s service, summarised for the council: seven headline figures (“On time”, “Early departures”, “Average delay”, “Observations (stop level)”, “Planned trips”, “Service delivered %”, “Comparison with other operators”), a written summary with its notes, and **Print / Save as PDF**.
 
 - “Observations (stop level)” counts records of a trip leaving a stop (13-1). One trip counts once per stop, so the figure is far larger than the planned trips.
 - When a timetable plans only some of the period’s days, the planned trips say so, such as “* 16/30 days a timetable plans”. Service delivered % counts the same days.
 - When Service delivered % cannot be shown, “—” is followed by the reason, in the same words as Compare agencies (such as “the feed is not yet checked for cancellations”).
-- The notes’ “On-time definition” gives the on-time tolerance used, such as “no more than 1 min late (early departures count as on time)”.
+- The notes’ “On-time definition” gives the on-time tolerance used. With the default conditions it reads “On-time definition (industry standard): no more than 5 min late and no more than 1 min early”.
+- “Early departures” is the share of departures that left more than 1 minute early (or more than the early tolerance, when one is set). The tile and the notes name that threshold.
 - Planned trips, Service delivered % and the data-quality note always cover the whole agency for the period; when a route, day, service or time-of-day condition narrows the on-time figures, the tiles and the summary say “whole agency”.
+- “Comparison with other operators” says whether this agency’s figures meet the conditions **Compare agencies** ranks by (8-2): “Comparable” or “Not comparable”. Under “Not comparable” it gives the first condition missed, in the same words as Compare agencies (such as “Observation coverage 41.0% (below 70%)”), and the notes say not to rank this agency’s figures against other operators’. The verdict always reads the whole agency for the period and the on-time definition every operator is judged by (the industry standard), whatever conditions or on-time tolerance the report uses. When the report uses another on-time tolerance, the notes say so.
+- When an administrator presses **Print / Save as PDF**, a snapshot of the figures on screen is taken first, and the foot of the printed page reads “Snapshot: (link) (method …)”. The link shows the printed figures as they were, even after the data is rebuilt. If no snapshot can be taken, or the figures were updated after the page opened, the page still prints, without the link, and the screen says so. Changing the view while the snapshot is being taken cancels the print. Anyone else’s print carries no link.
 
 **Delay record (for reference)** gives a passenger a record of how late their trip left the stop where they boarded. This service makes it from the real-time data the operator publishes, as a reference document; it is not a delay certificate issued by the operator, and the record says so.
 
@@ -377,44 +446,56 @@ If the route has no real-time data that day, the page says so.
 
 For staff, “Late departures (delay at each trip's first recorded stop)” opens every route’s late departures on the chosen day, with **Download CSV**. The list loads only when it is opened. It picks late trips by their delay at the first stop the real-time data recorded for each, so a trip that left its first stop on time and fell behind later is not in it. In its table, the “Recorded stop” carries “trip start” when the timetable starts that trip there.
 
+### 10-4. Timetable revisions
+
+For each day another timetable took effect (a revision), the timetables before and after it are compared stop by stop. **Revision** picks the one to compare; the newest opens first.
+
+- The **By day type** table gives, for weekdays, Saturdays and Sundays & holidays, the typical day (before → after), the departures and their change, how many stops were left with none, and how many have an earlier last bus. A typical day is an ordinary day of that type under each timetable, near the revision. These day types are fixed by the date alone, unlike the day types elsewhere, which follow the operator’s calendar and may merge Saturday with Sunday & holiday.
+- **Stops that changed** lists, for the day type chosen, every stop whose departures, first departure or last departure changed, those that lost the most first. The first and last departures read before → after. **Change by hour** shows only the hours whose count changed, as in “7:00 -1, 8:00 +1”. A stop left with no departures says so.
+- The **Routes** table gives, for the day type chosen, each route's trips, last trip and longest gap at its main stop, before → after. **Change** sorts routes by their trips on that day type into Fewer trips, More trips, Same trips, New route and No trips left. Once a whole week after the revision is aggregated, it adds the on-time rate and mean delay over equal whole weeks on each side (up to four), and the same figures pooled by change. These come from the delays the operator's real-time feed predicted.
+- A day type with no day in force under one of the timetables shows a dash and is not compared.
+- **Download CSV** saves the changed stops, with the versions compared, their typical days and the data source in its notes: a draft of a monitoring list.
+- Stop names are the current timetable’s; a stop it no longer has shows its ID. A trip’s last stop is not counted as a departure.
+
 ---
 
-## 11. Ask — questions with ready answers
+## 11. Notebook — ready-made analyses
 
-Ask answers common questions about delay with a table or chart, so you do not have to find the right report first. Open it with **Ask** in the sidebar, below the screens.
+The investigation notebook holds ready-made analyses of delay. Each one is a card that runs a fixed analysis and shows a table or chart, so you do not have to find the right report first. Each result is kept as a step in a saved thread, with exports and the evidence behind it. You pick a card; you do not type a question. Open it with **Notebook** in the sidebar, below the screens.
 
-![Ask](./12-ask-landing.en.png)
+![Notebook](./12-ask-landing.en.png)
 
-### 11-1. Asking a question
+### 11-1. Running an analysis
 
-- The bar at the top shows the period and routes your questions will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
-- Under “You can ask things like”, a card runs at once: “5 most delayed routes” or “5 least on-time routes”.
-- Under “More questions”, each question needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
-- After the first answer, open **Start another analysis** at the bottom to see every question. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes question.
+- The scope bar at the top shows the conditions your analyses will cover: period, days of the week and timetable, time of day, and routes (chapter 3). Click one to change it. A new investigation starts from the conditions of the screen you came from; once an investigation is open, each change is saved to it as you make it.
+- Under “Run at once”, a card runs immediately: “5 most delayed routes” or “5 least on-time routes”.
+- Under “More analyses”, each one needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
+- After the first result, open **Start another analysis** at the bottom to see every analysis. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes analysis.
 
-### 11-2. Reading the answer
+### 11-2. Reading the result
 
-![Ask answer](./13-ask-answer.en.png)
+![Notebook result](./13-ask-answer.en.png)
 
-- The question heads the answer, with the table or chart under it.
-- “Where this answer comes from” names the route, the conditions and how the figures were made. A “SQL only” badge means they were computed directly from the data; “LLM” marks a summary written by a language model from a result already fetched.
-- Buttons under the answer suggest next steps, such as “View morning peak only”, “View on the map”, “Compare with two weeks ago” and “Save as PNG”.
-- “Download result (JSON)”, and a CSV for each table, save the answer.
-- Each question becomes a step of the investigation. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
+- The analysis name heads the result, with the table or chart under it.
+- “Where this result comes from” names the route, the conditions and how the figures were made. A “SQL only” badge means they were computed directly from the data; “LLM” marks a summary written by a language model from a result already fetched.
+- Buttons under the result suggest next steps, such as “View morning peak only”, “View on the map”, “Compare with two weeks ago” and “Save as PNG”.
+- A ranking or weekday-against-weekend result ends with “Open on …”, and a trend result with “See the daily trend on Time”: each opens the screen that shows the same figures in full (**Routes**, **Day types & agencies** or **Time**) for the result’s own period and conditions. A result kept from before these links were added has none.
+- “Download result (JSON)”, and a CSV for each table, save the result.
+- Each analysis you run becomes a step of the investigation. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
 
-### 11-3. Asking about the result in your own words
+### 11-3. Optional: a follow-up question in your own words
 
-Where it is available to your account, a box under the latest answer, “Ask about this result...”, takes a question in your own words. Press the send button (the paper-plane icon) for an answer grounded in the result on screen. As the note under the box says, the AI runs only when you send, and it answers from the stored result without fetching new data. For a stop-by-stop answer, select a stop first.
+The notebook works without this. Where it is available to your account, a box under the latest result, “Ask about this result...”, takes a follow-up question in your own words. Press the send button (the paper-plane icon) for an answer grounded in the result on screen. As the note under the box says, the AI runs only when you send, and it answers from the stored result without fetching new data. For a stop-by-stop answer, select a stop first.
 
-The box is for digging into the result already on screen; to start a new ranking, use a question card instead. If an answer cannot be produced, a message says why — the question is too long, traffic is high, or the connection dropped — so shorten the question, wait a moment, or try again.
+The box is for digging into the result already on screen; to start a new ranking, use an analysis card instead. If an answer cannot be produced, a message says why — the question is too long, traffic is high, or the connection dropped — so shorten the question, wait a moment, or try again.
 
-When the box is not shown, free-text questions are not available to your account. The question cards still work, because they are computed directly from the data.
+When the box is not shown, free-text follow-ups are not available to your account. The investigation cards still work, because they are computed directly from the data.
 
 ### 11-4. Your investigations
 
-“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Without signing in, investigations are kept only in the browser where you asked them.
+“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Investigations you run without signing in are kept only in the browser where you ran them.
 
-If you are not sure which report to open, picking a question on Ask is often the quickest way in.
+If you are not sure which report to open, picking an analysis in the Notebook is often the quickest way in.
 
 ---
 
@@ -439,31 +520,33 @@ What the words on the screens and in this manual mean.
 ### 13-1. Units of data
 
 - **Feed**: the data an agency publishes. Delays are the departure delays its real-time feed (GTFS-Realtime) reports at each stop, used as they are; the Service does not work delays out from the timetable and vehicle positions. Route names, scheduled times, timetables and planned trips come from the timetable feed (GTFS).
-- **Reading** (“Samples” in the tables): one trip departing one stop counts as one reading. When the same trip and stop are reported many times, the last report is used. “Samples” counts readings, so one trip gives one reading per stop. The council report’s “Observations (stop level)” is the same count.
+- **Observation** (“Observations” in the tables): one trip departing one stop counts as one observation. When the same trip and stop are reported many times, the last report is used. “Observations” counts these, so one trip gives one observation per stop. The council report’s “Observations (stop level)” is the same count.
+- **Reading**: one report from the feed. An observation keeps only the last reading of each trip at each stop.
 - **First recorded stop**: the first stop where the real-time data reported the trip’s departure. For a trip with no report from the stop where it starts, it is a later stop. The staff list of late departures picks each trip by its delay there; the delay record (for reference) gives the delay at the stop where the passenger boarded.
 - **Set aside as implausible**: a report more than 2 hours (7,200 seconds) late or early is left out as a feed fault.
-- **Missing data**: days or hours with no readings are left out, not counted as on time.
+- **Missing data**: days or hours with no observations are left out, not counted as on time.
 - **Service day**: the date turns over at 04:00. A report that arrives between midnight and 04:00 counts toward the previous day.
 - **Timetable type**: each day is classed by the timetable the agency ran that day, as weekdays, Saturdays, or Sundays & holidays; for an agency whose Saturday and Sunday timetables are the same, as weekdays or weekends & holidays. A day the timetable cannot class is classed by its day of the week and public holidays.
 - **Route**: what the agency’s timetable codes as one route. Each row of the **Routes** table is one route. Route pickers put routes that share a name under one entry, with a count of its variants.
-- **Service pattern**: on a route’s page, the “Route” filter picks a name that one or more routes share, and “Service pattern” picks one of those routes.
+- **Service pattern**: one of the routes that share a name. A route picker lists the name once; open it to pick one of its service patterns.
 
 ### 13-2. Delay figures
 
-- **Average delay**: the mean of the readings’ departure delays, in minutes. Early departures stay in the mean as negative delays.
-- **Early departure**: a reading that left before its scheduled time; its delay is negative.
-- **On time** and **On-time %**: a reading is on time when its departure delay is within the on-time tolerance (1 minute unless changed), and early departures count as on time. On-time % is the share of readings that were on time.
-- **Over 5 min**: a reading whose departure delay is more than 5 minutes (300 seconds), whatever the on-time tolerance. “Share over 5 min” is their share of the samples, and “Over 5 min (count)” is how many there were.
-- **Live’s “On-time rate” and “5+ min late”**: Live takes the latest report of each trip reporting now. Trips 5 minutes or more late are “5+ min late”, and the share of the rest is the “On-time rate”, so it is counted differently from On-time % on the other screens.
+- **Average delay**: the mean of the observations’ departure delays, in minutes. Early departures stay in the mean as negative delays.
+- **Early departure**: an observation that left before its scheduled time; its delay is negative.
+- **On time** and **On-time %**: an observation is on time when it left no later than the on-time tolerance and no earlier than the early tolerance. By default that is the industry standard, from 1 minute early to 5 minutes late. “Count early departures as on time” counts every early departure, and with 1 minute that is the legacy definition. On-time % is the share of observations that were on time. In the **Notebook**, an investigation that names how late counts, such as “on-time rate within 5 min”, counts every early departure as on time.
+- **Early-departure rate**: the share of observations that left more than 1 minute early, or more than the early tolerance when one is set. It is counted whether or not early departures count as on time.
+- **Over 5 min**: an observation whose departure delay is more than 5 minutes (300 seconds), whatever the on-time tolerance. “Share over 5 min” is their share of the observations, and “Over 5 min (count)” is how many there were.
+- **Live’s “On-time rate” and “More than 5 min late”**: Live takes the latest report of each trip reporting now. The “On-time rate” is the share of those trips that were on time, under the same on-time window as the other screens (by default 1 minute early to 5 minutes late). On-time % on the other screens counts every observation in a period, while Live counts only the trips reporting now, so the two count different things. “More than 5 min late” is the number of trips later than the on-time window allows, and the time in its name follows the window’s late edge. A trip exactly 5 minutes late is on time, so under the default window it is counted the same way as “Over 5 min” on the other screens. A trip that left earlier than the early tolerance counts as neither late nor on time, and the note under the figures says how many there are.
 - **p50 and p90**: the values halfway along (the median) and 90% of the way along when the values are sorted from smallest. p90 is a guide to a value exceeded about one time in ten. They are approximations, worked out from counts grouped into fixed-width steps.
 - **wide margin**: shown when the 95% confidence interval (Wilson) of the on-time % is wider than ±5 points.
-- **few data**: shown for a route with fewer than 100 samples.
+- **few data**: shown for a route with fewer than 100 observations.
 - **Dwell**: the time, in seconds, from a trip’s arrival at a stop to its departure from it. The actual arrival and departure times are the scheduled times plus the delays the feed reports, so dwell is available only from feeds that report arrival delays. It counts only a departure the feed reported after it reported the arrival. A departure reported only before the arrival is a prediction, and gives no dwell.
 - **Running**: the time, in seconds, from a trip’s departure from one stop to its arrival at the next. Where the stops in between have no report, it covers the whole stretch. The departure it starts from can be one the feed reported only as a prediction, before the trip reached that stop.
 
 ### 13-3. Service and spacing
 
 - **Planned trips**: the number of trips the timetable planned to run over the period, counted day by day from the timetables running that day. When a timetable plans only some of the period’s days, the figure says how many were counted, such as “16/30 days a timetable plans”.
-- **Service delivered %**: the share of planned trips not reported as cancelled. Trips the feed reports as cancelled, or as skipping a stop, are taken off the planned trips; a trip that never appears in the feed is not counted as cancelled. It shows “—” for a feed format that cannot report cancellations, or a feed a check has not confirmed reports them. It also shows “—” where the feed reported no cancellation or skipped stop in the period or the 90 days up to its end: nothing would come off the planned trips, so it would read 100% whatever ran. It returns once the feed reports one. Compare agencies and the council report give the reason.
+- **Service delivered %**: the share of planned trips not reported as cancelled. Trips the feed reports as cancelled, or as skipping every stop it gives a delay or a status for, are taken off the planned trips; a stop the feed lists with neither counts neither way, a trip that skips only some stops still ran, and a trip that never appears in the feed is not counted as cancelled. It shows “—” for a feed format that cannot report cancellations, or a feed a check has not confirmed reports them. It also shows “—” where the feed reported no cancelled trip in the period or the 90 days up to its end: nothing would come off the planned trips, so it would read 100% whatever ran. It returns once the feed reports one. Compare agencies and the council report give the reason.
 - **Vehicle-km delivered %**: service delivered % applied to the planned vehicle-km, so the share is the same as service delivered %; a cancelled trip’s distance is taken to be an average trip’s. It is left out where service delivered % is, and shows “—” for an agency whose timetable has no route shapes (shapes.txt).
 - **Headway quality**: for routes whose planned headway (the median) is 12 minutes or less, how far the actual spacing strays. “Excess wait” is the average extra wait that the irregular spacing adds over the planned spacing.

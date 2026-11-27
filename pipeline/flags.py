@@ -87,9 +87,6 @@ REGISTRY: tuple[FlagDefinition, ...] = (
     FlagDefinition("ask_router_enabled", "ASK_ROUTER_ENABLED", "admin.flags.labels.askRouterEnabled", True),
     FlagDefinition("ask_llm_enabled", "ASK_LLM_ENABLED", "admin.flags.labels.askLlmEnabled", True),
     FlagDefinition("ask_followup_enabled", "ASK_FOLLOWUP_ENABLED", "admin.flags.labels.askFollowupEnabled", False),
-    FlagDefinition(
-        "copilot_insight_enabled", "COPILOT_INSIGHT_ENABLED", "admin.flags.labels.copilotInsightEnabled", False
-    ),
     FlagDefinition("ask_history_enabled", "ASK_HISTORY_ENABLED", "admin.flags.labels.askHistoryEnabled", True),
     FlagDefinition(
         "ask_intent_cache_enabled", "ASK_INTENT_CACHE_ENABLED", "admin.flags.labels.askIntentCacheEnabled", False
@@ -100,8 +97,8 @@ REGISTRY: tuple[FlagDefinition, ...] = (
     ),
     FlagDefinition("openapi_docs_enabled", "OPENAPI_DOCS_ENABLED", "admin.flags.labels.openapiDocsEnabled", False),
     FlagDefinition("perf_debug_enabled", "PERF_DEBUG_ENABLED", "admin.flags.labels.perfDebugEnabled", False),
-    FlagDefinition("login_required", "LOGIN_REQUIRED", "admin.flags.labels.loginRequired", True),
     FlagDefinition("ml_forecast", "ML_FORECAST_ENABLED", "admin.flags.labels.mlForecast", False),
+    FlagDefinition("updates_prune_enabled", "UPDATES_PRUNE_ENABLED", "admin.flags.labels.updatesPruneEnabled", False),
 )
 
 _BY_KEY = {d.key: d for d in REGISTRY}

@@ -56,12 +56,9 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         return {
@@ -96,7 +93,7 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ask_holds_no_pool_connection_while_the_llm_runs(ask_client, monkeypatch):
-    """A Stage-3 question waits on the LLM for tens of seconds; pinning a pooled
+    """An LLM-stage question waits on the LLM for tens of seconds; pinning a pooled
     connection for that wait lets a handful of slow questions starve every
     other endpoint, so the pool must be fully idle while the model runs."""
     client, agency_id = ask_client
@@ -189,7 +186,7 @@ async def test_ask_sends_an_llm_answers_decimal_cells_as_numbers(ask_client, mon
 
 @pytest.mark.asyncio
 async def test_ask_sends_a_rule_answers_decimal_cells_as_numbers(ask_client, monkeypatch):
-    """The rule and embedding stages build the same result, and send numbers too."""
+    """A rule answer builds the same result as the LLM path, and sends numbers too."""
     client, agency_id = ask_client
 
     async def fake_dispatch(tool, args, ctx, conn, agency_id, **kwargs):
@@ -247,8 +244,8 @@ async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client
     `ask_app`'s fixture sets `app.state.ch_client = None`, which `api.deps
     .get_ch` turns into the always-raising `_ClickHouseUnavailable`
     stand-in rather than a bare `None` — exercising the real dispatch path
-    end-to-end, no mocking needed. Stage 1/2 must catch the stand-in's
-    HTTPException(503) around `dispatch(...)`, as chat.py's Stage 3 does,
+    end-to-end, no mocking needed. The rules stage must catch the stand-in's
+    HTTPException(503) around `dispatch(...)`, as chat.py's LLM stage does,
     rather than let it propagate up and 503 the endpoint.
     """
     client, agency_id = ask_client
@@ -273,7 +270,7 @@ async def test_ask_stage1_dispatch_degrades_on_clickhouse_unavailable(ask_client
 
 @pytest.mark.asyncio
 async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, monkeypatch):
-    """Stage 1/2's dispatch(...) raising
+    """The rules stage's dispatch(...) raising
     ``asyncpg.exceptions.UndefinedTableError`` (an ``agg_*`` table missing on a
     migration-lagged environment) must propagate out of the router body so
     FastAPI's registered ``aggregate_not_ready_handler`` (see api/main.py and
@@ -305,8 +302,23 @@ async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, 
 
 
 @pytest.mark.asyncio
-async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatch):
-    """Novel question → router returns None → chat_with_tools called with rag_examples kwarg."""
+async def test_ask_free_text_degrades_to_a_message_with_no_llm_provider(ask_client, no_llm_key):
+    """A question only the LLM could answer gets a clear 200 message, never a 500."""
+    client, agency_id = ask_client
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "雨の日とそうでない日を比べたいです"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tool_call"] is None
+    assert body["answer"]
+
+
+@pytest.mark.asyncio
+async def test_ask_router_fallthrough_does_not_force_a_tool_call(ask_client, monkeypatch):
+    """Novel question → router returns None → chat_with_tools called without a forced tool call."""
     client, agency_id = ask_client
 
     captured = {}
@@ -317,15 +329,11 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
-        captured["rag_examples"] = rag_examples
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
@@ -337,8 +345,6 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         headers={"Origin": TEST_ORIGIN},
     )
     assert resp.status_code == 200
-    # rag_examples is a list (possibly empty if rag_chunks is empty for this agency).
-    assert isinstance(captured["rag_examples"], list)
     # A non-follow-up novel question must NOT force a tool call — a genuine
     # out-of-scope refusal in free text is still a valid, deliberate answer.
     assert captured["force_tool_call"] is False
@@ -356,12 +362,9 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         captured["history"] = history
@@ -373,11 +376,11 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
             "success": True,
         }
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("router should be skipped for follow-ups")
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -415,22 +418,19 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("router should be skipped for follow-ups")
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -464,22 +464,19 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("router should be skipped for follow-ups")
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -515,22 +512,19 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
         return {"answer": "stub", "tool_call": None, "result": None, "success": True}
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("router should be skipped for follow-ups")
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -553,11 +547,11 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
     async def boom_chat(*a, **k):
         raise AssertionError("chat_with_tools must NOT be called for a no-history follow-up")
 
-    async def boom_router(*a, **k):
+    def boom_router(*a, **k):
         raise AssertionError("router must NOT be called for a no-history follow-up")
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", boom_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom_router)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom_router)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -577,20 +571,20 @@ async def test_followup_without_history_does_not_hallucinate(ask_client, monkeyp
 @pytest.mark.asyncio
 @pytest.mark.parametrize("question", ["平日に絞り込んで遅延ワースト10", "定時率の低い順に並べ替えて"])
 async def test_first_turn_follow_up_wording_a_rule_answers_reaches_the_router(ask_client, monkeypatch, question):
-    """A Stage-1 rule answers these on their own, so a first turn using them
+    """A rule answers these on their own, so a first turn using them
     is routed, not answered with the no-history prompt."""
     client, agency_id = ask_client
     routed: list[str] = []
 
-    async def no_decision(q, *a, **k):
+    def no_decision(q, *a, **k):
         routed.append(q)
-        return (None, [])
+        return None
 
     async def fake_chat(*a, **k):
         return {"answer": "ok", "tool_call": None, "result": None, "success": True}
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -604,19 +598,19 @@ async def test_first_turn_follow_up_wording_a_rule_answers_reaches_the_router(as
 
 @pytest.mark.asyncio
 async def test_first_turn_follow_up_gets_the_no_history_prompt_when_the_router_is_off(ask_client, monkeypatch):
-    """With the router off no Stage-1 rule will answer the question, so a
+    """With the router off no rule will answer the question, so a
     first-turn continuation gets the no-history prompt even when a rule matches it."""
     client, agency_id = ask_client
 
     async def flags(key):
         return key != "ask_router_enabled"
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("neither the router nor the LLM may run for a no-history follow-up")
 
     monkeypatch.setattr("api.routers.ask.aflag", flags)
     monkeypatch.setattr("api.routers.ask.chat_with_tools", boom)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -640,12 +634,12 @@ async def test_first_turn_refinement_with_a_subject_of_its_own_reaches_the_route
     routed: list[str] = []
     captured: dict = {}
 
-    async def no_decision(q, *a, **k):
+    def no_decision(q, *a, **k):
         routed.append(q)
-        return (None, [])
+        return None
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -667,12 +661,12 @@ async def test_first_turn_refinement_with_a_subject_reaches_the_llm_when_the_rou
     async def flags(key):
         return key != "ask_router_enabled"
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("the router is off")
 
     monkeypatch.setattr("api.routers.ask.aflag", flags)
     monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -692,11 +686,11 @@ async def test_refinement_with_a_subject_and_history_still_skips_the_router(ask_
     client, agency_id = ask_client
     captured: dict = {}
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("router should be skipped for a follow-up with history")
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -717,15 +711,15 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
     The failure this guards: with an active conversation showing a route
     delay ranking table, a plain "停留所はいくつ？" ("how many stops are
     there?") — on topic but not continuation wording, so ``is_follow_up()``
-    correctly evaluates False and ``route_or_examples()`` runs — can come
+    correctly evaluates False and ``match_rules()`` runs — can come
     back as a prose non-answer ("the table doesn't include stop counts")
-    instead of dispatching ``describe_data(kind=stops)``, because Stage 3
+    instead of dispatching ``describe_data(kind=stops)``, because the LLM stage
     attaches the full history and the model can reason from its (unrelated)
     table text instead of calling a tool.
 
-    This exact question actually matches Stage 1's deterministic
-    ``meta-stops`` rule (``pipeline/query/router.py``), so ``route_or_examples``
-    is monkeypatched here to force a fall-through to Stage 3
+    This exact question actually matches the deterministic
+    ``meta-stops`` rule (``pipeline/query/router.py``), so ``match_rules``
+    is monkeypatched here to force a fall-through to the LLM stage
     (``chat_with_tools``), which is where the scenario above occurs, mirroring
     ``test_ask_writes_query_log_row``'s ``no_decision`` pattern in this same
     file. ``chat_with_tools`` is mocked here (as in the other tests in this
@@ -734,7 +728,7 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
     ``tests/query/test_chat_null_args.py``. This test pins the surrounding
     plumbing: not a recognized continuation (so ``force_tool_call`` stays
     False — tool_choice="auto" — see
-    ``test_ask_router_fallthrough_passes_rag_examples``), history is still
+    ``test_ask_router_fallthrough_does_not_force_a_tool_call``), history is still
     threaded through for possible anaphora resolution, and whatever tool
     call ``chat_with_tools`` returns reaches the client as a real tool call,
     not a prose non-answer.
@@ -748,12 +742,9 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         captured["history"] = history
@@ -765,11 +756,11 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
             "success": True,
         }
 
-    async def no_decision(*a, **kw):
-        return (None, [])
+    def no_decision(*a, **kw):
+        return None
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -785,7 +776,7 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
     data = resp.json()
     # Not a recognized continuation of the prior tool: must not force a call.
     assert captured["force_tool_call"] is False
-    # History is still threaded through to Stage 3 (it may help resolve
+    # History is still threaded through to the LLM stage (it may help resolve
     # generic anaphora even outside is_follow_up()'s regex) ...
     assert captured["history"] and captured["history"][0]["question"] == "遅延ランキングを見せて"
     # ... but the response must be a real tool call, not a prose non-answer
@@ -809,17 +800,17 @@ def _recording_chat(captured: dict):
 @pytest.mark.asyncio
 async def test_a_reference_back_with_history_skips_the_router(ask_client, monkeypatch):
     """A question like "その路線は？" names no route of its own, so a stateless
-    rule or embedding match would answer about whichever route its stored args
+    rule match would answer about whichever route its stored args
     name; with history attached it goes to the LLM, which sees the route it
     refers to."""
     client, agency_id = ask_client
     captured: dict = {}
 
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise AssertionError("router should be skipped for a reference back to the conversation")
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat(captured))
-    monkeypatch.setattr("api.routers.ask.route_or_examples", boom)
+    monkeypatch.setattr("api.routers.ask.match_rules", boom)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -838,12 +829,12 @@ async def test_a_reference_back_without_history_still_reaches_the_router(ask_cli
     client, agency_id = ask_client
     routed: list[str] = []
 
-    async def no_decision(q, *a, **k):
+    def no_decision(q, *a, **k):
         routed.append(q)
-        return (None, [])
+        return None
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat({}))
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -863,12 +854,12 @@ async def test_a_self_contained_question_with_history_still_reaches_the_router(a
     client, agency_id = ask_client
     routed: list[str] = []
 
-    async def no_decision(q, *a, **k):
+    def no_decision(q, *a, **k):
         routed.append(q)
-        return (None, [])
+        return None
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", _recording_chat({}))
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -889,21 +880,18 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
 
-    async def no_decision(*a, **k):
-        return (None, [])
+    def no_decision(*a, **k):
+        return None
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -935,12 +923,9 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
         conn,
         agency_id,
         locale="ja",
-        rag_examples=None,
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
         llm_approved=True,
     ):
         return {
@@ -951,11 +936,11 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
             "numeric_guard_triggered": True,
         }
 
-    async def no_decision(*a, **k):
-        return (None, [])
+    def no_decision(*a, **k):
+        return None
 
     monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     resp = await client.post(
         f"/api/{agency_id}/ask",
@@ -1008,7 +993,7 @@ async def test_stage1_rule_hit_never_calls_chat_with_tools(ask_client, monkeypat
 @pytest.mark.asyncio
 async def test_anonymous_caller_never_reaches_llm(ask_client, monkeypatch):
     """An anonymous caller never has a users.llm_approved row, so every
-    Stage-3 question gets the honest "not approved" degrade (200, no
+    LLM-stage question gets the honest "not approved" degrade (200, no
     tool_call) on the very first call, and never the provider, no matter
     how many times they ask.
 
@@ -1032,10 +1017,10 @@ async def test_anonymous_caller_never_reaches_llm(ask_client, monkeypatch):
 
     monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient())
 
-    async def no_decision(*a, **k):
-        return (None, [])
+    def no_decision(*a, **k):
+        return None
 
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     for question in ("何ができますか？", "他に何かできますか？"):
         resp = await client.post(
@@ -1047,103 +1032,6 @@ async def test_anonymous_caller_never_reaches_llm(ask_client, monkeypatch):
         assert resp.json()["tool_call"] is None
 
     assert calls["n"] == 0, "the LLM provider must never be reached by an unapproved caller"
-
-
-@pytest.mark.asyncio
-async def test_ask_forwards_panel_ctx_to_chat_with_tools(ask_client, monkeypatch):
-    """The Copilot side panel's optional panel_ctx hint reaches chat_with_tools
-    untouched — it is a system-prompt grounding hint only, never consulted by
-    the rules/embedding routing stage above it.
-    """
-    client, agency_id = ask_client
-    captured = {}
-
-    async def fake_chat(
-        question,
-        ctx,
-        conn,
-        agency_id,
-        locale="ja",
-        rag_examples=None,
-        history=None,
-        ch=None,
-        force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
-        llm_approved=True,
-    ):
-        captured["panel_ctx"] = panel_ctx
-        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
-
-    async def no_decision(*a, **k):
-        return (None, [])
-
-    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
-
-    resp = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "遅延状況は？", "panel_ctx": {"tab": "overview"}},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp.status_code == 200
-    assert captured["panel_ctx"] == {"tab": "overview"}
-
-
-@pytest.mark.asyncio
-async def test_ask_omits_panel_ctx_by_default(ask_client, monkeypatch):
-    """A request with no panel_ctx field forwards None — the pre-existing,
-    Ask-tab (non-Copilot) call shape is unaffected.
-    """
-    client, agency_id = ask_client
-    captured = {}
-
-    async def fake_chat(
-        question,
-        ctx,
-        conn,
-        agency_id,
-        locale="ja",
-        rag_examples=None,
-        history=None,
-        ch=None,
-        force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
-        llm_approved=True,
-    ):
-        captured["panel_ctx"] = panel_ctx
-        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
-
-    async def no_decision(*a, **k):
-        return (None, [])
-
-    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
-
-    resp = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "遅延状況は？"},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp.status_code == 200
-    assert captured["panel_ctx"] is None
-
-
-@pytest.mark.asyncio
-async def test_ask_rejects_unknown_panel_ctx_tab(ask_client):
-    """panel_ctx.tab is a closed enum (the frontend's known tab routes) — an
-    arbitrary/oversized string must be rejected before it can ever reach the
-    system prompt chat_with_tools builds from this hint.
-    """
-    client, agency_id = ask_client
-
-    resp = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "遅延状況は？", "panel_ctx": {"tab": "not-a-real-tab"}},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -1182,11 +1070,11 @@ async def test_signed_in_unapproved_caller_never_reaches_llm(ask_client, monkeyp
             call = SimpleNamespace(function=func, id="call_1", type="function")
             return SimpleNamespace(content=None, tool_calls=[call]), None
 
-    async def no_decision(*a, **k):
-        return (None, [])
+    def no_decision(*a, **k):
+        return None
 
     monkeypatch.setattr(chat_module, "_get_client", lambda: _FakeClient())
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
+    monkeypatch.setattr("api.routers.ask.match_rules", no_decision)
 
     try:
         resp = await client.post(

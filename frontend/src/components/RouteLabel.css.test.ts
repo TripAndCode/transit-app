@@ -46,3 +46,12 @@ describe("RouteLabel.css plate column without subgrid", () => {
   });
 });
 
+describe("RouteLabel.css small parts", () => {
+  it.each([
+    ["the ends line", "\n.route-label__ends {", "max(0.8em, var(--text-xs))"],
+    ["a compact plate", ".route-label--compact .route-label__plate {", "max(0.92em, var(--text-xs))"],
+    ["an aside", ".route-label__aside {", "max(0.9em, var(--text-xs))"],
+  ])("%s floors its em size at the smallest text size", (_part, selector, size) => {
+    expect(decl(ruleBody(css, selector), "font-size")).toBe(size);
+  });
+});

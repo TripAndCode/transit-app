@@ -1,0 +1,11 @@
+[Unit]
+Description=Validate a sampled hour of each agency's archived TripUpdates, and publish the counts per rule
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/transit-app
+EnvironmentFile=/etc/transit-ml/env
+ExecStart=/root/transit-app/deploy/vps/run-with-ping.sh VALIDATE /root/transit-app/.venv/bin/python /root/transit-app/scripts/rt_validate_sample.py --out /var/lib/transit-ml/validation --work /var/lib/transit-ml/work/validation
+Nice=10

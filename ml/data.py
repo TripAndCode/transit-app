@@ -30,6 +30,18 @@ def date_span(client: Client, agency_id: int) -> tuple[date, date] | None:
     return (first, last) if first is not None and last is not None else None
 
 
+def filed_span(client: Client, agency_id: int) -> tuple[date, date] | None:
+    """The service dates a stop event of the agency's rows can be filed under:
+    date_span, which runs by each row's capture, a day further out at each
+    end, the furthest a stop event is filed from its capture's service date
+    (pipeline.service_day.filed_date_ch). Off the same two index-served probes."""
+    span = date_span(client, agency_id)
+    if span is None:
+        return None
+    day = timedelta(days=1)
+    return span[0] - day, span[1] + day
+
+
 def count_days(client: Client, agency_id: int) -> int:
     """Distinct service days with any row: one pass over the agency's capture times,
     without the per-stop-event dedup that fetching cells needs."""
@@ -46,7 +58,7 @@ def fetch_cells(client: Client, agency_id: int, *, chunk_days: int = 7, since: d
     cells_sql orders by date first, so the chunks concatenate in order.
     `since` skips the dedup for earlier days, so a caller that needs only the
     recent end does not pay for the whole history."""
-    span = date_span(client, agency_id)
+    span = filed_span(client, agency_id)
     if span is None:
         return []
     start, last = span

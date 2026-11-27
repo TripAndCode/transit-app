@@ -1,38 +1,67 @@
+import { DEFAULT_WINDOW, EARLY_ANY, type OnTimeWindow } from "../../api/onTimeDefault";
 import type { Scope } from "../../api/scope";
 import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, type LabelT } from "../../utils/filterValueLabels";
+import { directionLetter } from "../../utils/directionLetter";
 import { roundTenth } from "../../utils/format";
 
 /** The `scope_applied` keys an endpoint reports, one per URL scope param. */
 export type ScopeField = "from" | "to" | "dow" | "time_band" | "hour" | "service" | "routes" | "stop" | "dir" | "late" | "early";
 export type TokenKey = "agency" | "routes" | "period" | "days" | "time" | "service" | "stop" | "dir" | "early" | "tolerance";
-export type ScopeToken = { key: TokenKey; label: string; field: ScopeField | null };
+/** A token a reader can change: every one but the agency's name. */
+export type ConditionKey = Exclude<TokenKey, "agency">;
+/** `idTag` is the raw id an admin sees after the words. It is its own field so
+ *  a screen can mark it apart (and print without it) and so a saved name never
+ *  carries it. */
+export type ScopeToken = { key: TokenKey; label: string; field: ScopeField | null; idTag?: string };
 export type PhraseCtx = {
   t: LabelT;
   agencyName: string;
   routeLabel: (code: string) => string;
   /** The line a route code belongs to, as the route picker groups them. */
   routeGroup?: (code: string) => string | undefined;
+  /** A stop's name from the static GTFS. Without one a stop reads as a
+   *  neutral "selected stop": a reader is never shown a bare stop id. */
+  stopName?: (id: string) => string | undefined;
+  /** Whether the raw stop id / direction id may follow the words, as
+   *  secondary text. Only an admin works in those ids. */
+  showIds?: boolean;
 };
 
-/** The on-time tolerance the server applies when `late` is unset. */
-const DEFAULT_LATE_SEC = 60;
+const DEFAULT_LATE_SEC = DEFAULT_WINDOW.late_sec;
 
 function dateLabel(iso: string, withYear: boolean): string {
   const [y, m, d] = iso.split("-").map(Number);
   return withYear ? `${y}/${m}/${d}` : `${m}/${d}`;
 }
 
+// Every span a phrase names goes through here, whole seconds under a minute
+// and else minutes to a tenth, so one edge prints one way wherever it shows.
 function secondsLabel(sec: number, t: LabelT, minKey: string, secKey: string): string {
   if (sec < 60) return translationT(t, secKey, { n: sec });
   return translationT(t, minKey, { n: roundTenth(sec / 60) });
+}
+
+/** A span alone, as a figure and its unit. */
+export function durationLabel(sec: number, t: LabelT): string {
+  return secondsLabel(sec, t, "scope.duration_min", "scope.duration_sec");
 }
 
 export function toleranceLabel(sec: number, t: LabelT): string {
   return secondsLabel(sec, t, "scope.tolerance_min", "scope.tolerance_sec");
 }
 
-/** The scope as words, one token per condition, in sentence order. Each
- *  token names the `scope_applied` field that says whether a screen used it. */
+export function earlyLabel(sec: number, t: LabelT): string {
+  return secondsLabel(sec, t, "scope.early_min", "scope.early_sec");
+}
+
+/** An on-time window's two sides in the scope's words. */
+export function windowLabels({ early_sec, late_sec }: OnTimeWindow, t: LabelT): { late: string; early: string } {
+  return {
+    late: toleranceLabel(late_sec, t),
+    early: early_sec == null ? translationT(t, "scope.early_any") : earlyLabel(early_sec, t),
+  };
+}
+
 function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx): string {
   if (routes.length === 0) return translationT(t, "scope.routes_all");
   if (routes.length === 1) return routeLabel(routes[0]);
@@ -61,6 +90,38 @@ export function periodLabel(scope: Pick<Scope, "from" | "to">, t: LabelT): strin
   return translationT(t, "scope.period", { from: dateLabel(scope.from, crossesYear), to: dateLabel(scope.to, crossesYear) });
 }
 
+type PlaceCtx = Pick<PhraseCtx, "t" | "stopName" | "showIds">;
+
+/** The stop's name, or a neutral phrase where the static GTFS has none, and
+ *  for an admin the id as a tag after it. */
+function stopParts(id: string, { t, stopName, showIds }: PlaceCtx): { label: string; idTag?: string } {
+  const label = stopName?.(id) ?? translationT(t, "scope.stop_unnamed");
+  return showIds ? { label, idTag: translationT(t, "scope.id_tag", { id }) } : { label };
+}
+
+/** No endpoint pairs a GTFS direction_id with a name across routes, so a
+ *  reader gets a neutral phrase; an admin also gets the id as a tag. */
+function dirParts(dir: 0 | 1, { t, showIds }: PlaceCtx): { label: string; idTag?: string } {
+  const label = translationT(t, "scope.dir_unnamed", { letter: directionLetter(dir) });
+  return showIds ? { label, idTag: translationT(t, "scope.id_tag", { id: `direction_id ${dir}` }) } : { label };
+}
+
+function joined({ label, idTag }: { label: string; idTag?: string }): string {
+  return idTag ? `${label} ${idTag}` : label;
+}
+
+export function stopLabel(id: string, ctx: PlaceCtx): string {
+  return joined(stopParts(id, ctx));
+}
+
+export function dirLabel(dir: 0 | 1, ctx: PlaceCtx): string {
+  return joined(dirParts(dir, ctx));
+}
+
+/** The scope as words, one token per condition, in the order a saved
+ *  analysis's title, a saved view's name and a snapshot's statement read
+ *  them. Each token names the `scope_applied` field that says whether a
+ *  screen used it. */
 export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   const { t, agencyName } = ctx;
   const tr = (key: string, opts?: Record<string, unknown>) => translationT(t, key, opts);
@@ -81,27 +142,79 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   if (scope.service !== "all") {
     tokens.push({ key: "service", label: tr("scope.service", { value: serviceValueLabel(scope.service, t) }), field: "service" });
   }
-  if (scope.stop) tokens.push({ key: "stop", label: tr("scope.stop", { id: scope.stop }), field: "stop" });
-  if (scope.dir != null) tokens.push({ key: "dir", label: tr("scope.dir", { dir: scope.dir }), field: "dir" });
+  if (scope.stop) tokens.push({ key: "stop", ...stopParts(scope.stop, ctx), field: "stop" });
+  if (scope.dir != null) tokens.push({ key: "dir", ...dirParts(scope.dir, ctx), field: "dir" });
   if (scope.early != null) {
-    tokens.push({ key: "early", label: secondsLabel(scope.early, t, "scope.early_min", "scope.early_sec"), field: "early" });
+    const label = scope.early === EARLY_ANY ? tr("scope.early_any") : earlyLabel(scope.early, t);
+    tokens.push({ key: "early", label, field: "early" });
   }
   tokens.push({ key: "tolerance", label: toleranceLabel(scope.late ?? DEFAULT_LATE_SEC, t), field: "late" });
   return tokens;
 }
 
-/** A locale template's text runs and `[slot]` placeholders, in order. Square
- *  brackets rather than `{{ }}` so i18next leaves the slots alone. */
-export function sentenceParts(template: string): ({ text: string } | { slot: string })[] {
-  const parts: ({ text: string } | { slot: string })[] = [];
-  let last = 0;
-  for (const m of template.matchAll(/\[(\w+)\]/g)) {
-    if (m.index > last) parts.push({ text: template.slice(last, m.index) });
-    parts.push({ slot: m[1] });
-    last = m.index + m[0].length;
+/** `scope_applied` as an endpoint reports it, keyed by URL param name
+ *  (api/scope_applied.py). */
+export type ScopeApplied = Partial<Record<ScopeField | (string & {}), boolean>> | null | undefined;
+
+/** What a page whose sections each report their own `scope_applied` used:
+ *  a condition any section used counts as used. Until every section has
+ *  answered nothing is known, and the result is undefined rather than a
+ *  partial answer that would hide a condition a section still loading is
+ *  about to use. */
+export function mergeScopeApplied(...sections: ScopeApplied[]): ScopeApplied {
+  if (sections.some((applied) => applied == null)) return undefined;
+  const merged: Record<string, boolean> = {};
+  for (const applied of sections) {
+    for (const [field, used] of Object.entries(applied!)) merged[field] = merged[field] === true || used === true;
   }
-  if (last < template.length) parts.push({ text: template.slice(last) });
-  return parts;
+  return merged;
+}
+
+/** Whether a condition narrows anything. A condition at its default filters
+ *  nothing, so a screen ignoring it is not worth striking through. */
+function conditionIsSet(key: TokenKey, scope: Scope): boolean {
+  switch (key) {
+    case "agency":
+      return false;
+    case "routes":
+      return scope.routes.length > 0;
+    case "days":
+      return scope.dow !== "all";
+    case "time":
+      return scope.hour != null || scope.time_band !== "all";
+    case "tolerance":
+      return scope.late != null;
+    default:
+      return true;
+  }
+}
+
+/** Whether a token's condition is set but the screen's data did not use it
+ *  (`applied[field] === false`), so a snapshot's statement strikes it
+ *  through. An absent `applied` means every condition was used. */
+export function isScopeConditionOff(token: ScopeToken, scope: Scope, applied: ScopeApplied): boolean {
+  return token.field != null && applied?.[token.field] === false && conditionIsSet(token.key, scope);
+}
+
+/** The `scope_applied` fields each condition's control sets. The days
+ *  control also holds the timetable, and the time control sets a band or an
+ *  hour range, so either field keeps it in use. */
+const CONDITION_FIELDS: Record<ConditionKey, readonly ScopeField[]> = {
+  routes: ["routes"],
+  period: ["from", "to"],
+  days: ["dow", "service"],
+  time: ["time_band", "hour"],
+  service: ["service"],
+  stop: ["stop"],
+  dir: ["dir"],
+  early: ["early"],
+  tolerance: ["late"],
+};
+
+/** Whether a screen's data uses a condition, so the scope bar shows it. An
+ *  absent `applied` means every condition is used. */
+export function conditionUsed(key: ConditionKey, applied: ScopeApplied): boolean {
+  return applied == null || CONDITION_FIELDS[key].some((field) => applied[field] !== false);
 }
 
 /** The period's length in days, both ends included. */

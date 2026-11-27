@@ -3,25 +3,39 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
-import { MemoryRouter } from "react-router-dom";
-import { FirstRunTour, FirstRunTourOnLive } from "./FirstRunTour";
+import { useState } from "react";
+import { FirstRunTour } from "./FirstRunTour";
+import { DEFAULT_WINDOW } from "../api/onTimeDefault";
 import { readTourSeen, resetTourSeenMemoryForTests } from "../api/tourSeen";
 
 void i18n.changeLanguage("en");
 
-/** The three real anchors FirstRunTour looks for, standing in for
- *  MapTab's FilterDock/OperationsTripPanel and Sidebar's Ask NavLink. */
-function renderTourWithAnchors() {
+/** The tour as Pulse owns it, holding its step. */
+function Tour({ onTime = DEFAULT_WINDOW }: { onTime?: typeof DEFAULT_WINDOW }) {
+  const [step, setStep] = useState(0);
+  return <FirstRunTour onTime={onTime} step={step} onStep={setStep} onLater={() => {}} />;
+}
+
+/** The three anchors FirstRunTour looks for, standing in for Pulse's
+ *  headline figure, its on-time pointer and its scope bar. */
+function renderTourWithAnchors(onTime = DEFAULT_WINDOW) {
   return render(
     <I18nextProvider i18n={i18n}>
       <div>
-        <div data-tour="filter-bar">filter dock</div>
-        <div data-tour="map-inspect">observed trips</div>
-        <a data-tour="ask-nav" href="/ask">
-          Ask
-        </a>
-        <FirstRunTour />
+        <div data-tour="pulse-delay">2.4 min</div>
+        <p data-tour="pulse-on-time">On-time % is on Routes</p>
+        <div data-tour="pulse-scope">Viewing all routes</div>
+        <Tour onTime={onTime} />
       </div>
+    </I18nextProvider>,
+  );
+}
+
+/** The tour with no anchor on the page yet. */
+function renderTourAlone() {
+  return render(
+    <I18nextProvider i18n={i18n}>
+      <Tour />
     </I18nextProvider>,
   );
 }
@@ -39,83 +53,55 @@ describe("FirstRunTour", () => {
   });
 
   it("does not render once the tour has already been seen", () => {
-    localStorage.setItem("transit.tourSeen", "1");
+    localStorage.setItem("transit.pulseTourSeen", "1");
     renderTourWithAnchors();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows the first step (filters) anchored on the real dashboard", () => {
+  it("opens on what one delay is, before any control", () => {
     renderTourWithAnchors();
     const dialog = screen.getByRole("dialog");
     expect(dialog).not.toHaveAttribute("hidden");
-    expect(within(dialog).getByText("Narrow what you're looking at")).toBeTruthy();
+    expect(within(dialog).getByText("What a delay is here")).toBeTruthy();
+    expect(within(dialog).getByText(/early departure counts as a negative delay/)).toBeTruthy();
     expect(within(dialog).getByText("Step 1 of 3")).toBeTruthy();
   });
 
-  it("points at the filter dock itself when its marker draws no box", () => {
-    const rect = (top: number, left: number, width: number, height: number) =>
-      ({ top, left, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
-    render(
-      <I18nextProvider i18n={i18n}>
-        <div data-tour="filter-bar" style={{ display: "contents" }}>
-          <div data-testid="dock">filter dock</div>
-        </div>
-        <FirstRunTour />
-      </I18nextProvider>,
-    );
-    const dock = screen.getByTestId("dock");
-    vi.spyOn(dock, "getBoundingClientRect").mockReturnValue(rect(300, 400, 200, 40));
-    // A resize re-places the tour on the next frame; run that frame now.
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((run) => {
-      run(0);
-      return 1;
-    });
-    act(() => {
-      window.dispatchEvent(new Event("resize"));
-    });
-    const panel = document.querySelector<HTMLElement>(".first-run-tour")!;
-    expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(340);
+  it("states the on-time window it is given, early edge included", async () => {
+    const user = userEvent.setup();
+    renderTourWithAnchors({ early_sec: 60, late_sec: 300 });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText(/between 1 min early and 5 min late\. Leaving earlier than that is not on time/)).toBeTruthy();
   });
 
-  it("sits below the map legend under the filter dock, so the first step never covers it", () => {
-    const rect = (top: number, left: number, width: number, height: number) =>
-      ({ top, left, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
-    render(
-      <I18nextProvider i18n={i18n}>
-        <div data-tour="filter-bar" style={{ display: "contents" }}>
-          <div data-testid="dock">filter dock</div>
-        </div>
-        <div data-tour="map-reference" data-testid="legend">legend</div>
-        <FirstRunTour />
-      </I18nextProvider>,
-    );
-    vi.spyOn(screen.getByTestId("dock"), "getBoundingClientRect").mockReturnValue(rect(300, 400, 200, 40));
-    vi.spyOn(screen.getByTestId("legend"), "getBoundingClientRect").mockReturnValue(rect(350, 400, 260, 60));
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((run) => {
-      run(0);
-      return 1;
-    });
-    act(() => {
-      window.dispatchEvent(new Event("resize"));
-    });
-    const panel = document.querySelector<HTMLElement>(".first-run-tour")!;
-    expect(Number.parseFloat(panel.style.top)).toBeGreaterThanOrEqual(410);
+  it("says every early departure is on time when the window has no early edge", async () => {
+    const user = userEvent.setup();
+    renderTourWithAnchors({ early_sec: null, late_sec: 60 });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText(/no more than 1 min late, and every early departure counts as on time/)).toBeTruthy();
   });
 
-  it("describes the filters Live actually has", () => {
+  it("uses no timetable-type jargon in any step", async () => {
+    const user = userEvent.setup();
     renderTourWithAnchors();
-    expect(within(screen.getByRole("dialog")).getByText(/Filter by route or service pattern/)).toBeTruthy();
+    const bodies: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      bodies.push(screen.getByRole("dialog").textContent ?? "");
+      if (i < 2) await user.click(screen.getByRole("button", { name: "Next" }));
+    }
+    expect(bodies.join(" ")).not.toMatch(/service pattern|timetable type/i);
+    expect([i18n.t("tour.delay.body", { lng: "ja" }), i18n.t("tour.scope.body", { lng: "ja" })].join("")).not.toContain("種別");
   });
 
   it("advances through all three steps and persists on the final 'Got it'", async () => {
     const user = userEvent.setup();
     renderTourWithAnchors();
 
-    expect(screen.getByText("Narrow what you're looking at")).toBeTruthy();
+    expect(screen.getByText("What a delay is here")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("Inspect what's running now")).toBeTruthy();
+    expect(screen.getByText("What on time means")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("Search and ask")).toBeTruthy();
+    expect(screen.getByText("What this screen covers")).toBeTruthy();
 
     expect(readTourSeen()).toBe("unseen");
     await user.click(screen.getByRole("button", { name: "Got it" }));
@@ -207,16 +193,12 @@ describe("FirstRunTour", () => {
   it("moves focus when the anchor only appears after mounting", async () => {
     vi.useFakeTimers();
     try {
-      const { container } = render(
-        <I18nextProvider i18n={i18n}>
-          <FirstRunTour />
-        </I18nextProvider>,
-      );
+      const { container } = renderTourAlone();
       const panel = document.querySelector<HTMLElement>(".first-run-tour");
       expect(panel?.hidden).toBe(true);
 
       const anchor = document.createElement("div");
-      anchor.setAttribute("data-tour", "filter-bar");
+      anchor.setAttribute("data-tour", "pulse-delay");
       container.appendChild(anchor);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(600);
@@ -243,28 +225,24 @@ describe("FirstRunTour", () => {
     try {
       const setInterval = vi.spyOn(window, "setInterval");
       const clearInterval = vi.spyOn(window, "clearInterval");
-      const { container } = render(
-        <I18nextProvider i18n={i18n}>
-          <FirstRunTour />
-        </I18nextProvider>,
-      );
+      const { container } = renderTourAlone();
       const pollIndex = setInterval.mock.calls.findIndex(([, delay]) => delay === 250);
       expect(pollIndex).toBeGreaterThanOrEqual(0);
       const intervalId = setInterval.mock.results[pollIndex].value;
 
       const anchor = document.createElement("div");
-      anchor.setAttribute("data-tour", "filter-bar");
+      anchor.setAttribute("data-tour", "pulse-delay");
       container.appendChild(anchor);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(250);
       });
 
       expect(clearInterval).toHaveBeenCalledWith(intervalId);
-      const before = document.querySelectorAll('[data-tour="filter-bar"]').length;
+      const before = document.querySelectorAll('[data-tour="pulse-delay"]').length;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
-      expect(document.querySelectorAll('[data-tour="filter-bar"]').length).toBe(before);
+      expect(document.querySelectorAll('[data-tour="pulse-delay"]').length).toBe(before);
       expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(false);
     } finally {
       vi.useRealTimers();
@@ -288,7 +266,7 @@ describe("FirstRunTour", () => {
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
     try {
       renderTourWithAnchors();
-      expect(observed).toEqual([document.querySelector('[data-tour="filter-bar"]')]);
+      expect(observed).toEqual([document.querySelector('[data-tour="pulse-delay"]')]);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -305,13 +283,9 @@ describe("FirstRunTour", () => {
     }
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
     try {
-      const { container } = render(
-        <I18nextProvider i18n={i18n}>
-          <FirstRunTour />
-        </I18nextProvider>,
-      );
+      const { container } = renderTourAlone();
       const first = document.createElement("div");
-      first.setAttribute("data-tour", "filter-bar");
+      first.setAttribute("data-tour", "pulse-delay");
       container.appendChild(first);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(250);
@@ -328,7 +302,7 @@ describe("FirstRunTour", () => {
       expect(document.querySelector<HTMLElement>(".first-run-tour")?.hidden).toBe(true);
 
       const second = document.createElement("div");
-      second.setAttribute("data-tour", "filter-bar");
+      second.setAttribute("data-tour", "pulse-delay");
       container.appendChild(second);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(250);
@@ -348,37 +322,5 @@ describe("FirstRunTour", () => {
     for (let i = 0; i < 4; i++) fireEvent.scroll(window);
     fireEvent(window, new Event("resize"));
     expect(raf).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("FirstRunTourOnLive", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    resetTourSeenMemoryForTests();
-  });
-
-  function renderAt(path: string, anchors: boolean) {
-    return render(
-      <I18nextProvider i18n={i18n}>
-        <MemoryRouter initialEntries={[path]}>
-          <button type="button">page control</button>
-          {anchors && <div data-tour="filter-bar">filter dock</div>}
-          <FirstRunTourOnLive />
-        </MemoryRouter>
-      </I18nextProvider>,
-    );
-  }
-
-  it("stays off a screen without the tour's anchors, leaving Tab to the page", async () => {
-    const user = userEvent.setup();
-    renderAt("/agencies/1/pulse", false);
-    expect(screen.queryByRole("dialog", { hidden: true })).not.toBeInTheDocument();
-    await user.tab();
-    expect(screen.getByRole("button", { name: "page control" })).toHaveFocus();
-  });
-
-  it("runs on Live, where its steps are anchored", () => {
-    renderAt("/agencies/1/live", true);
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

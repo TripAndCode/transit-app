@@ -1,4 +1,4 @@
-import { useRef, type ReactElement } from "react";
+import { Fragment, useRef, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useParams } from "react-router-dom";
 import { scopeToQueryString, useScope } from "../api/scope";
@@ -8,16 +8,19 @@ import { StillWorking } from "../components/StillWorking";
 import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
+import { ScopeBar } from "../components/scope/ScopeBar";
+import type { ScopeApplied } from "../components/scope/scopePhrases";
 import { Section } from "../components/ui/Section";
 import { delayRampVar } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { delayAxisMax, delayAxisShare } from "../components/charts/delayAxis";
-import { hasStopped } from "../components/agencyDirectory";
+import { byAgencyName, hasStopped } from "../components/agencyDirectory";
+import { coverageOutsideTier, unrankedReason } from "../components/comparabilityReason";
 import { fixedTenth, fmtPct, formatDate, formatDateRange, formatNumber, roundTenth } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
 import { useUrlState } from "../api/useUrlState";
-import type { NetworkAgencyRow } from "../api/types";
+import type { ComparabilityThresholds, NetworkAgencyRow } from "../api/types";
 import "./NetworkTab.css";
 
 const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implausible (clamped)
@@ -25,6 +28,23 @@ const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implau
 /** The severity threshold the product treats as "late", marked on the axis so
  *  a bar can be read against it without a legend. */
 const AXIS_MARK_MIN = 5;
+
+/** What the board counts by until its answer names it: the period alone
+ *  (api/routers/network.py), so the bar does not show every condition while
+ *  the board loads. */
+const BOARD_SCOPE_APPLIED: ScopeApplied = {
+  from: true,
+  to: true,
+  dow: false,
+  time_band: false,
+  hour: false,
+  service: false,
+  routes: false,
+  stop: false,
+  dir: false,
+  late: false,
+  early: false,
+};
 
 /** Worst first, then agencies with no data in range -- ordering by a metric
  *  puts the rows that need attention where the eye lands first, and a null
@@ -49,6 +69,15 @@ function newestDataTo(agencies: readonly NetworkAgencyRow[]): string | null {
 function dataRank(a: NetworkAgencyRow, newest: string | null): number {
   if (a.data_to == null) return 2;
   return hasStopped(a.data_to, newest) ? 1 : 0;
+}
+
+/** The gate's thresholds as the copy quotes them. */
+function thresholdValues(limits: ComparabilityThresholds): { coverage: string; ci: string; clamp: string } {
+  return {
+    coverage: formatNumber(limits.min_coverage_pct),
+    ci: formatNumber(limits.max_ci_half_width_pp),
+    clamp: formatNumber(limits.max_clamp_pct),
+  };
 }
 
 /** The planned figure, and every rate built on it, counts only the days a
@@ -103,6 +132,7 @@ function AgencyRow({
   windowFrom,
   windowTo,
   newest,
+  limits,
 }: {
   agency: NetworkAgencyRow;
   isCurrent: boolean;
@@ -112,6 +142,7 @@ function AgencyRow({
   windowFrom: string;
   windowTo: string;
   newest: string | null;
+  limits: ComparabilityThresholds;
 }) {
   const { t } = useTranslation();
   const a = agency;
@@ -136,12 +167,31 @@ function AgencyRow({
             window: a.window_days,
           })
         : t("network.planned_trips", { count: formatNumber(a.planned_trips) });
+  const basic = a.capability_tier === "basic";
   const delivered =
     a.service_delivered_pct != null
       ? `${fixedTenth(a.service_delivered_pct)}%`
-      : a.delivered_missing != null
+      : basic
+        ? t("capability.basic.figure")
+        : a.delivered_missing != null
         ? t("network.delivered_value_missing", { reason: t(`network.delivered_missing.${a.delivered_missing}`) })
         : "—";
+  const reason = unrankedReason(a, limits, t);
+  const observedCoverage =
+    a.coverage_pct != null && a.observed_trips != null && a.coverage_planned_trips != null
+      ? t("network.observed_coverage", {
+          pct: fixedTenth(a.coverage_pct),
+          observed: formatNumber(a.observed_trips),
+          planned: formatNumber(a.coverage_planned_trips),
+        })
+      : coverageOutsideTier(a)
+        ? `${t("network.col_observed_coverage")} ${t("capability.basic.figure")}`
+        : t("network.observed_coverage_missing");
+  // The interval describes the plain on-time rate, never the weighted one.
+  const interval =
+    !weightedView && a.on_time_pct != null && a.ci_low != null && a.ci_high != null
+      ? t("network.on_time_ci", { low: fixedTenth(a.ci_low), high: fixedTenth(a.ci_high) })
+      : null;
 
   return (
     <div
@@ -158,12 +208,14 @@ function AgencyRow({
             {t("network.viewing_badge")}
           </span>
         )}
+        {basic && <span className="network-row__sub">{t("capability.basic.label")}</span>}
         {coverage != null && <span className="network-row__sub">{coverage}</span>}
         {stopped && a.data_to != null && newest != null && (
           <span className="network-row__sub network-row__stopped">
             {t("onboarding.stopped", { date: formatDate(a.data_to, { year: a.data_to.slice(0, 4) !== newest.slice(0, 4) }) })}
           </span>
         )}
+        {reason != null && <span className="network-row__sub network-row__reason">{reason}</span>}
       </span>
 
       <span className="network-row__value num" aria-label={t("network.col_avg_delay")}>
@@ -194,9 +246,11 @@ function AgencyRow({
         {displayedOnTimePct == null
           ? "—"
           : `${fixedTenth(displayedOnTimePct)}%${weightedView ? t("network.on_time_weighted_suffix") : ""}`}
+        {interval != null && <span className="network-row__ci"> {interval}</span>}
       </span>
 
       <div className="network-row__meta">
+        <span>{observedCoverage}</span>
         <span>{planned}</span>
         <span>
           {t("network.col_delivered")} {delivered}
@@ -248,7 +302,7 @@ function AgencyRow({
 }
 
 export function NetworkTab() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { agencyId } = useParams();
   const currentAgencyId = agencyId ? Number(agencyId) : null;
   const [ctx, update] = useScope();
@@ -274,9 +328,16 @@ export function NetworkTab() {
   const suffix = linkQS ? `?${linkQS}` : "";
 
   const newest = data ? newestDataTo(data.agencies) : null;
-  const ordered = data
-    ? [...data.agencies].sort((a, b) => dataRank(a, newest) - dataRank(b, newest) || byDelayDescending(a, b))
-    : [];
+  // Only the agencies the data can compare are ranked. The rest follow by
+  // name, so no figure the gate refused to compare implies an order; the
+  // server leaves them in agency_id order for this.
+  const ranked = (data?.agencies ?? [])
+    .filter((a) => a.comparable)
+    .sort((a, b) => dataRank(a, newest) - dataRank(b, newest) || byDelayDescending(a, b));
+  const unranked = (data?.agencies ?? [])
+    .filter((a) => !a.comparable)
+    .sort((a, b) => byAgencyName(a, b) || a.agency_id - b.agency_id);
+  const ordered = [...ranked, ...unranked];
   // Every agency's figure, not only the shown ones, so "show more" never
   // rescales the bars already on screen.
   const axisMax = delayAxisMax(data?.agencies.map((a) => a.avg_delay_min) ?? []);
@@ -301,6 +362,10 @@ export function NetworkTab() {
         <ul className="network-howto-list">
           <li><strong>{t("network.col_avg_delay")}</strong> — {t("network.help_avg_delay")}</li>
           <li><strong>{t("network.col_on_time")}</strong> — {t("network.help_on_time")}</li>
+          <li><strong>{t("network.col_observed_coverage")}</strong> — {t("network.help_observed_coverage")}</li>
+          {data && (
+            <li><strong>{t("network.col_ranking")}</strong> — {t("network.help_ranking", thresholdValues(data.comparability))}</li>
+          )}
           {ridershipWeightingAvailable && (
             <li><strong>{t("network.ridership_weighted_toggle")}</strong> — {t("network.help_ridership_weighted")}</li>
           )}
@@ -314,16 +379,12 @@ export function NetworkTab() {
         </ul>
       </details>
 
-      <div className="network-controls">
-        <label>
-          {t("network.from")}{" "}
-          <input type="date" lang={i18n.language} value={ctx.from} max={ctx.to} onChange={(e) => update({ from: e.target.value })} />
-        </label>
-        <label>
-          {t("network.to")}{" "}
-          <input type="date" lang={i18n.language} value={ctx.to} min={ctx.from} onChange={(e) => update({ to: e.target.value })} />
-        </label>
-        {ridershipWeightingAvailable && (
+      {/* The board ranks every agency over one period, so the period is its
+          only condition, and it draws no one agency's figures. */}
+      <ScopeBar applied={data?.scope_applied ?? BOARD_SCOPE_APPLIED} actions={false} figures={false} />
+
+      {ridershipWeightingAvailable && (
+        <div className="network-controls">
           <label>
             <input
               type="checkbox"
@@ -333,13 +394,18 @@ export function NetworkTab() {
             />
             {t("network.ridership_weighted_toggle")}
           </label>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* DefinitionMetaBlock is its own disclosure: the aggregation rules are
           what you check once a comparison has raised a question, not what you
           read before making one. */}
-      {data && <DefinitionMetaBlock definition={data.definition} />}
+      {data && (
+        <DefinitionMetaBlock
+          definition={data.definition}
+          agencyNames={new Map(data.agencies.map((agency) => [agency.agency_id, agency.agency_name]))}
+        />
+      )}
 
       <AsyncSection
         loading={isPending}
@@ -355,7 +421,7 @@ export function NetworkTab() {
           </>
         }
       >
-        {() => (
+        {(summary) => (
           <>
             <div className="network-rows" data-testid="network-card-list" ref={rowsRef}>
               <div className="network-row network-row--head" aria-hidden="true">
@@ -364,25 +430,36 @@ export function NetworkTab() {
                 <span>{t("network.axis_caption", { max: axisMax })}</span>
                 <span style={{ textAlign: "right" }}>{t("network.col_on_time")}</span>
               </div>
-              {cappedAgencies.visible.map((a) => (
-                <AgencyRow
-                  key={a.agency_id}
-                  agency={a}
-                  isCurrent={currentAgencyId != null && a.agency_id === currentAgencyId}
-                  // Falls back to this agency's own unweighted on_time_pct when
-                  // the toggle is on but THIS agency has no configured weight --
-                  // never blocks rendering, just can't show a weighted figure
-                  // that doesn't exist.
-                  weightedView={showRidershipWeighted && a.has_ridership_weights}
-                  linkSuffix={suffix}
-                  axisMax={axisMax}
-                  windowFrom={data?.from ?? ctx.from}
-                  windowTo={data?.to ?? ctx.to}
-                  newest={newest}
-                />
+              {cappedAgencies.visible.map((a, i) => (
+                <Fragment key={a.agency_id}>
+                  {/* Before the first unranked row: `visible` is a prefix of `ordered`. */}
+                  {i === ranked.length && (
+                    <div className="network-unranked" data-testid="network-unranked">
+                      <h3 className="network-unranked__title">{t("network.unranked_heading")}</h3>
+                      <p className="network-unranked__criteria">
+                        {t("network.unranked_criteria", thresholdValues(summary.comparability))}
+                      </p>
+                    </div>
+                  )}
+                  <AgencyRow
+                    agency={a}
+                    isCurrent={currentAgencyId != null && a.agency_id === currentAgencyId}
+                    // Falls back to this agency's own unweighted on_time_pct when
+                    // the toggle is on but THIS agency has no configured weight --
+                    // never blocks rendering, just can't show a weighted figure
+                    // that doesn't exist.
+                    weightedView={showRidershipWeighted && a.has_ridership_weights}
+                    linkSuffix={suffix}
+                    axisMax={axisMax}
+                    windowFrom={data?.from ?? ctx.from}
+                    windowTo={data?.to ?? ctx.to}
+                    newest={newest}
+                    limits={summary.comparability}
+                  />
+                </Fragment>
               ))}
               {cappedAgencies.remaining > 0 && (
-                <button type="button" className="btn-ghost" onClick={cappedAgencies.showMore}>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={cappedAgencies.showMore}>
                   {t("common.show_more", { count: cappedAgencies.remaining })}
                 </button>
               )}
@@ -390,6 +467,15 @@ export function NetworkTab() {
             {cappedAgencies.visible.some(isPartlyTimetabled) && (
               <p className="network-footnote" data-testid="network-plan-coverage-footnote">
                 {t("network.plan_coverage_footnote")}
+              </p>
+            )}
+            {summary.coverage_through != null && summary.coverage_through < summary.to && (
+              <p className="network-footnote" data-testid="network-coverage-through-footnote">
+                {t("network.coverage_through_footnote", {
+                  date: formatDate(summary.coverage_through, {
+                    year: summary.coverage_through.slice(0, 4) !== summary.to.slice(0, 4),
+                  }),
+                })}
               </p>
             )}
           </>

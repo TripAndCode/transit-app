@@ -3,11 +3,16 @@
 validate_feed_url alone only checks the URL given to it once, before the
 first request - it does nothing about urllib's default redirect handling
 (which follows a 3xx to a new host with no re-validation) or an unbounded
-response body. safe_urlopen closes both gaps. All cases use IP-literal
-hosts so no real DNS/network call happens - the opener itself is mocked,
-matching this suite's existing hermetic style (see test_url_guard.py).
+response body. safe_urlopen closes both gaps. No case makes a DNS or
+external network call: most mock the opener with IP-literal hosts, and the
+deadline cases talk to a real loopback server with validate_feed_url stubbed,
+because only a real socket shows how http.client closes a finished response.
 """
 
+import http.client
+import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -255,3 +260,96 @@ def test_preserves_request_body_across_redirect(monkeypatch):
     with safe_urlopen(req) as resp:
         assert resp.read() == b"ok"
     assert seen_bodies == [b"payload", b"payload"]
+
+
+def _dripping_server(*, chunked: bool):
+    """A local HTTP server that sends its body one byte every 50 ms, each well
+    inside the client's socket timeout."""
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def serve():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            if chunked:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3c\r\n")
+            else:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 60\r\n\r\n")
+            try:
+                for _ in range(60):
+                    time.sleep(0.05)
+                    conn.sendall(b"x")
+                if chunked:
+                    conn.sendall(b"\r\n0\r\n\r\n")
+            except OSError:
+                pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    return server
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_a_deadline_ends_a_real_fetch_whose_body_drips(chunked):
+    server = _dripping_server(chunked=chunked)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", server.getsockname()[1], timeout=5)
+        conn.request("GET", "/feed")
+        resp = conn.getresponse()
+        deadline = time.monotonic() + 0.3
+        with pytest.raises(FeedURLError, match="deadline"):
+            url_guard._read_capped(resp, 10 * 1024 * 1024, deadline, "http://127.0.0.1/feed")
+        assert time.monotonic() - deadline < 0.5
+        conn.close()
+    finally:
+        server.close()
+
+
+def test_a_deadline_still_returns_a_body_that_arrives_in_time(monkeypatch):
+    monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _FakeResponse(b"hello" * 30000))
+    with safe_urlopen("http://8.8.8.8/feed", deadline=time.monotonic() + 5) as resp:
+        assert resp.read() == b"hello" * 30000
+
+
+def test_a_deadline_keeps_the_size_cap(monkeypatch):
+    monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _FakeResponse(b"x" * 1000))
+    with pytest.raises(FeedURLError, match="exceeded"):
+        safe_urlopen("http://8.8.8.8/feed", max_bytes=500, deadline=time.monotonic() + 5)
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_a_deadline_reads_a_dripping_body_that_finishes_in_time(monkeypatch, chunked):
+    server = _dripping_server(chunked=chunked)
+    monkeypatch.setattr(url_guard, "validate_feed_url", lambda url: None)
+    try:
+        url = f"http://127.0.0.1:{server.getsockname()[1]}/feed"
+        with safe_urlopen(url, timeout=5, deadline=time.monotonic() + 10) as resp:
+            assert resp.read() == b"x" * 60
+    finally:
+        server.close()
+
+
+def test_a_deadline_reads_a_content_length_body_the_response_closes_itself_on(monkeypatch):
+    """Under urllib, http.client closes a Content-Length response and its socket
+    on the body's last byte, so a deadline read must not reset that socket's
+    timeout afterwards."""
+    body = b"y" * 5000
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def serve():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % len(body) + body)
+
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setattr(url_guard, "validate_feed_url", lambda url: None)
+    try:
+        url = f"http://127.0.0.1:{server.getsockname()[1]}/feed"
+        with safe_urlopen(url, deadline=time.monotonic() + 5) as resp:
+            assert resp.read() == body
+    finally:
+        server.close()

@@ -1,7 +1,7 @@
 """Async DAL for the ask_intent_cache table.
 
-Used by the chat orchestrator (T5) and the promotion job (T7). Pure CRUD —
-no LLM, no embedding, no canonicalization (those happen upstream).
+Used by the chat orchestrator. Pure CRUD — no LLM, no canonicalization (that
+happens upstream).
 """
 
 from __future__ import annotations
@@ -13,22 +13,16 @@ import asyncpg
 
 from pipeline.query.intent import IntentSignature
 
-_ALLOWED_ACTIONS = frozenset({"confirmed", "edited"})
-
 # Mirror the cap in ``query_log.py`` so a 3000-char adversarial question can't
-# pollute the autocomplete chip surface (and, post-promotion, the RAG index).
+# pollute the autocomplete chip surface.
 _MAX_QUESTION_CHARS = 1000
 
 
-async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) -> dict[str, Any] | None:
-    """Return the cache row (as a dict) or None when the hash isn't cached."""
-    row = await conn.fetchrow(
-        "SELECT signature_hash, tool, args, confidence, hit_count, last_question, "
-        "last_user_action, promoted_at, agency_id, created_at, last_used_at "
-        "FROM ask_intent_cache WHERE signature_hash = $1 AND agency_id = $2",
-        signature_hash,
-        agency_id,
-    )
+_COLUMNS = "signature_hash, tool, args, confidence, hit_count, last_question, agency_id, created_at, last_used_at"
+
+
+async def _fetch(conn: asyncpg.Connection, where: str, *params: Any) -> dict[str, Any] | None:
+    row = await conn.fetchrow(f"SELECT {_COLUMNS} FROM ask_intent_cache WHERE {where}", *params)
     if row is None:
         return None
     out = dict(row)
@@ -36,6 +30,11 @@ async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) 
     if isinstance(out.get("args"), str):
         out["args"] = json.loads(out["args"])
     return out
+
+
+async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) -> dict[str, Any] | None:
+    """Return the cache row (as a dict) or None when the hash isn't cached."""
+    return await _fetch(conn, "signature_hash = $1 AND agency_id = $2", signature_hash, agency_id)
 
 
 async def lookup_by_question(conn: asyncpg.Connection, question: str, agency_id: int) -> dict[str, Any] | None:
@@ -46,20 +45,9 @@ async def lookup_by_question(conn: asyncpg.Connection, question: str, agency_id:
     Paraphrase matching (different text, same canonical intent) is handled by
     the downstream sig-hash lookup after an LLM call.
     """
-    row = await conn.fetchrow(
-        "SELECT signature_hash, tool, args, confidence, hit_count, last_question, "
-        "last_user_action, promoted_at, agency_id, created_at, last_used_at "
-        "FROM ask_intent_cache WHERE last_question = $1 AND agency_id = $2 "
-        "ORDER BY last_used_at DESC LIMIT 1",
-        question,
-        agency_id,
+    return await _fetch(
+        conn, "last_question = $1 AND agency_id = $2 ORDER BY last_used_at DESC LIMIT 1", question, agency_id
     )
-    if row is None:
-        return None
-    out = dict(row)
-    if isinstance(out.get("args"), str):
-        out["args"] = json.loads(out["args"])
-    return out
 
 
 async def upsert(
@@ -71,13 +59,7 @@ async def upsert(
     *,
     question: str,
 ) -> None:
-    """Insert a new cache row OR increment hit_count + refresh last_question/used_at.
-
-    A promoted row keeps its last_question: that text is what its
-    ``rag_chunks`` suggestion published (and what /ask/suggest joins on), and
-    the row is exempt from the retention prune, so a later asker's wording
-    must not land in it.
-    """
+    """Insert a new cache row OR increment hit_count + refresh last_question/used_at."""
     await conn.execute(
         """
         INSERT INTO ask_intent_cache
@@ -85,9 +67,7 @@ async def upsert(
         VALUES ($1, $2, $3::jsonb, $4, 1, $5, $6)
         ON CONFLICT (signature_hash, agency_id) DO UPDATE
           SET hit_count    = ask_intent_cache.hit_count + 1,
-              last_question = CASE WHEN ask_intent_cache.promoted_at IS NULL
-                                   THEN EXCLUDED.last_question
-                                   ELSE ask_intent_cache.last_question END,
+              last_question = EXCLUDED.last_question,
               last_used_at  = now(),
               confidence    = GREATEST(ask_intent_cache.confidence, EXCLUDED.confidence)
         """,
@@ -97,82 +77,4 @@ async def upsert(
         float(signature.confidence),
         question[:_MAX_QUESTION_CHARS],
         agency_id,
-    )
-
-
-async def update_user_action(
-    conn: asyncpg.Connection,
-    signature_hash: str,
-    agency_id: int,
-    action: str,
-) -> None:
-    """Record the user's verdict on a previously-cached interpretation."""
-    if action not in _ALLOWED_ACTIONS:
-        raise ValueError(f"action must be one of {sorted(_ALLOWED_ACTIONS)}; got {action!r}")
-    await conn.execute(
-        "UPDATE ask_intent_cache SET last_user_action = $3 WHERE signature_hash = $1 AND agency_id = $2",
-        signature_hash,
-        agency_id,
-        action,
-    )
-
-
-async def promotion_candidates(
-    conn: asyncpg.Connection,
-    agency_id: int,
-    *,
-    hit_threshold: int = 5,
-    quiet_days: int = 7,
-) -> list[dict[str, Any]]:
-    """Rows that satisfy: >=hit_threshold hits, no `edited` action, >=quiet_days old,
-    and not yet promoted. ``confirmed`` action is fine — only ``edited`` blocks."""
-    rows = await conn.fetch(
-        f"""
-        SELECT signature_hash, tool, args, last_question, last_user_action,
-               hit_count, created_at
-        FROM ask_intent_cache
-        WHERE agency_id = $1
-          AND hit_count >= $2
-          AND (last_user_action IS NULL OR last_user_action = 'confirmed')
-          AND created_at <= now() - INTERVAL '{int(quiet_days)} days'
-          AND promoted_at IS NULL
-        ORDER BY hit_count DESC, created_at ASC
-        """,
-        agency_id,
-        hit_threshold,
-    )
-    out = []
-    for r in rows:
-        d = dict(r)
-        if isinstance(d.get("args"), str):
-            d["args"] = json.loads(d["args"])
-        out.append(d)
-    return out
-
-
-async def mark_promoted(
-    conn: asyncpg.Connection,
-    signature_hash: str,
-    agency_id: int,
-    embedding_version: str | None = None,
-    question: str | None = None,
-) -> None:
-    """Mark a cache row as promoted to rag_chunks (called by the promotion job).
-
-    ``embedding_version`` records which embedder built the promoted chunk, so a
-    later model or library change can tell which promotions need redoing. NULL
-    means the promotion predates stamping.
-
-    ``question`` is the text the chunk published. The row keeps it as
-    last_question, which /ask/suggest joins on and later hits no longer
-    replace; None leaves last_question as it is.
-    """
-    await conn.execute(
-        "UPDATE ask_intent_cache SET promoted_at = now(), embedding_version = $3, "
-        "last_question = COALESCE($4, last_question) "
-        "WHERE signature_hash = $1 AND agency_id = $2",
-        signature_hash,
-        agency_id,
-        embedding_version,
-        question,
     )

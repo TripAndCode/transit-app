@@ -11,19 +11,31 @@ A change to what any of these statements produces is a builder change: bump
 the table's version in `pipeline/agg_registry.py` in the same commit.
 """
 
-from pipeline.db import hms_to_sec_sql
+from datetime import datetime, timezone
+
+from api.range import time_band_case_sql
+from pipeline.clickhouse import LIVE_SOURCED, STOP_SKIPPED, TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
+from pipeline.db import (
+    departure_ch,
+    hms_to_sec_sql,
+    latest_trip_report_ch,
+    stop_event_filter_ch,
+    trip_report_filter_ch,
+)
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.service_day import service_date_ch, service_day_offset_ch, service_day_seconds_sql
+from pipeline.static_archive import FILED_DATE_SQL, Stamp, filed_date_sql, observation_rows
 
 _SERVICE_DATE = service_date_ch()
 
 
 def feed_health_ch_sql(date_where: str) -> str:
     """Per service date: rows carrying a dep_delay, how many of those exceed the
-    plausibility clamp, and every row of the date, which is the ledger the next
-    run's rebuild decision reads."""
+    plausibility clamp, every row of the date, which is the ledger the next
+    run's rebuild decision reads, and those rows split by the source they were
+    ingested from: the collector's archive, or the live path."""
     return (
         """
             SELECT """
@@ -31,7 +43,13 @@ def feed_health_ch_sql(date_where: str) -> str:
         + """ AS date,
                    countIf(dep_delay IS NOT NULL) AS raw_samples,
                    countIf(abs(dep_delay) > {max_delay:Int32}) AS clamp_count,
-                   count() AS total_rows
+                   count() AS total_rows,
+                   countIf(NOT """
+        + LIVE_SOURCED
+        + """) AS archive_rows,
+                   countIf("""
+        + LIVE_SOURCED
+        + """) AS live_rows
             FROM updates
             WHERE agency_id = {agency_id:UInt16}
             """
@@ -40,6 +58,22 @@ def feed_health_ch_sql(date_where: str) -> str:
             GROUP BY date
             """
     )
+
+
+#: Per service date of capture, agg_feed_health's ledger counts (raw_samples,
+#: total_rows, live_rows; feed_health_ch_sql's own) as `updates` holds them
+#: now, over the rows captured from ``after`` up to ``before``. analyze's
+#: rebuild decision and the `updates` prune compare them with the stored
+#: ledger. A range on the stored instant, so the sort key prunes the scan;
+#: EARLIEST_CAPTURE and LATEST_CAPTURE leave an end open.
+LEDGER_COUNTS_CH_SQL = (
+    f"SELECT {_SERVICE_DATE} AS date, countIf(dep_delay IS NOT NULL) AS raw_samples, count() AS total_rows, "
+    f"countIf({LIVE_SOURCED}) AS live_rows "
+    "FROM updates WHERE agency_id = {agency_id:UInt16} "
+    "AND captured_at >= {after:DateTime64} AND captured_at < {before:DateTime64} GROUP BY date"
+)
+EARLIEST_CAPTURE = datetime(1970, 1, 1, tzinfo=timezone.utc)
+LATEST_CAPTURE = datetime(2200, 1, 1, tzinfo=timezone.utc)
 
 
 # ClickHouse's argMax(arg, val) silently SKIPS a row whose `arg`
@@ -63,59 +97,99 @@ def feed_health_ch_sql(date_where: str) -> str:
 # from sending it more sparingly. Date-scoped like every
 # incremental table: both subqueries carry date_where, so a changed
 # day is recomputed from all of that day's rows and no other day is
-# touched. A day with zero non-executed trips has no matching row
-# in the inner UNION, so it emits no row here at all -- the read
+# touched. A day with zero non-executed trips has no trip passing
+# the outer WHERE, so it emits no row here at all -- the read
 # path sums with a zero default rather than assuming row-per-day
 # density.
+#
+# SKIPPED means the vehicle passes the stop without stopping, so a run
+# that skipped some stops ran; a feed that reports every stop of a trip
+# SKIPPED is reporting the trip not run. A cancellation that listed no
+# stop is a CANCELED row per stop of its timetable still to come, or, when
+# none is or the timetable lacks the trip, one trip-level row, which counts
+# in the trip's status and is no stop.
+#
+# Both subqueries pick from the rows the departure dedup reads
+# (pipeline.db.stop_event_report_ch): a plausible departure, or a row
+# withdrawing one. A report carrying neither a delay nor a CANCELED or
+# SKIPPED status says nothing about whether the trip ran: a later one
+# leaves the withdrawal before it standing here exactly as it leaves that
+# stop without a departure there, and a stop the feed reported only so
+# counts neither way, so the trip's other stops decide.
+#
+# The route is picked once per trip-day, from the outer subquery's group:
+# the route its latest report naming one names, '' where none does. That
+# subquery groups every row the stop-level one reads, so every trip not run
+# is one of its trip-days and lands under exactly one route, and an agency's
+# day is the sum of its routes. The pick is aliased `route`, not
+# `route_code`, because ClickHouse substitutes a SELECT alias for a
+# same-named column elsewhere in the query.
 def service_delivered_ch_sql(date_where: str) -> str:
-    """Per service date, the trips the feed reported as not run: CANCELED trips and trips with a SKIPPED stop."""
+    """Per service date and route, the trips the feed reported as not run: a
+    trip whose latest status is CANCELED, or every stop of which it reports
+    with a plausible delay or a CANCELED or SKIPPED status has SKIPPED as its
+    latest such status. A stop reported only without either counts neither
+    way. A cancellation listing no stop that arrives after the trip has run,
+    past its last scheduled departure plus the clamp and listing margin, is
+    passed over (`pipeline.db.latest_trip_report_ch`)."""
     return (
         """
-                SELECT svc_date, count() FROM (
-                    SELECT svc_date, trip_id FROM (
-                        SELECT """
-        + _SERVICE_DATE
+                SELECT svc_date, route, count() FROM (
+                    SELECT """
+        + FILED_DATE_SQL
         + """ AS svc_date, trip_id,
-                               argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                           """
+        + latest_trip_report_ch("coalesce(u.schedule_relationship_trip, -1)", "svc_date")
+        + """ AS trip_rel,
+                           ifNull("""
+        + latest_trip_report_ch("u.route_code", "svc_date", "u.route_code IS NOT NULL")
+        + """, '') AS route
+                    FROM updates AS u WHERE """
+        + trip_report_filter_ch()
         + date_where
         + """
-                        GROUP BY svc_date, trip_id
-                    ) WHERE trip_rel = 3
-                    UNION DISTINCT
+                    GROUP BY svc_date, trip_id
+                ) WHERE trip_rel = """
+        + str(TRIP_CANCELED)
+        + """ OR (svc_date, trip_id) IN (
                     SELECT svc_date, trip_id FROM (
                         SELECT """
-        + _SERVICE_DATE
+        + FILED_DATE_SQL
         + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                        FROM updates AS u WHERE """
+        + stop_event_filter_ch(f"u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}")
         + date_where
         + """
                         GROUP BY svc_date, trip_id, stop_sequence
-                    ) WHERE stop_rel = 1
-                ) GROUP BY svc_date
+                    ) GROUP BY svc_date, trip_id HAVING countIf(stop_rel != """
+        + str(STOP_SKIPPED)
+        + """) = 0
+                )
+                GROUP BY svc_date, route
                 """
     )
 
 
-# `argMax(version, cnt)` picks the version stamped on the MOST rows
-# that day (mode), not the version of the latest single observation
-# -- a reload happening mid-day should attribute that day to whichever
-# version actually served most of it, not to whichever the last poll
-# happened to see.
-def schedule_revision_ch_sql(date_where: str) -> str:
-    """Per service date, the timetable version stamped on the most rows."""
+# `argMax(version, cnt)` picks the version filed on the MOST rows that
+# day (mode), not the version of the latest single observation. Read
+# under Stamp.IN_FORCE every row of a date with a version in force is
+# filed under it; a date with none falls back to the versions its rows
+# were ingested against, where the mode attributes a reload mid-day to
+# the version that served most of the day.
+def schedule_revision_ch_sql(date_where: str, stamp: Stamp = Stamp.IN_FORCE) -> str:
+    """Per service date, the timetable version filed on the most rows."""
     return (
         """
             SELECT svc_date, argMax(version, cnt) AS static_version_id
             FROM (
                 SELECT """
-        + _SERVICE_DATE
+        + filed_date_sql(stamp)
         + """ AS svc_date,
                        static_version_id AS version,
                        count() AS cnt
-                FROM updates WHERE agency_id = {agency_id:UInt16}"""
-        + date_where
+                """
+        + observation_rows("u.agency_id = {agency_id:UInt16}" + date_where, stamp)
         + """
                 GROUP BY svc_date, version
             )
@@ -131,11 +205,14 @@ def schedule_revision_ch_sql(date_where: str) -> str:
 # underneath it scans every `updates` row of the dates being rebuilt
 # (the agency's whole history on a full rebuild).
 #
-# The per-event dedup is build_dedup_ch_sql's: implausible and NULL
-# delays are dropped BEFORE the latest-observation-wins argMax, so a
+# The per-event dedup is build_dedup_ch_sql's, over the rows
+# pipeline.db.stop_event_filter_ch admits: implausible and NULL delays, and
+# untimely readings, are dropped BEFORE the latest-observation-wins argMax, so a
 # frozen-feed spike in an event's latest poll leaves its last
 # plausible estimate rather than removing the event and merging its
-# two neighbouring gaps. stop_sequence stays in the per-event key
+# two neighbouring gaps, while an event whose latest poll reports its
+# trip CANCELED or its stop SKIPPED is no departure and leaves no
+# event (pipeline.db.latest_departure_ch). stop_sequence stays in the per-event key
 # (as in build_dedup_ch_sql and agg_service_delivered_daily's own
 # stop-level subquery) so a route that revisits the same physical
 # stop_id within one trip keeps both visits as distinct events; only
@@ -154,31 +231,34 @@ def schedule_revision_ch_sql(date_where: str) -> str:
 # The filters are on `u.` columns
 # because an unqualified name matching a SELECT alias in WHERE is
 # replaced by that alias's aggregate (see build_dedup_ch_sql).
-def route_headway_daily_ch_sql(date_where: str) -> str:
+def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> str:
     """Per (route, stop, service date), the array of actual event times, and the
-    version names its events were ingested against ('' for none) with how many
-    events carry each (a sumMap tally, so the result grows with the names, not
-    the events). Each event's delay, schedule and name come from its latest poll."""
+    version names its events are filed under ('' for none, as *stamp* files
+    them) with how many events carry each (a sumMap tally, so the result grows
+    with the names, not the events). Each event's delay, schedule and name come
+    from its latest poll."""
     return (
         """
                 WITH per_event AS (
                     SELECT route_code, stop_id, """
-        + _SERVICE_DATE
+        + filed_date_sql(stamp)
         + """ AS svc_date, trip_id,
                            stop_sequence,
                            argMax(
-                               tuple(u.dep_delay, u.scheduled_sec, ifNull(u.static_version_id, '')),
+                               tuple("""
+        + departure_ch()
+        + """, u.scheduled_sec, ifNull(u.static_version_id, '')),
                                (u.captured_at, u.file_name)
                            ) AS latest
-                    FROM updates AS u
-                    WHERE u.agency_id = {agency_id:UInt16}
-                      AND u.stop_id IS NOT NULL AND u.route_code IS NOT NULL
-                      AND u.scheduled_sec IS NOT NULL
-                      AND u.dep_delay IS NOT NULL
-                      AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}"""
-        + date_where
+                    """
+        + observation_rows(
+            stop_event_filter_ch("u.stop_id IS NOT NULL" + date_where),
+            stamp,
+            filed_where="u.route_code IS NOT NULL AND u.scheduled_sec IS NOT NULL",
+        )
         + """
                     GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
+                    HAVING tupleElement(latest, 1) IS NOT NULL
                 )
                 SELECT route_code, stop_id, svc_date,
                        groupArray(toInt64("""
@@ -219,6 +299,13 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
 # not real zero-headway service) is excluded rather than let it
 # drag the median down.
 #
+# The median is PERCENTILE_CONT(0.5): for an even count of gaps, the
+# mean of the two middle ones, as statistics.median takes the actual
+# side's (pipeline.headways), so a route's scheduled and actual
+# headways are medians of one definition. PERCENTILE_DISC would take
+# the lower middle, so a timetable whose gaps split evenly between
+# long and short would read as its short gap.
+#
 # departure_time is raw GTFS text ("H:MM:SS" or similar) --
 # unlike `updates.scheduled_time` (normalized at ingest time by
 # pipeline.strategies._time.normalize_departure_time and capped
@@ -234,24 +321,24 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
 # otherwise sort it before the morning's first departure, where
 # GTFS's "24:10:00" sorts after 23:50.
 def route_headway_sql(all_routes: bool = False) -> str:
-    """Per route, the scheduled headway median, sample count, high-frequency flag and mean wait.
+    """Per route, the scheduled headway median, sample count and high-frequency flag.
 
     *all_routes* selects instead every route of a dominant service with its
-    median, NULL where the timetable gives none: what pipeline.static_headways
-    keeps per timetable.
+    median, sum and sum of squares, NULL where the timetable gives none: what
+    pipeline.static_headways keeps per timetable.
     """
     hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
     if all_routes:
         selected = """
-                SELECT ds.route_code, m.scheduled_headway_median_sec
+                SELECT ds.route_code, m.scheduled_headway_median_sec,
+                       m.scheduled_headway_sum_sec, m.scheduled_headway_sumsq_sec2
                 FROM dominant_service ds LEFT JOIN medians m USING (route_code)
             """
     else:
         selected = f"""
                 SELECT %(agency_id)s AS agency_id, route_code,
                        scheduled_headway_median_sec, scheduled_samples,
-                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
-                       scheduled_wait_mean_sec
+                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency
                 FROM medians
             """
     return f"""
@@ -274,17 +361,15 @@ def route_headway_sql(all_routes: bool = False) -> str:
                 ),
                 medians AS (
                     SELECT route_code,
-                           PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
+                           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
                            COUNT(*) AS scheduled_samples,
-                           -- E[H^2] / (2*E[H]) over this route's scheduled headway
-                           -- distribution -- the mean-wait-time formula
-                           -- (pipeline.headways.mean_wait_from_moments), computed
-                           -- here in SQL instead of pulling every raw headway_sec
-                           -- back into Python. NULLIF guards the (already
-                           -- near-impossible, since headway_sec > 0 is filtered
-                           -- below) zero-mean case.
-                           AVG(headway_sec::float8 * headway_sec::float8)
-                               / NULLIF(2 * AVG(headway_sec::float8), 0) AS scheduled_wait_mean_sec
+                           -- The distribution's sum and sum of squares, which
+                           -- add across the days a report pools, each under its
+                           -- own timetable (pipeline.static_headways): the
+                           -- scheduled mean wait is their E[H^2] / (2*E[H])
+                           -- (pipeline.headways.mean_wait_from_sums).
+                           SUM(headway_sec::float8) AS scheduled_headway_sum_sec,
+                           SUM(headway_sec::float8 * headway_sec::float8) AS scheduled_headway_sumsq_sec2
                     FROM gaps
                     WHERE headway_sec IS NOT NULL AND headway_sec > 0
                     GROUP BY route_code
@@ -294,7 +379,7 @@ def route_headway_sql(all_routes: bool = False) -> str:
 # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this
 # visit's departure minus its own arrival) and running time (this
 # visit's arrival minus the PREVIOUS visit's departure) -- see
-# pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
+# pipeline/dwell_run.py's docstring for the decomposition. Reads
 # the stop visits _analyze_locked materialises once into _analyze_visits
 # before this runs: one row per trip, service day and stop, pairing the arrival and the
 # departure the feed reports in separate polls, with the scheduled times of
@@ -302,7 +387,7 @@ def route_headway_sql(all_routes: bool = False) -> str:
 # when it maps to none). A visit reported only as an arrival (every trip's
 # terminus) has a NULL dep_delay; one reported only as a departure, a NULL
 # arr_delay.
-def dwell_run_sql() -> str:
+def dwell_run_sql(*, scoped: bool) -> str:
     """Per (date, route, service), dwell and running-time sample counts, sums and histograms."""
     dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
     run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
@@ -320,7 +405,7 @@ def dwell_run_sql() -> str:
                         d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay, d.dep_observed,
                         {sched_arr_expr} AS sched_arr_sec,
                         {sched_dep_expr} AS sched_dep_sec
-                    FROM _analyze_visits d
+                    {_visits_in_scope(scoped)}
                 ),
                 actuals AS (
                     -- A stop with no archived stop time (the visits scan's
@@ -375,7 +460,7 @@ def dwell_run_sql() -> str:
                 )
                 SELECT
                     %(agency_id)s AS agency_id,
-                    date::text, route_code, service_type,
+                    date, route_code, service_type,
                     COUNT(*) FILTER (WHERE dwell_sec IS NOT NULL) AS dwell_samples,
                     COALESCE(SUM(dwell_sec) FILTER (WHERE dwell_sec IS NOT NULL), 0) AS dwell_sum_sec,
                     {dwell_hist_expr} AS hist_dwell,
@@ -385,6 +470,105 @@ def dwell_run_sql() -> str:
                 FROM bucketed
                 GROUP BY date, route_code, service_type
                 ORDER BY date, route_code
+            """
+
+
+# A terminus arrival this far or more ahead of its scheduled time is early.
+SEGMENT_EARLY_ARRIVAL_SEC = 60
+# A stop reached on time or early whose dwell exceeds its scheduled dwell by
+# more than this counts as a hold to keep to the timetable (時間調整).
+SEGMENT_HOLD_ALLOWANCE_SEC = 60
+
+
+def _visits_in_scope(scoped: bool) -> str:
+    """The `_analyze_visits` rows a builder reads: those of the dates it
+    rebuilds when *scoped* (``%(rebuild_dates)s``), else every one. A trip-day's
+    visits share their date, so the filter never splits a trip."""
+    return "FROM _analyze_visits d" + (" WHERE d.date = ANY(%(rebuild_dates)s)" if scoped else "")
+
+
+def _forward_sec(later: str, earlier: str) -> str:
+    """Seconds from timetable clock *earlier* forward to *later*, whichever
+    way either writes a time past midnight or the service-day cutover: a
+    segment runs forward, for less than a day."""
+    return f"mod(mod(({later}) - ({earlier}), 86400) + 86400, 86400)"
+
+
+# Definitions: docs/methodology.md, "Running time per timetable segment". A
+# run counts only when the visit LAG() finds is the segment's own first stop
+# (sched_prev_stop_sequence): a stop the feed did not report would otherwise
+# file a two-segment time under the second segment.
+def segment_runtime_sql(*, scoped: bool) -> str:
+    """Per (date, route, from stop, to stop, time band): running-time samples,
+    the scheduled running time of the same trip-days, holds at the from stop
+    and early arrivals at a terminus."""
+    arr = hms_to_sec_sql("d.sched_arrival_time")
+    dep = hms_to_sec_sql("d.sched_departure_time")
+    prev_dep = hms_to_sec_sql("d.sched_prev_departure_time")
+    band = time_band_case_sql("(TIME '00:00' + make_interval(secs => mod(sched_prev_dep_sec, 86400)))")
+    return f"""
+                WITH visits AS (
+                    SELECT
+                        d.route_code, d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay, d.dep_observed,
+                        d.sched_stop_id, d.sched_prev_stop_sequence, d.sched_prev_stop_id, d.sched_is_last,
+                        {arr} AS sched_arr_sec,
+                        {dep} AS sched_dep_sec,
+                        {prev_dep} AS sched_prev_dep_sec
+                    {_visits_in_scope(scoped)}
+                ),
+                with_prev AS (
+                    -- Over every visit of the trip-day, a no-route one too, so
+                    -- LAG() reaches the visit the feed reported just before.
+                    SELECT *,
+                        LAG(stop_sequence) OVER w AS prev_stop_sequence,
+                        LAG(dep_delay) OVER w AS prev_dep_delay,
+                        LAG(arr_delay) OVER w AS prev_arr_delay,
+                        LAG(dep_observed) OVER w AS prev_dep_observed,
+                        LAG(sched_arr_sec) OVER w AS prev_sched_arr_sec,
+                        LAG(sched_dep_sec) OVER w AS prev_sched_dep_sec
+                    FROM visits
+                    WINDOW w AS (PARTITION BY trip_id, date ORDER BY stop_sequence)
+                ),
+                segments AS (
+                    SELECT
+                        route_code, date, sched_prev_stop_id AS from_stop_id, sched_stop_id AS to_stop_id,
+                        stop_sequence, sched_prev_dep_sec,
+                        CASE WHEN prev_stop_sequence = sched_prev_stop_sequence
+                             THEN {_forward_sec("sched_arr_sec", "prev_sched_dep_sec")} + arr_delay - prev_dep_delay
+                        END AS running_sec,
+                        {_forward_sec("sched_arr_sec", "sched_prev_dep_sec")} AS scheduled_run_sec,
+                        -- The dwell beyond the scheduled one, at the first stop.
+                        CASE WHEN prev_stop_sequence = sched_prev_stop_sequence AND prev_dep_observed
+                                  AND prev_arr_delay <= 0
+                                  AND prev_sched_arr_sec IS NOT NULL AND prev_sched_dep_sec IS NOT NULL
+                             THEN prev_dep_delay - prev_arr_delay END AS excess_dwell_sec,
+                        CASE WHEN sched_is_last THEN arr_delay END AS terminal_arr_delay
+                    FROM with_prev
+                    WHERE route_code IS NOT NULL
+                      AND sched_prev_stop_id IS NOT NULL AND sched_stop_id IS NOT NULL
+                ),
+                banded AS (
+                    SELECT *, {band} AS time_band
+                    FROM segments
+                )
+                SELECT
+                    %(agency_id)s AS agency_id,
+                    date, route_code, from_stop_id, to_stop_id, time_band,
+                    MIN(stop_sequence) AS to_stop_sequence,
+                    COALESCE(
+                        array_agg(running_sec ORDER BY running_sec) FILTER (WHERE running_sec IS NOT NULL),
+                        '{{}}'::int[]
+                    ) AS run_sec,
+                    COUNT(scheduled_run_sec) FILTER (WHERE running_sec IS NOT NULL) AS scheduled_samples,
+                    COALESCE(SUM(scheduled_run_sec) FILTER (WHERE running_sec IS NOT NULL), 0)
+                        AS scheduled_sum_sec,
+                    COUNT(excess_dwell_sec) AS hold_eligible,
+                    COUNT(*) FILTER (WHERE excess_dwell_sec > {SEGMENT_HOLD_ALLOWANCE_SEC}) AS holds,
+                    COUNT(terminal_arr_delay) AS terminal_arrivals,
+                    COUNT(*) FILTER (WHERE terminal_arr_delay <= -{SEGMENT_EARLY_ARRIVAL_SEC}) AS terminal_early
+                FROM banded
+                GROUP BY date, route_code, from_stop_id, to_stop_id, time_band
+                ORDER BY date, route_code, from_stop_id, to_stop_id, time_band
             """
 
 

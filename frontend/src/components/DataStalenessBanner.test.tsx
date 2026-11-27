@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
+import { decl, ruleBody } from "../test/cssRules";
 import { DataStalenessBanner } from "./DataStalenessBanner";
 import * as hooks from "../api/hooks";
 import type { RouteSummaryResponse } from "../api/types";
@@ -57,6 +60,25 @@ describe("DataStalenessBanner", () => {
     renderBanner();
     // scripts/capture_user_manual_screenshots.py hides the shell banners by this attribute.
     expect(screen.getByRole("status")).toHaveAttribute("data-shell-banner");
+  });
+
+  it("leaves its colours to the themed shell-banner rule", () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: summary({ latest_captured_at: hoursAgoIso(48) }),
+    } as never);
+    renderBanner();
+    const banner = screen.getByRole("status");
+    expect(banner.style.background).toBe("");
+    expect(banner.style.color).toBe("");
+    expect(banner.style.borderBottom).toBe("");
+    expect(screen.getByRole("button").style.color).toBe("inherit");
+  });
+
+  it("tints the shell banners from the warning tokens, so both themes follow", () => {
+    const css = readFileSync(resolve(__dirname, "../styles/global.css"), "utf-8");
+    const rule = ruleBody(css, "[data-shell-banner] {");
+    expect(decl(rule, "color")).toBe("var(--color-warning-text)");
+    expect(decl(rule, "background")).toBe("color-mix(in srgb, var(--color-warning) 12%, var(--bg-surface))");
   });
 
   it("renders nothing when the latest observation is recent", () => {

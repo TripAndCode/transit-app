@@ -3,9 +3,7 @@ name = "transit-delay-app"
 version = "0.1.0"
 description = "Transit delay analysis platform for Japanese GTFS-JP agencies"
 authors = []
-# Poetry 2 records each locked package's environment markers; 1.x ignores
-# them and would install the Linux-only `+cpu` torch below on macOS. CI and
-# the Dockerfile pin an exact version inside this range
+# CI and the Dockerfile pin an exact version inside this range
 # (tests/unit/test_poetry_pins.py keeps them in step).
 requires-poetry = ">=2.5,<3"
 packages = [
@@ -14,12 +12,12 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.15"
+python = ">=3.11,<3.16"
 psycopg2-binary = ">=2.9"
 openai = ">=1.50"
 slowapi = ">=0.1"
 asyncpg = ">=0.29"
-fastapi = ">=0.111"
+fastapi = ">=0.121"
 uvicorn = {version = ">=0.29", extras = ["standard"]}
 authlib = ">=1.3"
 itsdangerous = ">=2.2"
@@ -40,31 +38,6 @@ mypy = ">=1.14"
 playwright = "^1.60.0"
 packaging = ">=24"
 
-# `pipeline.query.embeddings.Embedder` already tolerates this whole group being
-# absent — its import is wrapped in try/except and callers fall through to the
-# LLM-only path (see that module's docstring). Optional so the deploy image
-# doesn't have to carry torch/transformers/scikit-learn/scipy — several GB,
-# unused until a RAG index actually exists — just to boot. `make bootstrap`
-# installs it for local dev; the Dockerfile's `--only main` deliberately
-# doesn't.
-[tool.poetry.group.embeddings]
-optional = true
-
-[tool.poetry.group.embeddings.dependencies]
-# Pinned to the major the vectors in `rag_chunks` were built with: an embedder
-# change invalidates the whole index (see `pipeline.query.embeddings.
-# embedding_version`), so a major bump is a deliberate re-index, not a
-# resolver decision.
-sentence-transformers = "^6"
-# The embedder runs on CPU only. PyPI's Linux torch wheel pulls in the CUDA
-# runtime and triton (several GB) that no host here can use, so Linux resolves
-# torch from the CPU-only index. That index's Linux builds carry a `+cpu` local
-# version with no macOS wheel, so other platforms keep PyPI's build.
-torch = [
-    {version = "^2.14", source = "pytorch-cpu", markers = "sys_platform == 'linux'"},
-    {version = "^2.14", markers = "sys_platform != 'linux'"},
-]
-
 [tool.poetry.group.ml]
 optional = true
 
@@ -77,11 +50,6 @@ numpy = ">=2.2"
 pandas = "^3"
 lightgbm = "^4.6"
 
-[[tool.poetry.source]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-priority = "explicit"
-
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
@@ -91,8 +59,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "--strict-markers"
 markers = [
-    "requires_llm_key: tests that need a configured live LLM provider key and the dev API reachable (off by default)",
-    "slow: Test downloads/loads ~120MB ML models; gated by RUN_SLOW=1",
     "anyio: async test driven by anyio's pytest plugin instead of pytest-asyncio's auto mode",
 ]
 

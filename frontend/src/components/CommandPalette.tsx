@@ -236,6 +236,7 @@ export function CommandPalette() {
     group: "nav",
     label: t(target.labelKey),
     sublabel: target.sublabelKey ? t(target.sublabelKey) : undefined,
+    keywords: target.keywords,
     keys: ["g", target.chordKey],
     run: () => goToNav(target.to),
   }));

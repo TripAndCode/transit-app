@@ -1,10 +1,9 @@
 """Post-generation numeric verification for free-form LLM answers.
 
-Structural defense-in-depth alongside the template-only proactive path
-(``pipeline.query.copilot_templates``): a system-prompt instruction not to
-invent numbers is not a guarantee, so every number the model actually wrote
-is cross-checked here against the grounding data it was given, and the
-answer is discarded (never shown) if any number doesn't trace back.
+Structural defense-in-depth: a system-prompt instruction not to invent
+numbers is not a guarantee, so every number the model actually wrote is
+cross-checked here against the grounding data it was given, and the answer
+is discarded (never shown) if any number doesn't trace back.
 """
 
 from __future__ import annotations

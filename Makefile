@@ -30,7 +30,7 @@ unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 catch-up-from-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml reprobe-rt-coverage seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 catch-up-from-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml reprobe-rt-coverage seed-agencies prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -46,7 +46,7 @@ bootstrap:
 	@command -v npm    >/dev/null || { echo "ERROR: npm not installed. brew install node"; exit 1; }
 	@test -f .env || { cp .env.example .env && echo "→ created .env from .env.example — edit it before \`make serve\`"; }
 	@echo "→ installing python deps"
-	@poetry install --with embeddings
+	@poetry install
 	@echo "→ installing npm deps"
 	@cd frontend && npm install --silent
 	@echo "→ bringing up Postgres + applying migrations"
@@ -73,27 +73,50 @@ bake:
 	@echo "→ baked frontend/dist → api/static/"
 
 # ── Sanity check ─────────────────────────────────────────────────────────────
-# Reports the state of env, DB container, port 8000, and SSO env without
+# Reports the state of env, DB container, port 8000, and sign-in env without
 # starting anything. Exit code 0 always — informational.
-# The SSO and ClickHouse lines count `.env` assignments with `grep -c`, which
-# prints no count at all for a file it cannot open, so an empty count (no
-# readable `.env`) is read as zero.
+# The sign-in lines read the values Make exported from `.env`, the same ones
+# `make serve` hands the app, so duplicates, CRLF endings and inline comments
+# resolve as they do there. The ClickHouse and R2 lines count `.env`
+# assignments with `grep -c`, which prints no count at all for a file it
+# cannot open, so an empty count (no readable `.env`) is read as zero.
 
 doctor:
 	@echo "── env ──"
 	@test -f .env && echo "  .env present" || echo "  .env MISSING (run \`cp .env.example .env\`)"
-	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  GEMINI_API_KEY/OPENAI_API_KEY MISSING — API startup will fail"
-	@n=$$(grep -cE '^(SESSION_SIGNING_KEY|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
-		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
-		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \
-		else echo "  SSO env: PARTIAL ($$n/5) — startup will fail"; fi
+	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  no GEMINI_API_KEY/OPENAI_API_KEY (LLM-backed Ask features off; the API still starts)"
+	@n=0; for v in "$$GOOGLE_CLIENT_ID" "$$GOOGLE_CLIENT_SECRET" "$$GITHUB_CLIENT_ID" "$$GITHUB_CLIENT_SECRET"; do \
+			if [ -n "$$v" ]; then n=$$((n + 1)); fi; done; \
+		k=$$(printf '%s' "$$SESSION_SIGNING_KEY" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$$//'); \
+		if [ "$$n" = "4" ]; then echo "  SSO env: all 4 OAuth client vars set (login enabled)"; \
+		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (no OAuth sign-in)"; \
+		else echo "  SSO env: PARTIAL ($$n/4) — startup will fail"; fi; \
+		if [ -n "$$k" ] && [ "$$k" != "dev-only-not-secret" ]; then echo "  SESSION_SIGNING_KEY: set"; \
+		elif [ "$$n" = "4" ] || { [ -n "$$DEFAULT_ADMIN_USERNAME" ] && [ -n "$$DEFAULT_ADMIN_PASSWORD" ]; }; then \
+			echo "  SESSION_SIGNING_KEY: MISSING or the dev default — sign-in is on, startup will fail (\`openssl rand -hex 32\`)"; \
+		else echo "  SESSION_SIGNING_KEY: unset (fine with no sign-in method)"; fi
 	@n=$$(grep -cE '^(CLICKHOUSE_USER|CLICKHOUSE_PASSWORD|CLICKHOUSE_DATABASE)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
 		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
 		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi
+	@n=$$(grep -cE '^OBJECT_STORE_(ENDPOINT|BUCKET|ACCESS_KEY_ID|SECRET_ACCESS_KEY)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
+		if [ "$$n" = "4" ]; then echo "  R2 env: all 4 set (\`make catch-up-from-r2 SEED_DAYS=3\` plans filling an empty DB)"; \
+		elif [ "$$n" = "0" ]; then echo "  R2 env: none set (no real data; ask the owner for a read-only key)"; \
+		else echo "  R2 env: PARTIAL ($$n/4) — \`make catch-up-from-r2\` will fail"; fi
 	@echo "── db ──"
 	@running=$$(docker compose ps --services --filter status=running 2>/dev/null); \
 		echo "$$running" | grep -qx db && echo "  db: running" || echo "  db NOT running — \`make db\`"; \
 		echo "$$running" | grep -qx clickhouse && echo "  clickhouse: running" || echo "  clickhouse NOT running — \`make db\`"
+	@echo "── standalone (docs/deploy-standalone.en.md) ──"
+	@running=$$(docker compose --profile standalone ps --services --filter status=running 2>/dev/null); \
+		if echo "$$running" | grep -qx app && echo "$$running" | grep -qx poller; then echo "  app and poller: running"; \
+		else echo "  app/poller not running — only a standalone deployment needs them; see docs/deploy-standalone.en.md"; fi; \
+		states=$$(docker compose --profile standalone ps -a --format '{{.Service}} {{.State}} {{.ExitCode}}' 2>/dev/null); \
+		echo "$$states" | grep -qE '^migrate [a-z]+ [1-9]' \
+			&& echo "  schema step (migrate) FAILED — \`docker compose --profile standalone logs migrate\`"; \
+		for s in app poller; do \
+			echo "$$states" | grep -qE "^$$s (restarting|exited) " \
+				&& echo "  $$s is restarting or has exited — \`docker compose --profile standalone logs $$s\`"; \
+		done; true
 	@echo "── port 8000 ──"
 	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
 		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \
@@ -109,7 +132,7 @@ doctor:
 		fi
 
 install:
-	poetry install --with embeddings
+	poetry install
 
 # ── Quality ──────────────────────────────────────────────────────────────────
 
@@ -180,8 +203,7 @@ db:
 	docker compose up -d --build
 	docker compose exec db sh -c 'until pg_isready -h localhost -U transit -d transit; do sleep 1; done'
 	docker compose exec clickhouse sh -c 'until wget --spider -q http://localhost:8123/ping; do sleep 1; done'
-	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py migrate up
-	@$(MAKE) ch-bootstrap
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py schema-up
 
 db-down:
 	docker compose down
@@ -260,10 +282,12 @@ sync-r2:
 # Prints the plan only, reading the databases and listing R2. APPLY=1 runs it
 # (after a typed confirmation), ANALYZE=1 analyzes afterwards, and ALLOW_GAPS=1
 # passes a day R2 has no archive for and loads a timetable after days with no rows.
+# SEED_DAYS=3 starts each agency with no rows 3 days back, which is how a fresh
+# database gets real data: `make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1`.
 # Narrow it with AGENCY="8 53", not AGENCY_ID: a local .env that sets AGENCY_ID
 # would otherwise narrow every run, and a partial catch-up reads like a whole one.
 catch-up-from-r2:
-	DATABASE_URL=$(db_url) poetry run python scripts/catch_up_from_r2.py $(foreach a,$(AGENCY),--agency-id $(a)) $(if $(APPLY),--apply,) $(if $(ANALYZE),--analyze,) $(if $(ALLOW_GAPS),--allow-gaps,)
+	DATABASE_URL=$(db_url) poetry run python scripts/catch_up_from_r2.py $(foreach a,$(AGENCY),--agency-id $(a)) $(if $(APPLY),--apply,) $(if $(ANALYZE),--analyze,) $(if $(ALLOW_GAPS),--allow-gaps,) $(if $(SEED_DAYS),--seed-days $(SEED_DAYS),)
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 # Usage: make ingest FOLDER=./raw_archives
@@ -306,9 +330,10 @@ digest:
 ingest-weather:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_weather $(if $(DAYS),--days $(DAYS),)
 
-# Pulls the ML workbench's latest published forecast and every weekly
-# evaluation summary and live scorecard (R2 `transit-ml`, read with ML_STORE_*
-# from .env) into agg_route_forecast_ml, ml_evaluations and ml_live_evaluations.
+# Pulls the ML workbench's latest published forecast, every weekly evaluation
+# summary and live scorecard, and the daily GTFS-RT validator summaries (R2
+# `transit-ml`, read with ML_STORE_* from .env) into agg_route_forecast_ml,
+# ml_evaluations, ml_live_evaluations and rt_validation_daily.
 # Idempotent: upserts on each table's key. Writes $(db_url), so it is an operator step against the dev database.
 ingest-ml:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py ingest_ml
@@ -323,16 +348,6 @@ reprobe-rt-coverage:
 # Idempotent: re-runnable, upserts on feed_url uniqueness.
 seed-agencies:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
-
-# Idempotent: re-runnable, upserts on content_hash uniqueness. Also the
-# re-index step after an embedding model or sentence-transformers major
-# change -- rows stamped with the old embedding_version are excluded from
-# Stage-2 search until this rebuilds them.
-build-rag-index:
-	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
-
-promote-intent-cache:
-	DATABASE_URL=$(db_url) poetry run python scripts/promote_intent_cache.py --agency-id $(AGENCY_ID)
 
 prune-query-log:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune_query_log --days 90
@@ -357,10 +372,8 @@ frontend-build:
 
 # Recaptures docs/features/ml-forecast.md's sibling, the in-app user manual's
 # own screenshots: build+bake a production bundle first (the dev server's
-# dev-only sidebar section would otherwise leak into every scene), set
-# login_required off via the admin flags UI/API (the dev-database guard
-# blocks that write from an agent's own tool calls), run this, then set it
-# back on.
+# dev-only sidebar section would otherwise leak into every scene), then run
+# this. It captures as a signed-out reader, so it needs no sign-in.
 capture-user-manual:
 	poetry run python scripts/capture_user_manual_screenshots.py
 
@@ -402,8 +415,6 @@ hooks:
 # Checks that every gold entry's stored signature survives canonicalization:
 # no database, router or LLM is involved. Regenerate the gold set after card
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
-# The scheduled Ask eval workflow, .github/workflows/ask-eval-weekly.yml, runs
-# tests/ask_eval/test_baseline.py instead.
 
 ask-eval:
 	poetry run python scripts/ask_eval.py

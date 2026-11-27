@@ -36,6 +36,21 @@ describe("ErrorBanner", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it("asks calmly, with no retry, for a period from the retention floor on", () => {
+    renderWithProviders(
+      <ErrorBanner
+        error={new ApiError(422, JSON.stringify({ detail: "x", code: "range_not_retained", floor: "2025-03-01" }))}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Detailed readings before 2025-03-01 are no longer kept, so this view can't cover that period. " +
+        "Choose a period from 2025-03-01 on",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it("renders a calm explanation (not a generic error banner) for the admin-approval-required 403", () => {
     renderWithProviders(
       <MemoryRouter>

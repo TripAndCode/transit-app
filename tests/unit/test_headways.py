@@ -6,9 +6,11 @@ its ClickHouse/Postgres callers in `pipeline.analyze`).
 """
 
 from pipeline.headways import (
+    BUNCHING_HEADWAY_FRACTION,
     HIGH_FREQUENCY_HEADWAY_SEC,
     coefficient_of_variation,
     coefficient_of_variation_from_pooled,
+    count_bunched,
     count_long_gaps,
     excess_wait_time_sec,
     headway_median_sec,
@@ -213,3 +215,58 @@ def test_no_route_changes_between_equal_medians():
     from pipeline.static_headways import changed_routes
 
     assert changed_routes({("a", "R1"): None, ("b", "R1"): None}, "a", "b") == []
+
+
+def test_a_route_changes_when_its_kept_sums_differ_under_the_same_median():
+    """Another trip pattern can keep the median and move the scheduled wait, and
+    a timetable kept before its sums were has none to compare."""
+    from pipeline.headways import ScheduledHeadways
+    from pipeline.static_headways import changed_routes
+
+    kept = {
+        ("a", "R1"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+        ("b", "R1"): ScheduledHeadways(600.0, 1800.0, 1080000.0),
+        ("a", "R2"): ScheduledHeadways(600.0, None, None),
+        ("b", "R2"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+        ("a", "R3"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+        ("b", "R3"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+    }
+    assert changed_routes(kept, "a", "b") == ["R1", "R2"]
+
+
+def test_the_scheduled_wait_of_pooled_days_is_their_sums_ratio():
+    """(3360^2 + 2 x 240^2) / (2 x 3840): the count cancels, so the sums alone give it."""
+    from pipeline.headways import mean_wait_from_sums
+
+    gaps = [3360, 240, 240]
+    assert mean_wait_from_sums(sum(gaps), sum(g * g for g in gaps)) == 1485.0
+    assert mean_wait_from_sums(None, 1.0) is None
+    assert mean_wait_from_sums(0.0, 0.0) is None
+
+
+def test_the_kept_headways_readers_are_the_daily_headways_and_not_every_archive_joined_table():
+    """A re-record of a timetable's headways rebuilds these, and no other archive-joined table."""
+    from pipeline.static_archive import archive_joined_tables
+    from pipeline.static_headways import kept_headway_readers
+
+    readers = kept_headway_readers()
+    assert "agg_route_headway_daily" in readers
+    assert set(readers) < set(archive_joined_tables())
+
+
+def test_bunching_is_bus_turnarounds_quarter_of_the_scheduled_headway():
+    assert BUNCHING_HEADWAY_FRACTION == 0.25
+
+
+def test_a_gap_exactly_a_quarter_of_the_scheduled_headway_is_not_bunched():
+    # Strictly shorter than 25% of 480 s = 120 s counts; 120 s itself does not.
+    assert count_bunched([60.0, 119.0, 120.0, 121.0, 480.0], 480.0) == 2
+
+
+def test_a_gap_between_a_quarter_and_a_half_of_the_headway_is_not_bunched():
+    assert count_bunched([150.0, 200.0, 239.0], 480.0) == 0
+
+
+def test_bunching_without_a_scheduled_headway_is_unknown_not_zero():
+    assert count_bunched([60.0, 900.0], None) is None
+    assert count_bunched([60.0, 900.0], 0.0) is None

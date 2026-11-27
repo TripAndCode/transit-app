@@ -10,7 +10,7 @@ import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { TopBar } from "./TopBar";
 
 function agency(agency_id: number, latest_data_date: string | null): Agency {
-  return { agency_id, agency_name: `Agency ${agency_id}`, feed_url: "", static_url: null, latest_data_date };
+  return { agency_id, agency_name: `Agency ${agency_id}`, feed_url: "", static_url: null, latest_data_date, capability_tier: "full" };
 }
 
 function summary(latest_captured_at: string | null): RouteSummaryResponse {
@@ -44,14 +44,14 @@ describe("TopBar", () => {
     window.removeEventListener(COMMAND_PALETTE_OPEN_EVENT, onOpen);
   });
 
-  it("anchors the first-run tour's Ask step", () => {
-    renderBar();
-    expect(screen.getByRole("button", { name: /Search routes, reports and screens/ })).toHaveAttribute("data-tour", "ask-nav");
-  });
-
   it("shows the ⌘K shortcut where there is a keyboard", () => {
     renderBar();
     expect(screen.getByText("K")).toBeInTheDocument();
+  });
+
+  it("groups the shortcut's keys in the one element the phone layout hides", () => {
+    renderBar();
+    expect(screen.getByText("K").parentElement).toHaveClass("topbar-kbd-group");
   });
 
   it.each([
@@ -109,7 +109,7 @@ describe("TopBar", () => {
       const panel = screen.getByRole("region", { name: "How fresh the data is" });
       expect(panel).toHaveTextContent("Service days through Tue, Sep 29, 2026");
       expect(panel).toHaveTextContent("436,691");
-      expect(panel).toHaveTextContent("Days without readings are left out, not counted as on time.");
+      expect(panel).toHaveTextContent("Days without observations are left out, not counted as on time.");
       await userEvent.keyboard("{Escape}");
       expect(screen.queryByRole("region", { name: "How fresh the data is" })).toBeNull();
       expect(chip).toHaveFocus();

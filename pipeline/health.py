@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 
 from db.migrate import _versions_on_disk
+from pipeline.reports import comparability
 from pipeline.service_day import service_date_of
 
 _log = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ _JST = ZoneInfo("Asia/Tokyo")
 
 async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshness]:
     """Per-agency freshness using agg_meta, agg_route_daily, and ClickHouse `updates`."""
-    from api.clickhouse import max_captured_at_before_by_agency, min_captured_at_by_agency
+    from api.clickhouse import min_captured_at_by_agency, newest_filed_date_before_by_agency
     from pipeline.freshness import is_stale
 
     now_utc = datetime.now(timezone.utc)
@@ -89,7 +90,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     agg_max_rows = await conn.fetch(_AGG_MAX_SQL)
     agg_max = {r["agency_id"]: r["d"] for r in agg_max_rows}
 
-    # One indexed read per agency (`api.clickhouse.max_captured_at_before` —
+    # One indexed read per agency (`api.clickhouse.newest_filed_date_before` —
     # see its docstring) instead of an unfiltered `GROUP BY agency_id` over
     # the whole `updates` table: the GROUP BY form has no `agency_id`
     # predicate at all, so it reads the `captured_at` column for every row in
@@ -108,13 +109,12 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     # clamp_pct) comes from Postgres. So a ClickHouse hiccup for ONE agency
     # must not fail the whole call: is_stale(agg_day, None) is "not stale"
     # (see its docstring), which is the correct degrade here.
-    # max_captured_at_before_by_agency runs the per-agency probes concurrently
+    # newest_filed_date_before_by_agency runs the per-agency probes concurrently
     # and degrades a failing agency's probe to None internally; shared with
     # pipeline.reports.network.compute_network_summary's identical shape.
-    probed = await max_captured_at_before_by_agency(
+    live_max = await newest_filed_date_before_by_agency(
         ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
     )
-    live_max: dict[int, date | None] = {aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()}
 
     # A never-analyzed agency (agg_day is None) needs the earliest live day
     # too, to size agg_behind_days off the real unaggregated span instead of
@@ -158,12 +158,13 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
             earliest_day = earliest_live.get(aid)
             # Inclusive day count from the earliest unaggregated day through
             # the newest completed one — e.g. a single day of unaggregated
-            # data (earliest_day == live_day) is 1 day behind, not 0. Falls
-            # back to a flat 1-day placeholder only if the earliest-day probe
-            # itself degraded to None (e.g. a ClickHouse hiccup for this one
-            # agency), matching this function's usual "degrade, don't fail
-            # the whole call" shape.
-            behind = (live_day - earliest_day).days + 1 if earliest_day is not None else 1
+            # data (earliest_day == live_day) is 1 day behind, not 0. At
+            # least 1: the newest day is a filed date, which can lie a day
+            # before the earliest capture's own. Falls back to a flat 1-day
+            # placeholder only if the earliest-day probe itself degraded to
+            # None (e.g. a ClickHouse hiccup for this one agency), matching
+            # this function's usual "degrade, don't fail the whole call" shape.
+            behind = max(1, (live_day - earliest_day).days + 1) if earliest_day is not None else 1
         else:
             behind = max(0, (live_day - agg_day).days)
 
@@ -172,7 +173,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
         f = feed.get(aid)
         raw = int(f["raw"]) if f and f["raw"] else 0
         clamp = int(f["clamp"]) if f and f["clamp"] else 0
-        clamp_pct = round(clamp / raw * 100, 2) if raw else None
+        clamp_pct = comparability.clamp_pct(clamp, raw)
 
         result.append(
             AgencyFreshness(

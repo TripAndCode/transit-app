@@ -5,7 +5,8 @@ A trip that left its first stop on time can still leave a later one late, so
 the record is read at the stop the passenger boarded, not the trip's first
 recorded stop the staff list keys on."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -48,9 +49,11 @@ def _sec(clock: str) -> int:
 
 
 def _reading(trip_id, stop_sequence, dep_delay, scheduled, *, route="R1", day=DAY, poll=0):
-    """One poll's departure reading, captured in the evening of ``day`` (JST)
-    so it files under that service day; a later ``poll`` is a later capture."""
-    captured = datetime.fromisoformat(f"{day}T09:{poll:02d}:00")
+    """One poll's departure reading, captured on ``day`` (JST) five minutes
+    before the stop's scheduled departure, so it files under that service day
+    and is timely; a later ``poll`` is a later capture."""
+    departs = datetime.fromisoformat(f"{day}T{scheduled}").replace(tzinfo=ZoneInfo("Asia/Tokyo"))
+    captured = departs - timedelta(minutes=5) + timedelta(seconds=poll)
     return (
         f"test/{day}/{route}/{trip_id}/{stop_sequence}/{poll}.pb",
         captured,

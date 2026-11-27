@@ -94,6 +94,7 @@ const DIAGNOSTICS = {
   standards_count: 0,
   weights: [],
   weights_coverage: { routes_with_weights: 0, routes_total: 0 },
+  feed_quality: [],
 };
 
 /** Overrides fields of the agencies list query result; `null` keeps the fixture. */

@@ -21,25 +21,18 @@ LOCALIZED_GET_ROUTES = {
     ("GET", "/api/{agency_id}/forecast/heatmap"),
     ("GET", "/api/{agency_id}/forecast/overview"),
     ("GET", "/api/{agency_id}/performance_standards"),
-    ("GET", "/api/{agency_id}/reports/suggest"),
     ("GET", "/api/{agency_id}/reports/{report_type}"),
     ("GET", "/api/{agency_id}/route-shape"),
     ("GET", "/api/{agency_id}/weather_delay"),
+    ("GET", "/api/snapshots/{snapshot_id}/today"),
 }
 
-# Take the locale but write no text in it: the build schema returns both
-# languages' labels at once. Its frontend key carries no language.
-LOCALE_UNUSED_GET_ROUTES = {
-    ("GET", "/api/{agency_id}/ask/build-schema"),
-}
-
-# Not cached as GET responses: Ask answers and follow-ups are mutations, and
-# the Copilot insight's own query key already carries the language.
+# Not cached as GET responses: Ask answers and follow-ups are mutations.
 LOCALIZED_POST_ROUTES = {
     ("POST", "/api/{agency_id}/ask"),
+    ("POST", "/api/{agency_id}/ask/card"),
     ("POST", "/api/{agency_id}/conversations/{conversation_id}/followup"),
     ("POST", "/api/{agency_id}/conversations/{conversation_id}/messages"),
-    ("POST", "/api/{agency_id}/copilot/insight"),
 }
 
 
@@ -59,7 +52,7 @@ def _routes_reading_the_locale() -> set[tuple[str, str]]:
 
 
 def test_every_route_reading_the_locale_is_classified():
-    assert _routes_reading_the_locale() == LOCALIZED_GET_ROUTES | LOCALE_UNUSED_GET_ROUTES | LOCALIZED_POST_ROUTES
+    assert _routes_reading_the_locale() == LOCALIZED_GET_ROUTES | LOCALIZED_POST_ROUTES
 
 
 def test_the_walk_sees_a_localized_route_inside_an_included_router():

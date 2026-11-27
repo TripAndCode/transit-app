@@ -287,6 +287,25 @@ def _clear_compute_caches():
     yield
 
 
+class _CacheClock:
+    """A settable stand-in for ``pipeline.cache``'s clock."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def cache_clock(monkeypatch):
+    """``pipeline.cache``'s clock, still until a test moves its ``now``, so a
+    test ages a cached entry without sleeping."""
+    clock = _CacheClock()
+    monkeypatch.setattr("pipeline.cache._monotonic", clock)
+    return clock
+
+
 @pytest.fixture
 def pg_conn(apply_schema, reset_sql):
     conn = psycopg2.connect(_database_url())
@@ -450,13 +469,14 @@ def mirror_updates_to_ch(ch_client, agency_id, *, table: str = "updates") -> Non
 
 
 @pytest.fixture(autouse=True)
-def _sso_off_unless_a_test_turns_it_on(monkeypatch):
-    """The login gate enforces only while SSO is configured. A shell that
-    exports the OAuth block would otherwise gate every anonymous read in the
-    suite; a test that needs SSO sets the variables itself."""
-    from api.sso import SSO_ENV
+def _sign_in_off_unless_a_test_turns_it_on(monkeypatch):
+    """Which sign-in methods are configured changes whether ``/api/auth/*``
+    answers and whether the app boots at all. A shell that exports the OAuth,
+    local-admin or signing-key variables would otherwise change that for the
+    whole suite; a test that needs sign-in sets the variables itself."""
+    from api.sso import LOCAL_ADMIN_ENV, SIGNING_KEY_ENV, SSO_ENV
 
-    for var in SSO_ENV:
+    for var in (*SSO_ENV, *LOCAL_ADMIN_ENV, SIGNING_KEY_ENV):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -503,7 +523,7 @@ async def confirm_rt_field_coverage(conn, *agency_ids, confirmed=True, expires_a
     Production gates every RT-optional-field reader on a live verdict in
     `rt_field_coverage_probes` intersected with a `RT_INGEST_STRATEGIES`
     ingest_strategy (see
-    `pipeline.strategies.static_join.rt_field_coverage_confirmed`), so a
+    `pipeline.strategies.static_join.rt_field_coverage_gap`), so a
     freshly-inserted test agency is untrusted until a test says otherwise —
     which is exactly the production default and needs no setup at all.
 

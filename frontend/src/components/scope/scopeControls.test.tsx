@@ -1,14 +1,46 @@
 import type { ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { AgencyDataEndProvider } from "../../api/AgencyDataEndProvider";
 import * as hooks from "../../api/hooks";
-import { useScope } from "../../api/scope";
+import { SCOPE_EXTRAS_NONE, useScope, type Scope } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
-import { DaysControl, PeriodControl, RoutesControl, TimeControl, ToleranceControl, type ControlProps } from "./scopeControls";
+import { DaysControl, EarlyControl, PeriodControl, RoutesControl, TimeControl, ToleranceControl, type ControlProps } from "./scopeControls";
+
+const apply = () => screen.getByRole("button", { name: /^Apply/ });
+
+const BASE_SCOPE: Scope = {
+  ...SCOPE_EXTRAS_NONE,
+  from: "2026-09-01",
+  to: "2026-09-28",
+  dow: "all",
+  time_band: "all",
+  service: "all",
+  routes: [],
+};
+
+const TWO_ROUTES = [
+  { route_id: "r101", route_short_name: "1", route_long_name: "Coast", route_code: "101", trip_headsigns: [] },
+  { route_id: "r102", route_short_name: "2", route_long_name: "Hill", route_code: "102", trip_headsigns: [] },
+];
+
+/** Mounts a control directly on a given scope and update spy, bypassing
+ *  useScope's URL binding -- so a test can assert on `update`'s call count and
+ *  arguments precisely, which an integration mount through the URL cannot. */
+function directMount(scope: Scope, update = vi.fn(), close?: () => void, Component: ComponentType<ControlProps> = RoutesControl) {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: TWO_ROUTES, isPending: false } as never);
+  renderWithProviders(
+    <MemoryRouter initialEntries={["/agencies/1/time"]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/time" element={<Component scope={scope} update={update} close={close} />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  return update;
+}
 
 function Probe() {
   const [params] = useSearchParams();
@@ -76,21 +108,77 @@ describe("scope controls", () => {
   afterEach(() => vi.restoreAllMocks());
 
   describe("days", () => {
-    it("turns one weekday off from every day", async () => {
+    it("stages a tick without writing the scope, and only Apply writes it", async () => {
       mount(DaysControl);
       await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(params().has("dow")).toBe(false);
+      await userEvent.click(apply());
       expect(params().get("dow")).toBe("tue,wed,thu,fri,sat,sun");
     });
 
     it("refuses to turn the last day off", async () => {
-      mount(DaysControl, "?dow=mon");
+      directMount({ ...BASE_SCOPE, dow: "mon" }, vi.fn(), undefined, DaysControl);
       await userEvent.click(screen.getByRole("button", { name: "Mon" }));
-      expect(params().get("dow")).toBe("mon");
+      expect(screen.getByRole("button", { name: "Mon" })).toHaveAttribute("aria-pressed", "true");
+      expect(apply()).toBeDisabled();
+    });
+
+    it("disables Apply while the draft matches the committed days, and again once a toggle is undone", async () => {
+      const update = directMount({ ...BASE_SCOPE }, vi.fn(), undefined, DaysControl);
+      expect(apply()).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(apply()).toBeEnabled();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(apply()).toBeDisabled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it("discards the draft on Cancel, with no update call, and closes", async () => {
+      const close = vi.fn();
+      const update = directMount({ ...BASE_SCOPE }, vi.fn(), close, DaysControl);
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.getByRole("button", { name: "Mon" })).toHaveAttribute("aria-pressed", "true");
+      expect(update).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes through the close prop on Apply", async () => {
+      const close = vi.fn();
+      directMount({ ...BASE_SCOPE }, vi.fn(), close, DaysControl);
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      await userEvent.click(apply());
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("discards a staged draft on a preset pick, even re-picking the already-checked preset", async () => {
+      mount(DaysControl);
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(apply()).toBeEnabled();
+      await userEvent.click(screen.getByRole("radio", { name: "All" }));
+      expect(apply()).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Mon" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("unchecks the preset while a draft is pending, and restores it on Cancel", async () => {
+      mount(DaysControl);
+      expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(screen.getByRole("radio", { name: "All" })).not.toBeChecked();
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
+    });
+
+    it("shows the Apply label with the staged day count", async () => {
+      mount(DaysControl);
+      expect(screen.getByRole("button", { name: "Apply · 7 days" })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(screen.getByRole("button", { name: "Apply · 6 days" })).toBeInTheDocument();
     });
 
     it("applies a preset and the timetable at once", async () => {
       mount(DaysControl);
-      await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Weekdays" }));
       expect(params().get("dow")).toBe("weekday");
       await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timetable type" }), "平日");
       expect(params().get("service")).toBe("平日");
@@ -161,11 +249,21 @@ describe("scope controls", () => {
   });
 
   describe("time", () => {
+    it("selects no band while an hour range is set", () => {
+      mount(TimeControl, "?hour=7-9");
+      for (const radio of screen.getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
+    });
+
     it("picks a band and drops an hour range", async () => {
       mount(TimeControl, "?hour=7-9");
-      await userEvent.click(screen.getByRole("button", { name: "Morning (05–09)" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Morning (05–09)" }));
       expect(params().get("time_band")).toBe("morning");
       expect(params().has("hour")).toBe(false);
+    });
+
+    it("lays the bands out two to a row", () => {
+      mount(TimeControl);
+      expect(screen.getByRole("radiogroup")).toHaveStyle({ gridTemplateColumns: "repeat(2, 1fr)" });
     });
 
     it("makes no promises about features to come", () => {
@@ -181,30 +279,30 @@ describe("scope controls", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-10-03T03:00:00Z"));
       mount(PeriodControl);
-      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("radio", { name: "Last 30 days" })).toHaveAttribute("aria-checked", "true");
     });
 
     it("ends the presets where the default period ends, leaving out a partial today", async () => {
       vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
       vi.setSystemTime(new Date("2026-09-29T03:00:00Z"));
       mount(PeriodControl, "", { ...SUMMARY, latest: "2026-09-29" });
-      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
-      await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+      expect(screen.getByRole("radio", { name: "Last 30 days" })).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(screen.getByRole("radio", { name: "Last 7 days" }));
       expect(params().get("to")).toBe("2026-09-28");
     });
 
     it("anchors a preset on the agency's latest data", async () => {
       mount(PeriodControl);
-      await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Last 7 days" }));
       expect(params().get("from")).toBe("2026-09-22");
       expect(params().get("to")).toBe("2026-09-28");
     });
 
     it("offers two weeks and the whole collection once the data is in", async () => {
       mount(PeriodControl, "", SUMMARY);
-      await userEvent.click(screen.getByRole("button", { name: "Last 14 days" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Last 14 days" }));
       expect(params().get("from")).toBe("2026-09-15");
-      await userEvent.click(screen.getByRole("button", { name: "Since collection began" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Since collection began" }));
       expect(params().get("from")).toBe("2026-06-01");
       expect(params().get("to")).toBe("2026-09-28");
     });
@@ -214,10 +312,21 @@ describe("scope controls", () => {
       expect(screen.getByRole("img", { name: "Daily mean delay" })).toBeInTheDocument();
     });
 
+    it("offers one choice per range when the collection spans exactly a preset", () => {
+      mount(PeriodControl, "?from=2026-09-22&to=2026-09-28", { ...SUMMARY, earliest: "2026-09-22" });
+      expect(screen.queryByRole("radio", { name: "Since collection began" })).toBeNull();
+      expect(screen.getByRole("radio", { name: "Last 7 days" })).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("lays the presets out two to a row", () => {
+      mount(PeriodControl, "", SUMMARY);
+      expect(screen.getByRole("radiogroup", { name: "Period" })).toHaveStyle({ gridTemplateColumns: "repeat(2, 1fr)" });
+    });
+
     it("leaves out the bars and the collection preset without data", () => {
       mount(PeriodControl);
       expect(screen.queryByRole("img", { name: "Daily mean delay" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Since collection began" })).toBeNull();
+      expect(screen.queryByRole("radio", { name: "Since collection began" })).toBeNull();
     });
 
     it("ignores a start after the end", () => {
@@ -227,22 +336,39 @@ describe("scope controls", () => {
       fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-09-05" } });
       expect(params().get("from")).toBe("2026-09-05");
     });
+
+    it("selects no preset while a custom range is set", () => {
+      mount(PeriodControl, "?from=2026-09-01&to=2026-09-10");
+      for (const radio of screen.getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
+    });
   });
 
   describe("tolerance", () => {
-    it("applies presets, with one minute as the default", async () => {
-      mount(ToleranceControl, "?late=300");
-      await userEvent.click(screen.getByRole("button", { name: "3 min" }));
+    it("applies presets, with five minutes, the industry window's, as the default", async () => {
+      mount(ToleranceControl, "?late=60");
+      expect(screen.getByRole("radio", { name: "1 min" })).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(screen.getByRole("radio", { name: "3 min" }));
       expect(params().get("late")).toBe("180");
-      await userEvent.click(screen.getByRole("button", { name: "1 min" }));
+      await userEvent.click(screen.getByRole("radio", { name: "5 min" }));
       expect(params().has("late")).toBe(false);
+    });
+
+    it("checks five minutes when the scope names no tolerance", () => {
+      mount(ToleranceControl);
+      expect(screen.getByRole("radio", { name: "5 min" })).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("checks no preset while the tolerance is one the slider set", () => {
+      mount(ToleranceControl, "?late=90");
+      const group = screen.getByRole("radiogroup", { name: "Counted on time up to" });
+      for (const radio of within(group).getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
     });
 
     it("names each preset's on-time share once the data is in", () => {
       mount(ToleranceControl, "", SUMMARY);
-      expect(screen.getByRole("button", { name: "1 min 34% on time" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "3 min 60% on time" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "5 min 75% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: "1 min 34% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: "3 min 60% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: "5 min 75% on time" })).toBeInTheDocument();
     });
 
     it("draws the on-time curve with a marker at the current tolerance", () => {
@@ -290,6 +416,41 @@ describe("scope controls", () => {
       expect(screen.queryByRole("img", { name: "On-time share by tolerance" })).toBeNull();
     });
 
+    it("limits early departures to one minute by default, and counts them all on request", async () => {
+      mount(ToleranceControl);
+      const group = screen.getByRole("radiogroup", { name: "Early departures" });
+      const counted = within(group).getByRole("radio", { name: "Count early departures as on time" });
+      const limited = within(group).getByRole("radio", { name: "Not on time if more than 1 min early" });
+      expect(limited).toHaveAttribute("aria-checked", "true");
+      expect(counted).toHaveAttribute("aria-checked", "false");
+      await userEvent.click(counted);
+      expect(params().get("early")).toBe("any");
+      expect(counted).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(limited);
+      expect(params().has("early")).toBe(false);
+    });
+
+    it("is the industry window, no more than one minute early and five late, with nothing set", () => {
+      mount(ToleranceControl);
+      expect(screen.getByRole("radio", { name: "5 min" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByRole("radio", { name: "Not on time if more than 1 min early" })).toHaveAttribute("aria-checked", "true");
+      expect([params().get("early"), params().get("late")]).toEqual([null, null]);
+    });
+
+    it("reaches the legacy definition, every early departure and up to one minute late", async () => {
+      mount(ToleranceControl);
+      await userEvent.click(screen.getByRole("radio", { name: "1 min" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Count early departures as on time" }));
+      expect([params().get("early"), params().get("late")]).toEqual(["any", "60"]);
+    });
+
+    it("says what an early tolerance neither choice names is, pressing neither", () => {
+      mount(ToleranceControl, "?early=120");
+      const group = screen.getByRole("radiogroup", { name: "Early departures" });
+      for (const radio of within(group).getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
+      expect(screen.getByText("Now: early by up to 2 min")).toBeInTheDocument();
+    });
+
     it("writes the slider only when the drag ends", () => {
       mount(ToleranceControl);
       const slider = screen.getByRole("slider", { name: "Counted on time up to" });
@@ -297,6 +458,30 @@ describe("scope controls", () => {
       expect(params().has("late")).toBe(false);
       fireEvent.pointerUp(slider);
       expect(params().get("late")).toBe("240");
+    });
+
+    it("keeps the applied preset checked until a drag onto another one lands", () => {
+      mount(ToleranceControl);
+      const slider = screen.getByRole("slider", { name: "Counted on time up to" });
+      fireEvent.change(slider, { target: { value: "180" } });
+      expect(screen.getByRole("radio", { name: "5 min" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByRole("radio", { name: "3 min" })).toHaveAttribute("aria-checked", "false");
+      fireEvent.pointerUp(slider);
+      expect(screen.getByRole("radio", { name: "3 min" })).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  describe("early", () => {
+    it("offers the same early-departure choice as the tolerance control", async () => {
+      mount(EarlyControl, "?early=any");
+      expect(screen.getByRole("radio", { name: "Count early departures as on time" })).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(screen.getByRole("radio", { name: "Not on time if more than 1 min early" }));
+      expect(params().has("early")).toBe(false);
+    });
+
+    it("stacks its sentence-long choices one to a row", () => {
+      mount(EarlyControl);
+      expect(screen.getByRole("radiogroup", { name: "Early departures" })).toHaveStyle({ gridTemplateColumns: "repeat(1, 1fr)" });
     });
   });
 
@@ -318,12 +503,96 @@ describe("scope controls", () => {
       expect(screen.getByRole("textbox", { name: "Search routes" })).toBeInTheDocument();
     });
 
-    it("adds a route and clears the filter with the last one", async () => {
+    it("stages a tick without writing the scope, and only Apply writes it", async () => {
       mount(RoutesControl);
       await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
-      expect(params().get("routes")).toBe("101");
-      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
       expect(params().has("routes")).toBe(false);
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 1 route" }));
+      expect(params().get("routes")).toBe("101");
+    });
+
+    it("commits an empty draft as no filter at all, offered as showing all routes", async () => {
+      mount(RoutesControl, "?routes=101");
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      const apply = screen.getByRole("button", { name: "Show all routes" });
+      expect(apply).toBeEnabled();
+      await userEvent.click(apply);
+      expect(params().has("routes")).toBe(false);
+    });
+
+    it("commits the whole draft in exactly one update call, not one per tick", async () => {
+      const update = directMount({ ...BASE_SCOPE, routes: [] });
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: /^2 ?Hill$/ }));
+      expect(update).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 2 routes" }));
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith({ routes: ["101", "102"] });
+    });
+
+    it("disables Apply while the draft matches what is picked, including the same set reordered", async () => {
+      directMount({ ...BASE_SCOPE, routes: ["101", "102"] });
+      const apply = () => screen.getByRole("button", { name: /^Apply/ });
+      expect(apply()).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ })); // untick 101
+      expect(apply()).toBeEnabled();
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ })); // re-tick, now ["102", "101"]
+      expect(apply()).toBeDisabled();
+    });
+
+    it("discards the draft on Cancel, with no update call", async () => {
+      const update = directMount({ ...BASE_SCOPE, routes: [] });
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it("closes through the close prop on Cancel", async () => {
+      const close = vi.fn();
+      directMount({ ...BASE_SCOPE, routes: [] }, vi.fn(), close);
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes through the close prop on Apply", async () => {
+      const close = vi.fn();
+      directMount({ ...BASE_SCOPE, routes: [] }, vi.fn(), close);
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 1 route" }));
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("applies the draft on a clean Enter in the search field", async () => {
+      const update = directMount({ ...BASE_SCOPE, routes: [] });
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Search routes" }), { key: "Enter" });
+      expect(update).toHaveBeenCalledWith({ routes: ["101"] });
+    });
+
+    it("does nothing on Enter while the draft is unchanged, as the disabled Apply would", () => {
+      const close = vi.fn();
+      const update = directMount({ ...BASE_SCOPE, routes: ["101"] }, vi.fn(), close);
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Search routes" }), { key: "Enter" });
+      expect(update).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+    });
+
+    it("keeps its search text after its own Apply, where it stays mounted in the pinned strip", async () => {
+      mount(RoutesControl);
+      const search = screen.getByRole("textbox", { name: "Search routes" });
+      await userEvent.type(search, "Coast");
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 1 route" }));
+      expect(params().get("routes")).toBe("101");
+      expect(screen.getByRole("textbox", { name: "Search routes" })).toHaveValue("Coast");
+    });
+
+    it("hands focus to the search field when a tray button removes itself", async () => {
+      directMount({ ...BASE_SCOPE, routes: ["101", "102"] });
+      await userEvent.click(screen.getByRole("button", { name: /^Remove route .*\(101\)$/ }));
+      expect(screen.getByRole("textbox", { name: "Search routes" })).toHaveFocus();
+      await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+      expect(screen.getByRole("textbox", { name: "Search routes" })).toHaveFocus();
     });
   });
 });

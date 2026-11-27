@@ -39,11 +39,41 @@ type LinePaint = NonNullable<Extract<LayerSpecification, { type: "line" }>["pain
 
 /** One vehicle is one reading, not a headline: the mark is small enough that a
  *  screenful of them reads as a field rather than a wall of alarms, and only
- *  the severe tier and the selected trip earn extra area. Size therefore
+ *  the severe tier and a selected mark (the picked trip, or every vehicle on
+ *  a picked route when no trip is chosen) earn extra area. Size therefore
  *  encodes severity, never volume. */
 export const VEHICLE_RADIUS = { base: 6, severe: 9, selected: 11 } as const;
 
-const MARK_STROKE_WIDTH = 1.5;
+export const MARK_STROKE_WIDTH = 1.5;
+/** The ring for a selected mark -- the picked trip, or every vehicle on a
+ *  picked route when no trip is chosen, since picking a route is meant to
+ *  highlight its buses the same way picking a trip highlights it -- thicker
+ *  and in the app's accent, so the highlight reads as deliberate rather than
+ *  a second, differently coloured dot next to the one that encodes delay. */
+export const SELECTED_RING_WIDTH = 3;
+/** A gentle feather on every mark's edge, so it reads as a soft dot rather
+ *  than a hard-cut disc, without a second, larger circle underneath it.
+ *  MapLibre's circle shader fades the mark's outer edge to transparent over
+ *  a band `max(1 / devicePixelRatio, MARK_BLUR * (radius + strokeWidth))` px
+ *  wide, eating into the stroke from the outside in: its own one-device-
+ *  pixel antialias, or this blur, whichever is wider. This constant bounds
+ *  only its own term, never past half of any tier's stroke (the selected
+ *  ring included): `MARK_BLUR * (radius + strokeWidth) <= strokeWidth / 2`
+ *  for every tier. At a low device pixel ratio that one-pixel floor is the
+ *  wider of the two, and MARK_BLUR has no visible effect there. A heavier
+ *  blur also starts smearing adjacent marks together at a busy stop. */
+const MARK_BLUR = 0.07;
+
+/** Never below the 12px floor a watched label needs to stay legible. */
+export const TRIP_LABEL_SIZE = { base: 12, selected: 13 } as const;
+
+/** The live-trip label's vertical offset from its mark, in ems of the
+ *  label's own font size so the clearance scales with text-size rather than
+ *  needing a separate constant per tier. Chosen so `TRIP_LABEL_OFFSET_EM *
+ *  labelSize` clears `radius + strokeWidth` for every tier: the base and
+ *  severe tiers at `TRIP_LABEL_SIZE.base` with `MARK_STROKE_WIDTH`, the
+ *  selected tier at `TRIP_LABEL_SIZE.selected` with `SELECTED_RING_WIDTH`. */
+export const TRIP_LABEL_OFFSET_EM = 1.1;
 
 export function vehicleCirclePaint(): CirclePaint {
   return {
@@ -54,11 +84,14 @@ export function vehicleCirclePaint(): CirclePaint {
       VEHICLE_RADIUS.base,
     ],
     "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
-    // A hairline in the page's own surface colour, rather than a heavy dark
-    // casing ring: enough to separate a mark from the basemap in either theme
-    // without giving every reading the weight of an incident.
-    "circle-stroke-color": surfaceColorResolved(),
-    "circle-stroke-width": MARK_STROKE_WIDTH,
+    "circle-blur": MARK_BLUR,
+    // The unselected stroke is a hairline in the page's own surface colour,
+    // rather than a heavy dark casing ring: enough to separate a mark from
+    // the basemap in either theme without giving every reading the weight of
+    // an incident. A selected mark takes SELECTED_RING_WIDTH in the accent
+    // colour instead.
+    "circle-stroke-color": ["case", ["boolean", ["get", "selected"], false], accentColorResolved(), surfaceColorResolved()],
+    "circle-stroke-width": ["case", ["boolean", ["get", "selected"], false], SELECTED_RING_WIDTH, MARK_STROKE_WIDTH],
   };
 }
 
@@ -280,11 +313,8 @@ export function useOperationsMapLayers(
           layout: {
             "text-field": ["get", "trip_label"],
             "text-font": ["Noto Sans Regular"],
-            "text-size": ["case", ["boolean", ["get", "selected"], false], 12, 10],
-            // Ems, against a mark that is now a third of its old radius: a
-            // larger offset leaves the label floating free of the dot it
-            // names.
-            "text-offset": [0, 1.1],
+            "text-size": ["case", ["boolean", ["get", "selected"], false], TRIP_LABEL_SIZE.selected, TRIP_LABEL_SIZE.base],
+            "text-offset": [0, TRIP_LABEL_OFFSET_EM],
             "text-anchor": "top",
             "text-allow-overlap": false,
             "text-optional": true,
@@ -460,7 +490,7 @@ export function useOperationsMapLayers(
         layout: {
           "text-field": ["concat", ["get", "stop_name"], "  ", ["get", "delay_label"]],
           "text-font": ["Noto Sans Regular"],
-          "text-size": 11,
+          "text-size": 12,
           "text-offset": [0, 1.5],
           "text-anchor": "top",
           "text-optional": true,

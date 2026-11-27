@@ -3,9 +3,8 @@ import type { TimeBand } from "../api/scope";
 
 /**
  * The 8 time-band filter choices, in display order. Single source of truth
- * for every band picker (Ask's FilterContextBar, the scope sentence's time
- * control, the command palette), kept as one function so they can't
- * silently diverge.
+ * for every band picker (the scope bar's time control, the command
+ * palette), kept as one function so they can't silently diverge.
  */
 export function buildTimeBandOptions(t: TFunction): { value: TimeBand; label: string }[] {
   return [

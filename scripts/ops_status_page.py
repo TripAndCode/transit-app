@@ -364,6 +364,7 @@ def _r2_highlight(details: Mapping[str, object]) -> str:
         f"disk={_present(details, 'disk_used_pct')}% "
         f"rt_bytes={_present(details, 'rt_bytes')} "
         f"static_bytes={_present(details, 'static_bytes')} "
+        f"vp_bytes={_present(details, 'vp_bytes')} "
         f"total_bytes={_present(details, 'r2_bytes_total')}"
     )
 

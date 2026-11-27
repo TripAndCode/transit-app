@@ -1,80 +1,67 @@
-import { Link } from "react-router-dom";
-import { Trans, useTranslation } from "react-i18next";
-import { useSession } from "../api/auth";
-import { useConfig } from "../api/config";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { DataSourceCredits } from "../components/DataSourceCredits";
 import { LegalLinks } from "../components/LegalLinks";
-import { LiveMapHero } from "./landing/LiveMapHero";
-import { ScrollNarrative } from "./landing/ScrollNarrative";
+import { CtaLink } from "./landing/CtaLink";
+import { PauseToggle } from "./landing/PauseToggle";
+import { WelcomeHero } from "./landing/WelcomeHero";
+import { StatusBar } from "./landing/StatusBar";
+import { AudienceCards } from "./landing/AudienceCards";
+import { FeedTable } from "./landing/FeedTable";
+import { CouncilSample } from "./landing/CouncilSample";
+import { MethodSteps } from "./landing/MethodSteps";
+import { BusTownTeaser } from "./landing/BusTownTeaser";
 import "./LandingPage.css";
 
-/** Pre-authentication marketing/landing page -- a cinematic first
- *  impression kept deliberately separate from the calm, data-dense signed-
- *  in dashboard (AGENTS.md's "keep UI calm" rule governs the working
- *  Overview/Map/Analysis/Agencies/Live/Ask tabs, not this page). It stays
- *  reachable after sign-in and from the app's "about" link, so its one CTA
- *  is the way in this visitor actually has: the dashboard for a signed-in
- *  user or, on a deployment that serves signed-out visitors, for a guest;
- *  sign-in otherwise. The hero (animated live-map scene + headline + that
- *  CTA) is the entry point; below it, `ScrollNarrative` mounts three real,
- *  working chart components (fed by static fixtures, not live data) telling
- *  the product's story. */
+const NAV_LINKS = [
+  { href: "#councils", key: "landing.nav.councils" },
+  { href: "#observatory", key: "landing.nav.feeds" },
+  { href: "#bus-town", key: "nav.bus-town" },
+  { href: "#method", key: "landing.nav.method" },
+] as const;
+
+/** The welcome page: a structured walk through what the product actually
+ *  shows (nationwide observatory, council reports, feed grades, Bus Town
+ *  playback, the calculation method), every figure a labelled sample
+ *  fixture, never a live read. It stays reachable after sign-in and from the
+ *  app's "about" link, so its CTA wording follows the visitor's session --
+ *  see useCtaKind. The pause toggle is the one control for every looping
+ *  animation on the page (WCAG 2.2.2). */
 export function LandingPage() {
   const { t } = useTranslation();
-  const { data: session } = useSession();
-  const { data: config } = useConfig();
-  // Only a visitor known to be signed out, on a configuration known to let
-  // signed-out visitors in, is sent to "/" as a guest: while either is
-  // unknown, or when sign-in is required, the CTA stays sign-in.
-  const guest = session === null && config != null && !config.login_required;
+  const [paused, setPaused] = useState(false);
+  const year = new Date().getFullYear();
   return (
-    <div className="landing-shell">
-      <section className="landing-hero">
-        <LiveMapHero />
-        {/* The scrim sits above the canvas and below the text content in
-            DOM order (canvas, scrim, content) and keeps the headline legible
-            whatever the map is doing underneath. Reordering these -- or
-            moving the content above it without an explicit stacking context
-            -- lets the scene paint over the text again. The scene's playback
-            control comes with the canvas and lifts itself above both. */}
-        <div className="landing-hero__scrim" aria-hidden="true" />
-        <div className="landing-hero__content">
-          <div className="landing-hero__brand">{t("header.app_title")}</div>
-          <span className="landing-hero__eyebrow">{t("header.app_tagline")}</span>
-          {/* Two spans so the headline always breaks between its question and
-              its scope, never mid-phrase; the space keeps the two lines from
-              running together in the accessible name. */}
-          <h1 className="landing-hero__title">
-            <span className="landing-hero__title-line">{t("landing.hero.title_question")}</span>{" "}
-            <span className="landing-hero__title-line">{t("landing.hero.title_scope")}</span>
-          </h1>
-          <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
-          {session ? (
-            <Link to="/" className="landing-hero__cta">
-              {t("landing.hero.open_dashboard")}
-            </Link>
-          ) : guest ? (
-            <>
-              <Link to="/" className="landing-hero__cta">
-                {t("landing.hero.view_dashboard")}
-              </Link>
-              {config.auth_enabled && (
-                <p className="landing-hero__note">
-                  <Trans t={t} i18nKey="landing.hero.login_note" components={{ login: <Link to="/login" /> }} />
-                </p>
-              )}
-            </>
-          ) : (
-            <Link to="/login" className="landing-hero__cta">
-              {t("common.login")}
-            </Link>
-          )}
+    <div className={paused ? "landing-shell is-paused" : "landing-shell"}>
+      <header className="landing-header">
+        <div className="landing-header__brand">
+          <span className="landing-header__title">{t("header.app_title")}</span>
+          <span className="landing-header__tagline">{t("header.app_tagline")}</span>
         </div>
-      </section>
-      <ScrollNarrative />
+        <nav className="landing-header__nav" aria-label={t("landing.nav.aria_label")}>
+          {NAV_LINKS.map((link) => (
+            <a key={link.href} href={link.href}>
+              {t(link.key)}
+            </a>
+          ))}
+        </nav>
+        <div className="landing-header__actions">
+          <PauseToggle paused={paused} onToggle={() => setPaused((p) => !p)} />
+          <CtaLink className="btn btn--primary landing-header__cta" />
+        </div>
+      </header>
+      <WelcomeHero />
+      <StatusBar />
+      <AudienceCards />
+      <FeedTable />
+      <CouncilSample />
+      <MethodSteps />
+      <BusTownTeaser />
       <footer className="landing-footer">
+        <p className="landing-footer__disclaimer">{t("landing.footer.disclaimer")}</p>
         <LegalLinks className="landing-footer__links" />
         <DataSourceCredits className="landing-footer__credits" />
+        <p className="landing-footer__copyright">{t("landing.footer.copyright", { year, name: t("header.app_title") })}</p>
       </footer>
     </div>
   );

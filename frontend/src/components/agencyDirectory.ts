@@ -52,6 +52,11 @@ function dataRank(agency: Agency, newest: string | null): number {
  *  finds every card where it was. */
 const NAME_ORDER = new Intl.Collator("ja");
 
+/** Two agencies in name order, as every list of agencies orders them. */
+export function byAgencyName(a: { agency_name: string }, b: { agency_name: string }): number {
+  return NAME_ORDER.compare(a.agency_name, b.agency_name);
+}
+
 /** Agencies by prefecture, the prefecture with more agencies first and those
  *  of no known prefecture last. Within a group, current data comes before
  *  stopped data before none, each in name order. `newest` is the newest day
@@ -68,7 +73,7 @@ export function groupAgencies(agencies: Agency[], newest: string | null): Agency
   const groups = [...byPrefecture].map(([prefectureKey, members]) => ({
     prefectureKey,
     agencies: members.sort(
-      (a, b) => dataRank(a, newest) - dataRank(b, newest) || NAME_ORDER.compare(a.agency_name, b.agency_name),
+      (a, b) => dataRank(a, newest) - dataRank(b, newest) || byAgencyName(a, b),
     ),
   }));
   return groups.sort(

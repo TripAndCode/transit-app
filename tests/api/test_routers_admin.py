@@ -4,13 +4,13 @@ the self-guard, last-admin guard, suspend kills sessions, and soft-delete anonym
 
 import asyncio
 import json
-import secrets
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.activity import today_jst
 from api.security import token_hash
 from tests.conftest import _test_pool
 from tests.fixtures.users import add_session, add_session_digest
@@ -337,6 +337,52 @@ async def test_soft_delete_anonymizes(admin_client, aconn):
 
 
 @pytest.mark.asyncio
+async def test_soft_delete_removes_the_users_notebook_investigations(admin_client, aconn, aagency_id):
+    """A deleted admin's Ask conversations (and their messages) must not
+    survive the soft delete; another user's conversation is untouched."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_target, _ = await _seed(aconn, email="investigator@x")
+    _, uid_other, _ = await _seed(aconn, email="other-investigator@x")
+    target_conv = await aconn.fetchval(
+        "INSERT INTO ask_conversations (user_id, agency_id, title) VALUES ($1, $2, 'target') RETURNING conversation_id",
+        uid_target,
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO ask_conversation_messages (conversation_id, role, rendered_summary) VALUES ($1, 'user', 'hi')",
+        target_conv,
+    )
+    other_conv = await aconn.fetchval(
+        "INSERT INTO ask_conversations (user_id, agency_id, title) VALUES ($1, $2, 'other') RETURNING conversation_id",
+        uid_other,
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO ask_conversation_messages (conversation_id, role, rendered_summary) VALUES ($1, 'user', 'hi')",
+        other_conv,
+    )
+    r = await admin_client.delete(
+        f"/api/admin/users/{uid_target}",
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 204
+    assert await aconn.fetchval("SELECT count(*) FROM ask_conversations WHERE conversation_id=$1", target_conv) == 0
+    assert (
+        await aconn.fetchval("SELECT count(*) FROM ask_conversation_messages WHERE conversation_id=$1", target_conv)
+        == 0
+    )
+    assert await aconn.fetchval("SELECT count(*) FROM ask_conversations WHERE conversation_id=$1", other_conv) == 1
+    assert (
+        await aconn.fetchval("SELECT count(*) FROM ask_conversation_messages WHERE conversation_id=$1", other_conv) == 1
+    )
+    after = await aconn.fetchval(
+        "SELECT after::text FROM admin_audit WHERE action = 'user.deleted' AND target_id = $1", str(uid_target)
+    )
+    assert json.loads(after)["ask_conversations_deleted"] == 1
+
+
+@pytest.mark.asyncio
 async def test_user_detail(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid_target, _ = await _seed(aconn, email="detail@x")
@@ -349,7 +395,7 @@ async def test_user_detail(admin_client, aconn):
     body = r.json()
     assert body["email"] == "detail@x"
     assert any(i["provider"] == "google" for i in body["identities"])
-    assert body["byok_provider"] is None
+    assert "byok_provider" not in body
 
 
 @pytest.mark.asyncio
@@ -540,32 +586,15 @@ async def test_bulk_patch_records_nothing_for_an_id_the_patch_does_not_change(ad
 
 
 @pytest.mark.asyncio
-async def test_user_detail_reports_byok_provider_without_the_key(admin_client, aconn):
-    sid_admin, _, _ = await _seed(aconn, role="admin")
-    _, uid_target, _ = await _seed(aconn, email="byok@x")
-    await aconn.execute(
-        "INSERT INTO user_llm_keys (user_id, provider, encrypted_key, key_suffix) VALUES ($1, 'openai', $2, 'abcd')",
-        uid_target,
-        b"not-a-real-ciphertext",
-    )
-    r = await admin_client.get(f"/api/admin/users/{uid_target}", cookies={"sid": sid_admin})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["byok_provider"] == "openai"
-    assert "key" not in body
-    assert "abcd" not in str(body)
-
-
-@pytest.mark.asyncio
 async def test_user_activity_sums_the_window_per_route(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid, _ = await _seed(aconn, email="usage@x")
     await aconn.execute(
         """
-        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
-        VALUES ($1, current_date,      '/api/{agency_id}/overview/summary', 'GET', 1, false, 3, 1),
-               ($1, current_date - 1,  '/api/{agency_id}/overview/summary', 'GET', 1, false, 2, 0),
-               ($1, current_date - 40, '/api/{agency_id}/overview/summary', 'GET', 1, false, 9, 9)
+        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, requests, errors)
+        VALUES ($1, current_date,      '/api/{agency_id}/overview/summary', 'GET', 1, 3, 1),
+               ($1, current_date - 1,  '/api/{agency_id}/overview/summary', 'GET', 1, 2, 0),
+               ($1, current_date - 40, '/api/{agency_id}/overview/summary', 'GET', 1, 9, 9)
         """,
         uid,
     )
@@ -583,6 +612,89 @@ async def test_user_activity_is_admin_only_and_bounded(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     r = await admin_client.get(f"/api/admin/users/{uid}/activity?days=366", cookies={"sid": sid_admin})
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_usage_is_unauthenticated_401_and_non_admin_403(admin_client, aconn):
+    assert (await admin_client.get("/api/admin/usage")).status_code == 401
+    sid_user, _, _ = await _seed(aconn, role="user")
+    assert (await admin_client.get("/api/admin/usage", cookies={"sid": sid_user})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_usage_refuses_an_agency_id_postgres_cannot_hold(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    for bad in ("0", "99999999999"):
+        r = await admin_client.get(f"/api/admin/usage?agency_id={bad}", cookies={"sid": sid_admin})
+        assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_usage_splits_signed_in_and_signed_out_and_zero_fills_days(admin_client, aconn):
+    sid_admin, uid, _ = await _seed(aconn, role="admin")
+    day = today_jst()
+    await aconn.execute(
+        """
+        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, requests, errors)
+        VALUES ($1, $2, '/api/agencies', 'GET', NULL, 7, 1)
+        """,
+        uid,
+        day,
+    )
+    await aconn.execute(
+        """
+        INSERT INTO anonymous_activity_daily (day, route, method, agency_id, requests, errors)
+        VALUES ($1, '/api/agencies', 'GET', NULL, 7, 2)
+        """,
+        day,
+    )
+    r = await admin_client.get("/api/admin/usage?days=3", cookies={"sid": sid_admin})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["routes"] == [{"route": "/api/agencies", "method": "GET", "signed_out": 7, "signed_in": 7, "errors": 3}]
+    assert "api_key" not in body["routes"][0]
+    assert len(body["days"]) == 3
+    assert body["days"][-1] == {"day": day.isoformat(), "signed_out": 7, "signed_in": 7}
+    assert body["days"][0] == {"day": body["days"][0]["day"], "signed_out": 0, "signed_in": 0}
+
+
+@pytest.mark.asyncio
+async def test_usage_filters_by_agency_and_excludes_the_window_boundary_day(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    day = today_jst()
+    await aconn.execute(
+        """
+        INSERT INTO anonymous_activity_daily (day, route, method, agency_id, requests, errors)
+        VALUES ($1::date,      '/api/{agency_id}/overview/summary', 'GET', 1, 3, 0),
+               ($1::date,      '/api/{agency_id}/overview/summary', 'GET', 2, 9, 0),
+               ($1::date - 30, '/api/{agency_id}/overview/summary', 'GET', 1, 4, 0)
+        """,
+        day,
+    )
+    r = await admin_client.get("/api/admin/usage?days=30&agency_id=1", cookies={"sid": sid_admin})
+    assert r.status_code == 200
+    # Only agency 1's requests count, and the row exactly 30 days ago (the
+    # window's boundary, not strictly inside it) is excluded.
+    assert r.json()["routes"] == [
+        {
+            "route": "/api/{agency_id}/overview/summary",
+            "method": "GET",
+            "signed_out": 3,
+            "signed_in": 0,
+            "errors": 0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_api_key_routes_no_longer_exist_for_an_admin(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    get_r = await admin_client.get("/api/admin/api-keys", cookies={"sid": sid_admin})
+    post_r = await admin_client.post(
+        "/api/admin/api-keys", json={"owner_user_id": 1}, cookies={"sid": sid_admin}, headers=_HEADERS
+    )
+    assert get_r.status_code in (404, 405)
+    assert post_r.status_code in (404, 405)
 
 
 _ORIGINAL_SUSPENSION = datetime(2020, 1, 1, tzinfo=timezone.utc)
@@ -671,61 +783,20 @@ async def test_suspension_transitions_still_stamp_and_clear_suspended_at(admin_c
 _HEADERS = {"Origin": "http://test"}
 
 
-async def _seed_key(conn, *, owner_user_id, owner_email, revoked_at=None):
-    raw = f"sk_{secrets.token_urlsafe(16)}"
-    key_id = await conn.fetchval(
-        "INSERT INTO api_keys (key_hash, owner_user_id, owner_email, revoked_at) VALUES ($1, $2, $3, $4) RETURNING id",
-        token_hash(raw),
-        owner_user_id,
-        owner_email,
-        revoked_at,
-    )
-    return key_id, raw
-
-
 async def _delete(client, sid, uid):
     return await client.delete(f"/api/admin/users/{uid}", cookies={"sid": sid}, headers=_HEADERS)
 
 
 @pytest.mark.asyncio
-async def test_soft_delete_masks_and_revokes_every_key_the_user_owns(admin_client, aconn):
-    """Ownership is what erase_user and the account export use: a key issued
-    to the account, or a legacy ownerless key recorded under its address in
-    any case. An already-revoked key keeps the time it was revoked."""
-    sid_admin, _, _ = await _seed(aconn, role="admin")
-    _, uid, _ = await _seed(aconn, email="keyed@x")
-    _, uid_other, _ = await _seed(aconn, email="other@x")
-    live_id, live_raw = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x")
-    revoked_id, _ = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x", revoked_at=_ORIGINAL_SUSPENSION)
-    legacy_id, legacy_raw = await _seed_key(aconn, owner_user_id=None, owner_email="Keyed@X")
-    other_id, other_raw = await _seed_key(aconn, owner_user_id=uid_other, owner_email="other@x")
-    assert (await admin_client.get("/health", headers={"X-API-Key": legacy_raw})).status_code == 200
-
-    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
-
-    keys = {r["id"]: r for r in await aconn.fetch("SELECT id, owner_email, revoked_at FROM api_keys")}
-    for key_id in (live_id, revoked_id, legacy_id):
-        assert keys[key_id]["owner_email"] == f"deleted-{uid}@local"
-        assert keys[key_id]["revoked_at"] is not None
-    assert keys[revoked_id]["revoked_at"] == _ORIGINAL_SUSPENSION
-    assert keys[other_id]["owner_email"] == "other@x"
-    assert keys[other_id]["revoked_at"] is None
-    for raw in (live_raw, legacy_raw):
-        assert (await admin_client.get("/health", headers={"X-API-Key": raw})).status_code == 401
-    assert (await admin_client.get("/health", headers={"X-API-Key": other_raw})).status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_soft_delete_marks_the_row_deleted_and_audits_the_revoked_keys(admin_client, aconn):
+async def test_soft_delete_marks_the_row_deleted_and_audits_it(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid, _ = await _seed(aconn, email="marked@x")
-    key_id, _ = await _seed_key(aconn, owner_user_id=uid, owner_email="marked@x")
     assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
     assert await aconn.fetchval("SELECT deleted_at FROM users WHERE user_id=$1", uid) is not None
     after = await aconn.fetchval(
         "SELECT after::text FROM admin_audit WHERE action = 'user.deleted' AND target_id = $1", str(uid)
     )
-    assert json.loads(after)["api_keys_revoked"] == [key_id]
+    assert json.loads(after)["email"] == f"deleted-{uid}@local"
     assert "marked@x" not in after
 
 
@@ -793,19 +864,6 @@ async def test_a_deleted_user_cannot_be_deleted_again(admin_client, aconn):
     )
 
 
-@pytest.mark.asyncio
-async def test_no_key_can_be_issued_to_a_deleted_user(admin_client, aconn):
-    sid_admin, _, _ = await _seed(aconn, role="admin")
-    _, uid, _ = await _seed(aconn)
-    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
-    r = await admin_client.post(
-        "/api/admin/api-keys", json={"owner_user_id": uid}, cookies={"sid": sid_admin}, headers=_HEADERS
-    )
-    assert r.status_code == 409
-    assert r.json()["detail"] == "user is deleted"
-    assert await aconn.fetchval("SELECT count(*) FROM api_keys WHERE owner_user_id=$1", uid) == 0
-
-
 _ACTOR_UA = "admin-console/1"
 _ACTOR_HEADERS = {**_HEADERS, "User-Agent": _ACTOR_UA}
 
@@ -858,22 +916,14 @@ async def test_a_bulk_patch_records_the_admins_address_and_browser_on_every_even
 
 
 @pytest.mark.asyncio
-async def test_session_key_invite_and_delete_actions_record_the_admins_address_and_browser(admin_client, aconn):
+async def test_session_key_and_delete_actions_record_the_admins_address_and_browser(admin_client, aconn):
     sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
     sid, uid, _ = await _seed(aconn)
     kw = {"cookies": {"sid": sid_admin}, "headers": _ACTOR_HEADERS}
     r = await admin_client.delete(f"/api/admin/users/{uid}/sessions/{token_hash(sid)[:16]}", **kw)
     assert r.status_code == 204
-    r = await admin_client.post("/api/admin/api-keys", json={"owner_user_id": uid}, **kw)
-    assert r.status_code == 201
-    assert (await admin_client.delete(f"/api/admin/api-keys/{r.json()['id']}", **kw)).status_code == 204
-    r = await admin_client.post("/api/admin/invites", json={"email": "invitee@example.com"}, **kw)
-    assert r.status_code == 201
     assert (await admin_client.delete(f"/api/admin/users/{uid}", **kw)).status_code == 204
     assert await _actor_trail(aconn, uid_admin) == [
         (uid, "session_revoked", "127.0.0.1", _ACTOR_UA),
-        (uid, "api_key_issued", "127.0.0.1", _ACTOR_UA),
-        (uid, "api_key_revoked", "127.0.0.1", _ACTOR_UA),
-        (None, "invite_created", "127.0.0.1", _ACTOR_UA),
         (uid, "deleted", "127.0.0.1", _ACTOR_UA),
     ]

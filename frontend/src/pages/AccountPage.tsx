@@ -1,9 +1,8 @@
-import { useId, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useLogout, useSession } from "../api/auth";
-import { ApiError, apiDelete, apiErrorDetail, apiGet, apiPut, apiUrl } from "../api/client";
+import { apiDelete, apiGet } from "../api/client";
 import { formatDateTime } from "../utils/format";
 import { describeUserAgent } from "../utils/userAgent";
 import { useAgencies } from "../api/hooks";
@@ -11,11 +10,8 @@ import { readLastAgency } from "../api/lastAgency";
 import { Card } from "../components/ui/Card";
 import { PageHeader } from "../components/ui/PageHeader";
 import { Section } from "../components/ui/Section";
-import { Toolbar } from "../components/ui/Toolbar";
 import { LegalLinks } from "../components/LegalLinks";
-import { Modal } from "../components/Modal";
 import { Skeleton } from "../components/Skeleton";
-import "./AccountPage.css";
 
 type SessionRow = {
   sid_prefix: string;
@@ -26,197 +22,6 @@ type SessionRow = {
   /** The session this page was loaded with. */
   current: boolean;
 };
-
-type LlmKeyStatus = {
-  configured: boolean;
-  provider?: string;
-  key_suffix?: string;
-};
-
-/** BYOK LLM key settings — lets a signed-in user store their own provider key
- * so Copilot/Ask calls bill their provider account, not the operator's. The
- * raw key is write-only: the backend never echoes it back, only the masked
- * `key_suffix`, and this component never holds it in state past the mutation
- * call that sends it. */
-function LlmKeySection() {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const {
-    data: status,
-    isPending: statusPending,
-    isError: statusError,
-  } = useQuery({
-    queryKey: ["myLlmKey"],
-    queryFn: ({ signal }) => apiGet<LlmKeyStatus>("/api/me/llm-key", { signal }),
-  });
-  const [providerOverride, setProviderOverride] = useState<string | null>(null);
-  const provider = providerOverride ?? status?.provider ?? "gemini";
-  const [apiKey, setApiKey] = useState("");
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [removeError, setRemoveError] = useState<string | null>(null);
-
-  const save = useMutation({
-    mutationFn: () => apiPut<LlmKeyStatus>("/api/me/llm-key", { provider, api_key: apiKey }),
-    onSuccess: (data) => {
-      setApiKey("");
-      setSaveError(null);
-      // Seed the cache directly from the mutation response rather than just
-      // invalidating: the response already carries the fresh masked
-      // `key_suffix` (never the raw key), so this shows the new status
-      // immediately without waiting on a second round-trip refetch.
-      qc.setQueryData(["myLlmKey"], data);
-    },
-    onError: (err) => {
-      setApiKey("");
-      // Only the 400 the server raises about the key itself says "rejected";
-      // a 401/403 (session or CSRF), rate limit, 5xx or dropped connection
-      // says nothing about the key.
-      const rejected = err instanceof ApiError && err.status === 400;
-      setSaveError(t(rejected ? "account.llm_key.rejected" : "account.llm_key.save_error"));
-    },
-  });
-
-  const remove = useMutation({
-    mutationFn: () => apiDelete("/api/me/llm-key"),
-    onSuccess: () => {
-      setRemoveError(null);
-      qc.setQueryData(["myLlmKey"], { configured: false });
-    },
-    onError: () => setRemoveError(t("account.llm_key.remove_error")),
-  });
-
-  return (
-    <Section
-      title={t("account.llm_key.title")}
-      description={
-        status?.configured
-          ? t("account.llm_key.status_own", { provider: status.provider, suffix: status.key_suffix })
-          : statusPending
-            ? t("common.loading")
-            : statusError
-              ? t("account.llm_key.status_unavailable")
-              : t("account.llm_key.status_shared")
-      }
-    >
-      <Toolbar>
-        <select value={provider} onChange={(e) => setProviderOverride(e.target.value)}>
-          <option value="gemini" /* i18n-ignore: provider brand name */>Gemini</option>
-          <option value="openai" /* i18n-ignore: provider brand name */>OpenAI</option>
-        </select>
-        <label>
-          {t("account.llm_key.input_label")}
-          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-        </label>
-        <button onClick={() => save.mutate()} disabled={!apiKey || save.isPending}>
-          {t("common.save")}
-        </button>
-        {(status?.configured || statusError) && (
-          <button onClick={() => remove.mutate()} disabled={remove.isPending}>
-            {t("account.llm_key.remove")}
-          </button>
-        )}
-      </Toolbar>
-      {saveError && <p role="alert">{saveError}</p>}
-      {removeError && <p role="alert">{removeError}</p>}
-    </Section>
-  );
-}
-
-const DELETE_ERROR_KEYS: Record<string, string> = {
-  last_admin: "account.data.error_last_admin",
-  managed_account: "account.data.error_managed",
-};
-
-/** Download everything the app holds about you. */
-function DataSection() {
-  const { t } = useTranslation();
-  return (
-    <Section title={t("account.data.title")} description={t("account.data.description")}>
-      <Toolbar>
-        <a href={apiUrl("/api/me/export")} download>
-          {t("account.data.export")}
-        </a>
-      </Toolbar>
-    </Section>
-  );
-}
-
-/** Delete the account for good, apart from everything else on the page.
- *  Deletion is a hard delete on the server, so the confirm button waits for
- *  the account's own email to be typed. */
-function DangerZone({ email }: { email: string }) {
-  const { t } = useTranslation();
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  const titleId = useId();
-  const [open, setOpen] = useState(false);
-  const [typed, setTyped] = useState("");
-  const remove = useMutation({
-    mutationFn: () => apiDelete("/api/me", { body: { confirm_email: typed } }),
-    onSuccess: () => {
-      qc.clear();
-      navigate("/welcome", { replace: true });
-    },
-  });
-  const matches = typed.trim().toLowerCase() === email.toLowerCase();
-  const detail = remove.error ? apiErrorDetail(remove.error) : null;
-  const errorKey = remove.error ? (DELETE_ERROR_KEYS[detail ?? ""] ?? "account.data.error_generic") : null;
-
-  return (
-    <Section className="account-danger" title={t("account.data.delete")} description={t("account.data.delete_description")}>
-      <Toolbar>
-        <button
-          className="account-danger__button"
-          onClick={() => {
-            setTyped("");
-            remove.reset();
-            setOpen(true);
-          }}
-        >
-          {t("account.data.delete")}
-        </button>
-      </Toolbar>
-      <Modal
-        open={open}
-        onClose={() => {
-          if (!remove.isPending) setOpen(false);
-        }}
-        labelledBy={titleId}
-        style={{
-          width: "min(460px, calc(100vw - 32px))",
-          padding: 20,
-          border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius)",
-          boxShadow: "var(--el-2)",
-        }}
-      >
-        <h2 id={titleId} style={{ margin: "0 0 8px", fontSize: 16 }}>
-          {t("account.data.delete_title")}
-        </h2>
-        <p style={{ margin: "0 0 12px", fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-          {t("account.data.delete_body")}
-        </p>
-        <label style={{ display: "block", marginBottom: 12, fontSize: "var(--text-sm)" }}>
-          {t("account.data.delete_confirm_label", { email })}
-          <input value={typed} onChange={(e) => setTyped(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4 }} />
-        </label>
-        {errorKey && (
-          <p role="alert" style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)" }}>
-            {t(errorKey)}
-          </p>
-        )}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={() => setOpen(false)} disabled={remove.isPending}>
-            {t("common.cancel")}
-          </button>
-          <button className="account-danger__button" onClick={() => remove.mutate()} disabled={!matches || remove.isPending}>
-            {t("account.data.delete_confirm")}
-          </button>
-        </div>
-      </Modal>
-    </Section>
-  );
-}
 
 /** The account page's outline while the session loads: a title, the
  *  profile card and two sections, so the page settles in place. */
@@ -276,7 +81,6 @@ export function AccountPage() {
           <p style={{ margin: 0, color: "var(--text-tertiary)", fontSize: "var(--text-sm)" }}>{t("account.linked_none")}</p>
         )}
       </Section>
-      <LlmKeySection />
       <Section title={t("account.active_sessions")}>
         {sessions?.map((s) => {
           const device = describeUserAgent(s.user_agent);
@@ -316,7 +120,6 @@ export function AccountPage() {
           </p>
         )}
       </Section>
-      <DataSection />
       <button
         onClick={() => logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") })}
         disabled={logout.isPending}
@@ -330,7 +133,6 @@ export function AccountPage() {
           {t("account.logout_error")}
         </div>
       )}
-      <DangerZone email={session.email} />
       <div style={{ marginTop: 24, fontSize: "var(--text-sm)" }}>
         <LegalLinks />
       </div>

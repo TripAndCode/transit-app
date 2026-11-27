@@ -1,6 +1,6 @@
-"""The Routes screen's one table: each route's average delay, on-time rate and
-share of departures over five minutes late, sorted by whichever the reader
-picks."""
+"""The Routes screen's one table: each route's average delay, on-time rate,
+early-departure rate and share of departures over five minutes late, sorted by
+whichever the reader picks."""
 
 import csv
 import io
@@ -26,7 +26,7 @@ def _reset_limiter():
     limiter.reset()
 
 
-# Spread so that each sort orders the four routes differently:
+# Spread so that each sort orders the four routes differently (on time under legacy_60s):
 #   code   avg   on-time  over 5 (share, count)  samples
 #   A     4.00    40.0%      60.0%  15             25
 #   B     7.33    20.0%      40.0%  10             25
@@ -74,7 +74,8 @@ async def test_each_figure_is_the_one_its_own_report_shows(reports_client, ch_cl
     by_code = {r[0]: r for r in table["rows"]}
     assert set(by_code) == set(_ROUTES)
     for code, delays in _ROUTES.items():
-        # (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, low_confidence, margin_pp)
+        # (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, early_pct,
+        #  low_confidence, margin_pp)
         row = by_code[code]
         avg = next(r for r in ranking["rows"] if r[0] == code)
         rate = next(r for r in on_time["rows"] if r[0] == code)
@@ -83,8 +84,9 @@ async def test_each_figure_is_the_one_its_own_report_shows(reports_client, ch_cl
         assert row[2] == rate[2], code
         assert row[4] == late[2], code
         assert row[5] == avg[5] == rate[4] == late[4] == len(delays), code
-        assert row[6:] == rate[5:], code
+        assert row[7:] == rate[5:], code
         assert float(row[3]) == round(100 * sum(d > 300 for d in delays) / len(delays), 1), code
+        assert float(row[6]) == 0.0, code
 
 
 @pytest.mark.asyncio
@@ -100,12 +102,12 @@ async def test_every_sort_ranks_the_same_routes_worst_first_and_best_on_request(
     band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
 
     for sort, worst_first in _WORST_FIRST.items():
-        worst = (await client.get(_url(agency_id, band, f"&sort={sort}"))).json()
+        worst = (await client.get(_url(agency_id, band, f"&sort={sort}&preset=legacy_60s"))).json()
         assert [r[0] for r in worst["rows"]] == worst_first, sort
         assert worst["rows_total"] == 4, sort
         # The response names the order its rows are in.
         assert (worst["sort"], worst["order"]) == (sort, "worst")
-        best = (await client.get(_url(agency_id, band, f"&sort={sort}&order=best&limit=2"))).json()
+        best = (await client.get(_url(agency_id, band, f"&sort={sort}&order=best&limit=2&preset=legacy_60s"))).json()
         assert [r[0] for r in best["rows"]] == worst_first[::-1][:2], sort
         assert best["rows_total"] == 4, sort
         assert (best["sort"], best["order"]) == (sort, "best")
@@ -202,15 +204,15 @@ async def test_the_scopes_tolerance_moves_the_on_time_rate_and_never_the_five_mi
     band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
 
     default = (await client.get(_url(agency_id, band))).json()
-    wider = (await client.get(_url(agency_id, band, "&late=120"))).json()
-    assert float(default["rows"][0][2]) == 0.0
-    assert float(wider["rows"][0][2]) == 80.0
-    for body in (default, wider):
+    narrower = (await client.get(_url(agency_id, band, "&late=60"))).json()
+    assert float(default["rows"][0][2]) == 80.0
+    assert float(narrower["rows"][0][2]) == 0.0
+    for body in (default, narrower):
         assert float(body["rows"][0][3]) == 20.0
         assert body["rows"][0][4] == 5
-    assert default["definition"]["late_tolerance_sec"] == 60
-    assert wider["definition"]["late_tolerance_sec"] == 120
-    assert wider["scope_applied"]["late"] is True
+    assert default["definition"]["late_tolerance_sec"] == 300
+    assert narrower["definition"]["late_tolerance_sec"] == 60
+    assert narrower["scope_applied"]["late"] is True
 
 
 @pytest.mark.asyncio
@@ -238,11 +240,16 @@ async def test_the_csv_holds_every_figure_and_marks_a_wide_margin(reports_client
         "5分超の割合(%)",
         "5分超回数",
         "観測数",
+        "早発率(%)",
         "誤差大",
         "誤差(±ポイント)",
+        "過去90日(2026-02-13〜2026-05-13)の定時率(%)",
+        "過去90日の定時率を示さない理由",
     ]
-    # A 60% rate over 100 observations has a 95% interval wider than ±5 points.
-    assert lines[2] == ["W1", "2.67", "60.0", "40.0", "40", "100", "誤差大", "9.5"]
+    # A 60% rate over 100 observations has a 95% interval wider than ±5 points;
+    # the 90 days before the day hold no observation of the route.
+    assert lines[2] == ["W1", "2.67", "60.0", "40.0", "40", "100", "0.0", "誤差大", "9.5", "", "観測なし"]
+    assert "早発率=60秒を超える早発の割合" in lines[0][0]
 
 
 @pytest.mark.asyncio
@@ -254,9 +261,86 @@ async def test_the_summary_names_the_sort_in_the_requested_language(reports_clie
     ja = (await client.get(_url(agency_id, "", "&sort=late5_share"))).json()
     en = (await client.get(_url(agency_id, "", "&sort=late5_share"), headers={"Accept-Language": "en"})).json()
     assert ja["text"] == (
-        "【系統一覧：5分超の割合が高い順】\n1位: 路線S1 平均1.7分、定時率75.0%、5分超25.0%（25件）、観測100件"
+        "【系統一覧：5分超の割合が高い順】\n"
+        "1位: 路線S1 平均1.7分、定時率75.0%、1分を超える早発0.0%、5分超25.0%（25件）、観測100件"
     )
     assert en["text"] == (
         "[Routes, highest share over 5 min first]\n"
-        "#1 route S1 mean 1.7 min, on-time 75.0%, over 5 min 25.0% (25), 100 samples"
+        "#1 route S1 mean 1.7 min, on-time 75.0%, more than 1 min early 0.0%, over 5 min 25.0% (25), 100 observations"
     )
+
+
+# 25 departures: ten more than a minute early, five exactly a minute early.
+_EARLY = [-120] * 5 + [-61] * 5 + [-60] * 5 + [0] * 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_the_early_departure_rate_counts_departures_more_than_the_early_tolerance_early(
+    reports_client,  # noqa: F811
+    ch_client,
+    ch_async_client,
+    path,
+):
+    """The rate counts the departures more than the early tolerance early, a
+    minute by default and with early departures counted as on time alike; a
+    wider early tolerance moves it to that limit. A departure exactly at the
+    limit is not early."""
+    client, agency_id, pool = reports_client
+    await _seed_route_at(pool, agency_id, "E", "平日", DAY, "08:00", _EARLY)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    default = (await client.get(_url(agency_id, band))).json()
+    legacy = (await client.get(_url(agency_id, band, "&preset=legacy_60s"))).json()
+    limited = (await client.get(_url(agency_id, band, "&early=120"))).json()
+    assert float(default["rows"][0][6]) == float(legacy["rows"][0][6]) == 40.0
+    assert float(limited["rows"][0][6]) == 0.0
+    assert default["definition"]["early_departure_sec"] == legacy["definition"]["early_departure_sec"] == 60
+    assert limited["definition"]["early_departure_sec"] == 120
+    # The on-time rate keeps its own rule beside it: the ten more than a
+    # minute early are not on time by default, and are under legacy_60s.
+    assert float(default["rows"][0][2]) == 60.0
+    assert float(legacy["rows"][0][2]) == 100.0
+
+
+# Whole-minute readings on the window's edges: exactly a minute early and
+# exactly five minutes late are on time; two minutes early and 301 s late are not.
+_EDGES = [-120] * 5 + [-60] * 5 + [0] * 5 + [300] * 5 + [301] * 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize(
+    ("query", "preset", "on_time"),
+    [
+        ("", "standard_m1_p5", 60.0),
+        ("&preset=standard_m1_p5", "standard_m1_p5", 60.0),
+        ("&early=60&late=300", "standard_m1_p5", 60.0),
+        ("&early=any&late=300", "custom", 80.0),
+    ],
+)
+async def test_readings_on_the_windows_edges_count_exactly_on_both_paths(
+    reports_client,  # noqa: F811
+    ch_client,
+    ch_async_client,
+    path,
+    query,
+    preset,
+    on_time,
+):
+    """The industry window, and the five-minute tolerance with early
+    departures on time, count a departure exactly a minute early or exactly
+    five minutes late the same way whether the aggregates or a live scan
+    answer."""
+    client, agency_id, pool = reports_client
+    await _seed_route_at(pool, agency_id, "S", "平日", DAY, "08:00", _EDGES)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(_url(agency_id, band, query))).json()
+    row = body["rows"][0]
+    assert float(row[2]) == on_time
+    assert float(row[6]) == 20.0
+    definition = body["definition"]
+    assert definition["preset"] == preset
+    assert definition["late_tolerance_sec"] == 300
+    assert definition["early_departure_sec"] == 60

@@ -130,6 +130,13 @@ describe("HelpPage", () => {
     expect(decl(ruleBody(css, ".user-manual-section,\n.user-manual-section [id] {"), "scroll-margin-top")).toBe("16px");
   });
 
+  it("draws a manual's own rule in the section dividers' colour, not the browser's grey", () => {
+    const css = readFileSync(resolve(__dirname, "../styles/global.css"), "utf8");
+    const hr = ruleBody(css, ".user-manual-content hr {");
+    expect(decl(hr, "border")).toBe("0");
+    expect(decl(hr, "border-top")).toBe("1px solid var(--border-soft)");
+  });
+
   describe("one document", () => {
     const scrollIntoView = vi.fn();
     beforeEach(() => {

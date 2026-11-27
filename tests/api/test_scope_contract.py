@@ -25,7 +25,6 @@ def _assert_declares_scope(body: dict) -> None:
         "/api/{a}/reports/dow_weekday",
         "/api/{a}/reports/dwell_run",
         "/api/{a}/overview/summary",
-        "/api/{a}/peak-hour-breakdown?hour=8",
         "/api/{a}/headway_quality",
         "/api/{a}/performance_standards",
         "/api/{a}/weather_delay",

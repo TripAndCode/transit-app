@@ -11,9 +11,6 @@ docs
 # to take effect — a negation before the pattern it overrides is a no-op.
 !docs/features/
 tests
-# Re-include the Ask golden set: pipeline/query/router.py and the RAG index
-# read it at runtime (ordering rule explained above).
-!tests/ask_eval/golden_set.jsonl
 .superpowers
 oracle_cloud
 .github
@@ -22,8 +19,11 @@ tools
 .pre-commit-config.yaml
 .gitleaks*
 # frontend/src stays in the image: pipeline/data_sources.py reads the
-# data-source list and the credit wording from it at runtime.
+# data-source list and the credit wording from it at runtime, and
+# pipeline/reports/definition.py the methodology's addresses.
 frontend/node_modules
 frontend/dist
 api/static
 .claude
+/archive/
+/backup/

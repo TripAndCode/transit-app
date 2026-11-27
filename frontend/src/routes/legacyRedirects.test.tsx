@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import {
+  LEGACY_REDIRECTS_REMOVE_AFTER,
   RedirectAnalysisLens,
   RedirectForecast,
+  RedirectNetworkToAgencyNetwork,
   RedirectReportType,
   RedirectSaved,
   RedirectTo,
@@ -126,7 +128,7 @@ describe("legacy redirects", () => {
   it("sends an analysis/:reportType bookmark to the screen hosting it", () => {
     const loc = go(LENS, <RedirectAnalysisLens />, "/agencies/9/analysis/dwell_run?routes=50", "agencies/:agencyId/why");
     expect(loc.pathname).toBe("/agencies/9/why");
-    expect(loc.params.get("report")).toBe("dwell_run");
+    expect(loc.params.has("report")).toBe(false);
     expect(loc.params.get("routes")).toBe("50");
   });
 
@@ -191,4 +193,63 @@ describe("legacy redirects", () => {
     expect(loc.params.get("by")).toBe("agencies");
     expect(loc.params.get("from")).toBe("2026-09-01");
   });
+});
+
+describe("RedirectNetworkToAgencyNetwork", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("redirects to the last-selected agency's Compare by agencies, preserving the query string", () => {
+    localStorage.setItem("transit.lastAgency", "8");
+    const router = createMemoryRouter(
+      [
+        { path: "network", element: <RedirectNetworkToAgencyNetwork /> },
+        { path: "agencies/:agencyId/compare", element: <Target label="agency-network" /> },
+      ],
+      { initialEntries: ["/network?from=2026-06-07&to=2026-06-10"] },
+    );
+    render(<RouterProvider router={router} />);
+    expect(screen.getByText("agency-network")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/agencies/8/compare");
+    const params = new URLSearchParams(router.state.location.search);
+    expect(params.get("by")).toBe("agencies");
+    expect(params.get("from")).toBe("2026-06-07");
+    expect(params.get("to")).toBe("2026-06-10");
+    expect(router.state.historyAction).toBe("REPLACE");
+  });
+
+  it("redirects to / when no agency was ever selected", () => {
+    const router = createMemoryRouter(
+      [
+        { path: "network", element: <RedirectNetworkToAgencyNetwork /> },
+        { path: "/", element: <Target label="root" /> },
+      ],
+      { initialEntries: ["/network"] },
+    );
+    render(<RouterProvider router={router} />);
+    expect(screen.getByText("root")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+  });
+});
+
+
+describe("legacy redirect removal date", () => {
+  it("is a real calendar date", () => {
+    const d = LEGACY_REDIRECTS_REMOVE_AFTER;
+    expect(d).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10)).toBe(d);
+  });
+
+  // Runs only where RUN_DEADLINES=1 (the scheduled workflow), so reaching the
+  // date never fails a pull request's checks.
+  it.runIf(process.env.RUN_DEADLINES === "1")(
+    "has not passed: delete this file, its routes in main.tsx and the date once it has",
+    () => {
+      const today = new Date().toISOString().slice(0, 10);
+      expect(
+        today <= LEGACY_REDIRECTS_REMOVE_AFTER,
+        `The legacy redirects were due for removal after ${LEGACY_REDIRECTS_REMOVE_AFTER}. ` +
+          "Delete frontend/src/routes/legacyRedirects.tsx, this test and the routes that mount them in main.tsx.",
+      ).toBe(true);
+    },
+  );
 });

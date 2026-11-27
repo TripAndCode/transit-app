@@ -28,16 +28,27 @@ because the frontend i18n layer translates display names client-side.
 
 from __future__ import annotations
 
+import logging
 import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import asyncpg
 import clickhouse_connect
 
-from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
-from pipeline import perf
+from api.range import (
+    TIME_BAND_RANGES,
+    RangeCtx,
+    ServiceType,
+    clamp_range_ctx,
+    hour_param,
+    last_closed_jst_day,
+    resolve_service_dates,
+)
+from pipeline import perf, retained_reads
+from pipeline.agg_sql import SEGMENT_HOLD_ALLOWANCE_SEC
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
@@ -48,7 +59,6 @@ from pipeline.query.tool_queries import (
     route_hour_dow_pattern,
     route_info,
     route_trend_shift,
-    schedule_realism_padding,
     schedule_realism_segments,
     segment_hotspots,
 )
@@ -59,9 +69,22 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.rankings import _weighted_avg_min
+from pipeline.reports.definition import DefinitionMeta
+from pipeline.reports.rankings import (
+    MIN_GROUP_SAMPLES,
+    _round2,
+    _weighted_avg_min,
+    on_time_window,
+    threshold_aggregates_serve,
+)
+from pipeline.reports.report_stamp import report_definition
+from pipeline.reports.savepoint import savepoint
+from pipeline.reports.segment_runtime import compute_segment_runtime
+from pipeline.retained_reads import RangeNotRetained
 from pipeline.route_catalog import left_out_unless_named, route_list, rows_to_fetch
 from pipeline.stats import annotate_on_time_pct_confidence
+
+_log = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -140,6 +163,18 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("on_time_summary", "en"): "On-time rate (within {threshold_min} min) — top {count} routes",
     ("on_time_summary_worst", "ja"): "定時率 (遅延 {threshold_min} 分以内) 下位{count}路線",
     ("on_time_summary_worst", "en"): "On-time rate (within {threshold_min} min) — bottom {count} routes",
+    ("on_time_summary_default", "ja"): "定時率 (業界標準: 早発{early_min}分・遅延{late_min}分以内) 上位{count}路線",
+    ("on_time_summary_default", "en"): (
+        "On-time rate (industry standard: no more than {early_min} min early, {late_min} min late) — top {count} routes"
+    ),
+    (
+        "on_time_summary_default_worst",
+        "ja",
+    ): "定時率 (業界標準: 早発{early_min}分・遅延{late_min}分以内) 下位{count}路線",
+    ("on_time_summary_default_worst", "en"): (
+        "On-time rate (industry standard: no more than {early_min} min early, {late_min} min late) "
+        "— bottom {count} routes"
+    ),
     ("route_meta_not_found", "ja"): "路線{route} の路線情報が見つかりません。",
     ("route_meta_not_found", "en"): "No metadata found for route {route}.",
     ("route_meta_summary", "ja"): "路線{route} 路線情報",
@@ -162,6 +197,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("schedule_realism_padding_summary", "en"): "Schedule realism — route {route} (padding view)",
     ("schedule_realism_terminus_suffix", "ja"): "／終点早着率 {pct}%（{n}件中）",
     ("schedule_realism_terminus_suffix", "en"): " — terminus early-arrival rate {pct}% (n={n})",
+    ("schedule_realism_timetable_suffix", "ja"): "／ダイヤ {version}（{days}日分）",
+    ("schedule_realism_timetable_suffix", "en"): " — timetable {version} ({days} days)",
+    ("schedule_realism_feed_estimate", "ja"): "／フィードの予測値に基づく推定値",
+    ("schedule_realism_feed_estimate", "en"): " — feed-based estimate",
     ("trend_shift_summary", "ja"): "路線{route} トレンド変化",
     ("trend_shift_summary", "en"): "Trend shift — route {route}",
     ("trend_shift_no_data", "ja"): "路線{route} のトレンドデータが選択期間にありません。",
@@ -210,6 +249,14 @@ _LOCALES: dict[tuple[str, str], str] = {
         "この条件では集計に時間がかかりすぎました。期間を短くするか、路線を絞ってお試しください。"
     ),
     ("query_timeout", "en"): "This took too long to count. Try a shorter period or fewer routes.",
+    ("range_not_retained", "ja"): (
+        "{floor} より前の詳細な観測データは保存期間を過ぎているため、この表示では扱えません。"
+        "{floor} 以降の期間を選んでください。それより前の期間は日ごとの集計によるレポートで確認できます。"
+    ),
+    ("range_not_retained", "en"): (
+        "Detailed readings before {floor} are no longer kept, so this view can't cover that period. "
+        "Choose a period from {floor} on; the reports built from daily totals still cover the earlier dates."
+    ),
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
     ("did_you_mean_candidate", "ja"): "路線{code}({name})",
@@ -218,7 +265,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("series_top_offenders", "ja"): " (悪化: {routes})",
     ("series_top_offenders", "en"): " (worst: {routes})",
     ("series_line", "ja"): "{date}: 平均{avg:.2f}分 / {samples}件{top}",
-    ("series_line", "en"): "{date}: mean {avg:.2f} min / {samples} samples{top}",
+    ("series_line", "en"): "{date}: mean {avg:.2f} min / {samples} observations{top}",
     ("more_rows", "ja"): "…他{n}件",
     ("more_rows", "en"): "…{n} more",
     ("route_prefix", "ja"): "路線{route}",
@@ -267,100 +314,46 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("mt_no_observations", "en"): "no observations.",
     ("mt_date_range_summary", "ja"): "観測期間: {first_date} 〜 {last_date}",
     ("mt_date_range_summary", "en"): "observation window: {first_date} – {last_date}",
+    (
+        "mt_date_range_summary_floor",
+        "ja",
+    ): "観測期間: {first_date} 〜 {last_date}（詳細な観測データは {floor} 以降を保存）",
+    ("mt_date_range_summary_floor", "en"): (
+        "observation window: {first_date} – {last_date} (detailed readings kept from {floor})"
+    ),
     ("mt_agencies_summary", "ja"): "登録されているエージェンシー: {n} 社",
     ("mt_agencies_summary", "en"): "registered agencies: {n}",
-    ("mt_sample_counts_no_data", "ja"): "選択期間 ({from_date}〜{to_date}) にサンプルデータがありません。",
-    ("mt_sample_counts_no_data", "en"): "no sample data in the selected window ({from_date} – {to_date}).",
+    ("mt_sample_counts_no_data", "ja"): "選択期間 ({from_date}〜{to_date}) に観測がありません。",
+    ("mt_sample_counts_no_data", "en"): "no observations in the selected window ({from_date} – {to_date}).",
     ("mt_sample_counts_page_asc", "ja"): (
-        "サンプル数の少ない順 全{total}路線中 {shown_from}–{shown_to}件を表示"
+        "観測数の少ない順 全{total}路線中 {shown_from}–{shown_to}件を表示"
         "（続きは「次の{limit}件」）({from_date}〜{window_end})"
     ),
     ("mt_sample_counts_page_asc", "en"): (
-        "sample count ascending {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
+        "observation count ascending {shown_from}–{shown_to} of {total} (next: 'next {limit}') "
+        "({from_date} – {window_end})"
     ),
     ("mt_sample_counts_page_desc", "ja"): (
-        "サンプル数 全{total}路線中 {shown_from}–{shown_to}件を表示"
-        "（続きは「次の{limit}件」）({from_date}〜{window_end})"
+        "観測数 全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）({from_date}〜{window_end})"
     ),
     ("mt_sample_counts_page_desc", "en"): (
-        "sample count {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
+        "observation count {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
     ),
-    ("mt_sample_counts_first_asc", "ja"): "サンプル数の少ない順 {n}路線 ({from_date}〜{window_end})",
-    ("mt_sample_counts_first_asc", "en"): "sample count bottom-{n} ({from_date} – {window_end})",
-    ("mt_sample_counts_first_desc", "ja"): "サンプル数 上位{n}路線 ({from_date}〜{window_end})",
-    ("mt_sample_counts_first_desc", "en"): "sample count top-{n} ({from_date} – {window_end})",
+    ("mt_sample_counts_first_asc", "ja"): "観測数の少ない順 {n}路線 ({from_date}〜{window_end})",
+    ("mt_sample_counts_first_asc", "en"): "observation count bottom-{n} ({from_date} – {window_end})",
+    ("mt_sample_counts_first_desc", "ja"): "観測数 上位{n}路線 ({from_date}〜{window_end})",
+    ("mt_sample_counts_first_desc", "en"): "observation count top-{n} ({from_date} – {window_end})",
     ("mt_overview_summary", "ja"): "データセット概要",
     ("mt_overview_summary", "en"): "dataset overview",
     ("mt_metrics_summary", "ja"): "計算可能な指標の一覧",
     ("mt_metrics_summary", "en"): "available metrics",
     ("mt_capabilities_summary", "ja"): "答えられる質問の例（カテゴリ別）",
     ("mt_capabilities_summary", "en"): "example questions I can answer (by category)",
-    # The Insight Panel's reasons. The card names the route with the app's own
-    # label above the text, so the text names only the day or days the rule
-    # judged ({day}/{span}, from suggest_day/suggest_span): the agency's last
-    # analyzed day, which lags the wall clock, so never "today".
-    ("suggest_reason_anomaly", "ja"): (
-        "{day}の平均遅延が、その前の7日間と比べて大幅に悪化しています（平均{avg_min}分）。"
-    ),
-    ("suggest_reason_anomaly", "en"): (
-        "Average delay on {day} was much worse than over the 7 days before (avg {avg_min} min)."
-    ),
-    ("suggest_reason_trend_worsened", "ja"): "{span}の途中から遅延が悪化しています（{delta_min}分の変化）。",
-    ("suggest_reason_trend_worsened", "en"): "Delays worsened partway through {span} ({delta_min} min change).",
-    ("suggest_reason_trend_improved", "ja"): "{span}の途中から遅延が改善しています（{delta_min}分の変化）。",
-    ("suggest_reason_trend_improved", "en"): "Delays improved partway through {span} ({delta_min} min change).",
-    ("suggest_reason_on_time_fallback", "ja"): "{span}で最も定時率が低い路線です（定時率{pct}%）。",
-    ("suggest_reason_on_time_fallback", "en"): "The lowest on-time rate of any route over {span} ({pct}% on time).",
-    ("suggest_day", "ja"): "{month}/{day}（{dow}）",
-    ("suggest_day", "en"): "{dow} {month}/{day}",
-    ("suggest_span", "ja"): "{first}〜{last}",
-    ("suggest_span", "en"): "{first} – {last}",
     # Shown in place of an LLM-authored free-text answer whose numeric claims
     # don't trace back to the grounding data it was given (see
     # pipeline.query.hallucination_guard.verify_numeric_claims).
     ("numeric_guard_fallback", "ja"): "現在のデータでその数値を確認できませんでした。",
     ("numeric_guard_fallback", "en"): "I can't confirm that number from the current data.",
-    # Copilot proactive-insight templates. Every number is interpolated here
-    # from the caller's already-fetched view payload, never authored by the
-    # model, so these templates must not introduce a placeholder the payload
-    # cannot fill (see pipeline.query.copilot_templates).
-    ("copilot_overview_top_delay", "ja"): (
-        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です。"
-        "全路線の今週の平均は {avg} 分、基準の {baseline} 分から {delta}% {direction}しています"
-        "（現在 {delayed_count} 路線が遅延）。"
-    ),
-    ("copilot_overview_top_delay", "en"): (
-        "Route {name} is running the longest average delay right now, at {top_avg} min. "
-        "Across all routes the average is {avg} min this week, {direction} {delta}% "
-        "from the {baseline} min baseline ({delayed_count} routes currently delayed)."
-    ),
-    ("copilot_overview_top_delay_no_baseline", "ja"): (
-        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（現在 {delayed_count} 路線が遅延）。"
-        "比べられる前の期間のデータはまだありません。"
-    ),
-    ("copilot_overview_top_delay_no_baseline", "en"): (
-        "Route {name} is running the longest average delay right now, at {top_avg} min "
-        "({delayed_count} routes currently delayed). There is no earlier period to compare it with yet."
-    ),
-    ("copilot_overview_top_route", "ja"): (
-        "現在もっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（現在 {delayed_count} 路線が遅延）。"
-    ),
-    ("copilot_overview_top_route", "en"): (
-        "Route {name} is running the longest average delay right now, at {top_avg} min "
-        "({delayed_count} routes currently delayed)."
-    ),
-    ("copilot_overview_top_delay_cite", "ja"): "{samples}件の観測に基づく · 概況の集計",
-    ("copilot_overview_top_delay_cite", "en"): "Based on {samples} departures · Pulse summary",
-    ("copilot_delta_up", "ja"): "増加",
-    ("copilot_delta_up", "en"): "up",
-    ("copilot_delta_down", "ja"): "減少",
-    ("copilot_delta_down", "en"): "down",
-    ("copilot_no_signal", "ja"): "現在のビューに目立った傾向はありません。この期間の遅延はおおむね平常どおりです。",
-    ("copilot_no_signal", "en"): (
-        "Nothing stands out from the current view — delays look broadly typical for this range."
-    ),
-    ("copilot_no_signal_cite", "ja"): "目立った傾向なし",
-    ("copilot_no_signal_cite", "en"): "no notable pattern",
 }
 
 
@@ -442,6 +435,9 @@ _LEFT_OUT_NOTE = (
 
 # The top_n schema's metric enum and _tool_top_n's guard both read this one tuple.
 _TOP_N_METRICS = ("avg_delay", "on_time_rate", "worst_5min")
+# The report each top_n metric's ranking is: compute_ranking orders the same
+# figures either way, so a best-first list is the ranking report's too.
+_TOP_N_REPORTS = {"avg_delay": "ranking", "on_time_rate": "on_time", "worst_5min": "worst_5min"}
 
 
 TOOLS: list[dict] = [
@@ -473,8 +469,9 @@ TOOLS: list[dict] = [
                 "Ranking of routes, one row per route, over the request window "
                 "and UI filters. The metric param controls what is ranked: avg_delay (default; "
                 "longest average delay first, with p50/p90 minutes), on_time_rate (highest on-time "
-                "% first, always at the fixed 60-second on-time threshold), worst_5min (most "
-                "departures more than 5 minutes late first). avg_delay and on_time_rate leave out "
+                "% first, always under the industry standard: no more than 1 minute early and 5 "
+                "minutes late), worst_5min (most "
+                "departures more than 5 minutes late first). Every metric leaves out "
                 "routes with 20 or fewer samples. " + _LEFT_OUT_NOTE + " For an on-time ranking at another "
                 "threshold use on_time_rate (best_first=false lists the lowest first). Use for "
                 "'worst N', 'best N', 'most 5-minute delays'."
@@ -576,9 +573,10 @@ TOOLS: list[dict] = [
             "description": (
                 "On-time percentage per route over the request window and UI "
                 "filters, highest first unless best_first=false (n rows, default 20); routes "
-                "with 20 or fewer samples are left out. " + _LEFT_OUT_NOTE + " A departure counts as on time when it "
-                "is at most threshold_min minutes late (default 1 = 60 seconds); early departures "
-                "always count as on time. Set threshold_min=5 for '5分以内定時率'."
+                "with 20 or fewer samples are left out. " + _LEFT_OUT_NOTE + " Without threshold_min, a departure is "
+                "on time under the industry standard: no more than 1 minute early and 5 minutes late. "
+                "With threshold_min, it is on time when at most threshold_min minutes late, and early "
+                "departures always count as on time. Set threshold_min=5 for '5分以内定時率'."
             ),
             "parameters": {
                 "type": "object",
@@ -587,7 +585,10 @@ TOOLS: list[dict] = [
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 30,
-                        "description": "Minutes late still counted as on time (default 1).",
+                        "description": (
+                            "Minutes late still counted as on time, every early departure included. "
+                            "Leave out for the industry standard (1 minute early to 5 minutes late)."
+                        ),
                     },
                     "n": {
                         "type": "integer",
@@ -679,11 +680,14 @@ TOOLS: list[dict] = [
                 "over the request window and UI filters. Unlike segment_hotspots, which ranks the "
                 "absolute delay level at each stop (including delay carried from upstream), this "
                 "looks at each stop-to-stop segment on its own. For agencies whose feed reports "
-                "arrival times, returns every segment × scheduled hour with the scheduled running "
+                "arrival times, returns every timetable segment × time band with the scheduled running "
                 "time, observed median and 85th-percentile running time, padding_min (scheduled "
                 "minus observed median: positive = slack, negative = too tight) and the share of "
-                "on-time-or-early arrivals then held more than 60 s beyond the scheduled dwell, plus "
-                "the route's rate of trips reaching the terminus early. For other agencies it falls "
+                f"on-time-or-early arrivals then held more than {SEGMENT_HOLD_ALLOWANCE_SEC} s beyond the "
+                "scheduled dwell, plus "
+                "the route's rate of trips reaching the terminus early, under the timetable in force "
+                "on the window's newest date. The figures are feed-based estimates, not observed "
+                "passages. For other agencies it falls "
                 "back to the up to 5 segments where delay grows the most between consecutive stops "
                 "(avg_added_min, segments with more than 5 samples). Use for '時刻表がおかしい', "
                 "'余裕時間が足りない'."
@@ -773,7 +777,8 @@ SYSTEM_PROMPT = """\
    dimension=service_type: 1路線の日種別(平日・土曜・日祝、または平日・土日祝)別。route 必須)
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, best_first?, days_back?, from?, to?): 定時率ランキング
-  (threshold_min で定時の閾値を変えられる。best_first=false で定時率の低い順)
+  (既定は業界標準: 早発1分・遅延5分以内。threshold_min で「N分以内」(早発は定時に含む)に変えられる。
+   best_first=false で定時率の低い順)
 - route_meta(route): 路線の路線情報
 - segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット
   (遅延が最も大きい停留所 上位5件。上流からの持ち越しを含む)
@@ -1051,6 +1056,31 @@ async def _require_registered_route(args: dict, conn, agency_id: int, locale: st
     return route
 
 
+async def _report_stamp(
+    report_type: str, ctx: RangeCtx, conn, agency_id: int, ch, **kwargs: Any
+) -> DefinitionMeta | None:
+    """The stamp *report_type* carries for *ctx*, for a tool computing that
+    report's figures over *ctx*: the scope the tool computes for, after any
+    route or service it narrows to. Built before the figures, as the report
+    builds it. The tools left unstamped (route_stats, segment_hotspots,
+    route_stop_patterns, compare_segments by service type and the rest)
+    compute figures no report does, so no report's stamp describes them.
+
+    The stamp is context beside the figures, so one that cannot be built is
+    None rather than a failed answer, read inside a savepoint so the caller's
+    transaction outlives the failure. A missing aggregate table still raises:
+    the figures would fail on it too, and its handler answers it."""
+    try:
+        async with savepoint(conn):
+            definition, _ = await report_definition(conn, ch, agency_id, ctx, report_type, **kwargs)
+    except asyncpg.exceptions.UndefinedTableError:
+        raise
+    except Exception:
+        _log.exception("%s method stamp for agency %s could not be built", report_type, agency_id)
+        return None
+    return definition
+
+
 async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
@@ -1113,6 +1143,10 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     if raw_service and raw_service in _SERVICE_TYPE_MAP:
         ctx = await resolve_service_dates(replace(ctx, service=_SERVICE_TYPE_MAP[raw_service]), conn, agency_id)
 
+    early_sec, late_sec = on_time_window() if metric == "on_time_rate" else (None, None)
+    definition = await _report_stamp(
+        _TOP_N_REPORTS[metric], ctx, conn, agency_id, ch, early_tolerance_sec=early_sec, late_tolerance_sec=late_sec
+    )
     left_out = await left_out_unless_named(conn, agency_id, ctx)
     n_fetch = rows_to_fetch(n, left_out)
     if metric == "avg_delay":
@@ -1133,7 +1167,9 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         cols = ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     else:
-        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n_fetch)
+        # The other rankings' floor, so the card lists what the Routes table
+        # lists at it (route_table with sparse=1).
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n_fetch, min_samples=MIN_GROUP_SAMPLES)
         cols = ["route_code", "late5_count", "avg_min", "samples"]
         label = _summary("label_ranking_late5", lang=locale)
 
@@ -1149,6 +1185,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         summary=_summary(summary_key, lang=locale, label=label, count=len(rows)),
         rows=_without_service_slot(rows),
         columns=cols,
+        definition=definition,
     )
 
 
@@ -1161,6 +1198,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         # compute function actually narrows the query (the post-filter on a
         # top-50 result was missing routes outside the top).
         cmp_ctx = replace(ctx, routes=(str(route),)) if route else ctx
+        definition = await _report_stamp("compare_ranking", cmp_ctx, conn, agency_id, ch)
         left_out = await left_out_unless_named(conn, agency_id, cmp_ctx)
         rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=rows_to_fetch(50, left_out), ch=ch)
         rows, _ = route_list(rows, 50, left_out, ())
@@ -1174,6 +1212,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
             summary=_summary("compare_summary_dow", lang=locale),
             rows=[list(r) for r in rows],
             columns=["route_code", "heijitsu_min", "kyujitsu_min", "abs_delta", "signed_delta"],
+            definition=definition,
         )
 
     if dimension == "service_type":
@@ -1212,6 +1251,8 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
     # Granularity comes from args (default "day") and is forwarded to the series.
     granularity = args.get("granularity", "day")
+    # The daily series alone, as the trend export writes it.
+    definition = await _report_stamp("trend", series_ctx, conn, agency_id, ch, csv=True)
     series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity, ch=ch)
     days = series.get("days") or []
     if not days:
@@ -1229,15 +1270,29 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
             avg=avg,
         ),
         series=days,
+        definition=definition,
     )
 
 
 async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    threshold_min = int(args.get("threshold_min", 1))
-    threshold_sec = max(0, threshold_min) * 60
+    # No threshold is the default preset's window, as every other on-time
+    # figure; a threshold is "within N minutes late", early departures on time.
+    raw_threshold = args.get("threshold_min")
+    threshold_min = None if raw_threshold is None else max(0, int(raw_threshold))
+    threshold_sec = None if threshold_min is None else threshold_min * 60
     # Card chips send "k"; LLM tool calls send "n".
     n = int(args.get("k", args.get("n", 20)))
     best_first = bool(args.get("best_first", True))
+    # A threshold is the window "up to threshold_sec late, any early departure
+    # on time", which compute_on_time reads by its own rule.
+    window, live = (
+        (on_time_window(), None)
+        if threshold_sec is None
+        else ((None, threshold_sec), not threshold_aggregates_serve(ctx, threshold_sec))
+    )
+    definition = await _report_stamp(
+        "on_time", ctx, conn, agency_id, ch, early_tolerance_sec=window[0], late_tolerance_sec=window[1], live=live
+    )
     left_out = await left_out_unless_named(conn, agency_id, ctx)
     rows = await compute_on_time(
         agency_id,
@@ -1254,16 +1309,21 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     # Display-only annotation (pipeline/stats.py) — does not change
     # compute_on_time's own contract.
     rows = annotate_on_time_pct_confidence(rows)
+    key = "on_time_summary" if threshold_min is not None else "on_time_summary_default"
+    early_sec, late_sec = on_time_window()
     return ToolResult(
         kind="table",
         summary=_summary(
-            "on_time_summary" if best_first else "on_time_summary_worst",
+            key if best_first else f"{key}_worst",
             lang=locale,
             threshold_min=threshold_min,
+            early_min=(early_sec or 0) // 60,
+            late_min=late_sec // 60,
             count=len(rows),
         ),
         rows=_without_service_slot(rows),
         columns=["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
+        definition=definition,
     )
 
 
@@ -1352,36 +1412,44 @@ async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
 
 
 async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    """Schedule-padding view (`schedule_realism_padding`) when the agency's
-    ingest strategy makes it available and there's at least one segment to
-    show; otherwise the dep_delay-only `schedule_realism_segments` view,
-    which works for every ingest strategy but can't distinguish deliberate
-    timetable slack from delay that started upstream (see that function's
-    own docstring) — the same "richer view when available, degrade
-    gracefully otherwise" pattern `pipeline.reports.dwell_run` uses.
+    """Running time per timetable segment and time band
+    (`pipeline.reports.segment_runtime`, read from analyze's aggregate) when
+    the agency's feed is confirmed to send arrivals and the route has a
+    segment in range; otherwise the dep_delay-only `schedule_realism_segments`
+    view, which works for every ingest strategy but can't distinguish
+    deliberate timetable slack from delay that started upstream (see that
+    function's own docstring).
     """
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
         return route
 
-    padding = await schedule_realism_padding(agency_id, ctx, conn, ch, route=str(route))
-    if padding["available"] and padding["rows"]:
+    definition = await _report_stamp("segment_runtime", ctx, conn, agency_id, ch)
+    fit = await compute_segment_runtime(agency_id, ctx, conn, route=str(route))
+    # A segment with no observed run in range has no figure to show.
+    segments = [seg for seg in fit["segments"] if seg["samples"]]
+    if fit["available"] and segments:
         summary = _summary("schedule_realism_padding_summary", lang=locale, route=route)
-        if padding["terminus_early_rate"] is not None:
+        if fit["static_version_id"] is not None:
+            summary += _summary(
+                "schedule_realism_timetable_suffix", lang=locale, version=fit["static_version_id"], days=fit["days"]
+            )
+        if fit["terminus_early_rate"] is not None:
             summary += _summary(
                 "schedule_realism_terminus_suffix",
                 lang=locale,
-                pct=round(padding["terminus_early_rate"] * 100),
-                n=padding["terminus_samples"],
+                pct=round(fit["terminus_early_rate"] * 100),
+                n=fit["terminus_arrivals"],
             )
+        summary += _summary("schedule_realism_feed_estimate", lang=locale)
         return ToolResult(
             kind="table",
             summary=summary,
-            rows=[list(r) for r in padding["rows"]],
+            rows=[_segment_row(seg) for seg in segments],
             columns=[
-                "stop_sequence",
-                "next_stop_sequence",
-                "hour",
+                "from_stop",
+                "to_stop",
+                "time_band",
                 "scheduled_run_min",
                 "actual_run_p50_min",
                 "actual_run_p85_min",
@@ -1389,6 +1457,7 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
                 "padding_min",
                 "time_adjustment_rate",
             ],
+            definition=None if definition is None else definition.read_under(fit["static_version_id"]),
         )
 
     rows = await schedule_realism_segments(agency_id, ctx, conn, ch, route=str(route))
@@ -1400,6 +1469,26 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
         rows=[list(r) for r in rows],
         columns=["stop_sequence", "next_stop_sequence", "avg_added_min", "samples"],
     )
+
+
+def _minutes(seconds: float | None) -> float | None:
+    return float(_round2(seconds / 60.0)) if seconds is not None else None
+
+
+def _segment_row(seg: dict) -> list:
+    """One segment's table row; its band is written as the clock range it covers."""
+    band = seg["time_band"]
+    return [
+        seg["from_stop_name"] or seg["from_stop_id"],
+        seg["to_stop_name"] or seg["to_stop_id"],
+        "–".join(TIME_BAND_RANGES[band]) if band is not None else None,
+        _minutes(seg["scheduled_run_sec"]),
+        _minutes(seg["run_p50_sec"]),
+        _minutes(seg["run_p85_sec"]),
+        seg["samples"],
+        _minutes(seg["padding_sec"]),
+        float(_round2(seg["hold_rate"])) if seg["hold_rate"] is not None else None,
+    ]
 
 
 async def _tool_trend_shift(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
@@ -1432,8 +1521,8 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
-    # Guided-card only (``__build__``); deliberately absent from TOOLS so the
-    # LLM never selects it on its own.
+    # Notebook cards only;
+    # deliberately absent from TOOLS so the LLM never selects it on its own.
     "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,
@@ -1447,7 +1536,7 @@ _HANDLERS.update(META_HANDLERS)
 
 
 # Free-text arguments matched against stored route and stop names. dispatch
-# NFKC-folds them as router._match_rules folds the question, so "１０２１" or
+# NFKC-folds them as router.match_rules folds the question, so "１０２１" or
 # "Ａ１" reaches the resolvers and the SQL as "1021" or "A1".
 _FREE_TEXT_ARGS = frozenset({"route", "filter_substring"})
 
@@ -1457,6 +1546,23 @@ def _fold_free_text_args(arguments: dict[str, Any]) -> dict[str, Any]:
         k: unicodedata.normalize("NFKC", v) if k in _FREE_TEXT_ARGS and isinstance(v, str) else v
         for k, v in arguments.items()
     }
+
+
+# Card-alias tools sent by the frontend map to canonical handler names, so
+# the short card names (on_time / trend / cmp_service) dispatch live.
+_TOOL_ALIASES: dict[str, str] = {
+    "on_time": "on_time_rate",
+    "trend": "time_series",
+    "cmp_service": "compare_segments",
+}
+
+
+def canonical_tool_name(tool_name: str) -> str | None:
+    """The handler name a client-supplied *tool_name* dispatches to, or None
+    when no handler answers to it. Lets a caller record a tool without
+    storing arbitrary client text or splitting one tool across its aliases."""
+    resolved = _TOOL_ALIASES.get(tool_name, tool_name)
+    return resolved if resolved in _HANDLERS else None
 
 
 async def dispatch(
@@ -1483,14 +1589,6 @@ async def dispatch(
     exercise those specific paths don't need to construct a client; real
     request-serving callers always pass the real one.
     """
-    # Card-alias tools sent by the frontend map to canonical handler
-    # names. Keep aliases explicit here so the eval gold file can use the short
-    # card names (on_time / trend / cmp_service) and live dispatch still works.
-    _TOOL_ALIASES: dict[str, str] = {
-        "on_time": "on_time_rate",
-        "trend": "time_series",
-        "cmp_service": "compare_segments",
-    }
     tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
 
     # Validated against the allowlist BEFORE any perf label is created from
@@ -1550,7 +1648,14 @@ async def dispatch(
         # own window; every handler then reads the scope's service filter as
         # the agency's own timetable days.
         effective_ctx = await resolve_service_dates(_apply_date_overrides(ctx, arguments), conn, agency_id)
-        return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
+        try:
+            return await retained_reads.checked(
+                lambda: handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch), conn
+            )
+        except RangeNotRetained as exc:
+            return ToolResult(
+                kind="empty", summary=_summary("range_not_retained", lang=locale, floor=exc.floor.isoformat())
+            )
 
 
 # Rendering — the assistant bubble's text body

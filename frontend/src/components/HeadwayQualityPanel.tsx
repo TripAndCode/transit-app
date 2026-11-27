@@ -2,17 +2,20 @@
  * Headway panel shown beside the `dwell_run` report on Why and the `on_time`
  * report on Routes (see AnalysisTab.tsx):
  * Excess Waiting Time, spacing coefficient of variation, and long-gap rate
- * for this agency's routes classified high-frequency by
- * `agg_route_headway.is_high_frequency` (pipeline/headways.py). Renders
- * nothing extra for a non-high-frequency route -- such routes simply never
- * appear in `rows` (see pipeline/reports/headway_quality.py), and the
- * report above this panel is completely unaffected either way. An empty
- * answer the API gives a reason for says that reason, not a lack of data.
+ * for this agency's routes over the days the timetable in force classes them
+ * high-frequency (pipeline/headways.py). Renders nothing extra for a route
+ * high-frequency on no selected day -- such routes simply never appear in
+ * `rows` (see pipeline/reports/headway_quality.py), and the report above
+ * this panel is completely unaffected either way. An empty answer the API
+ * gives a reason for says that reason, not a lack of data, and the days left
+ * out for a timetable whose scheduled headways weren't kept are counted.
  */
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useHeadwayQuality } from "../api/hooks";
-import { useRouteNames } from "../api/useRouteNames";
+import { useRouteNames, type RouteNames } from "../api/useRouteNames";
+import { useCapabilityTier, type TierState } from "../api/useCapabilityTier";
+import type { HeadwayQualityResponse } from "../api/types";
 import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
@@ -20,7 +23,9 @@ import { ErrorBanner } from "./ErrorBanner";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { formatNumber, fmtRatioPct } from "../utils/format";
 import { DAY_TYPE_KEY } from "./dayTypeKey";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { headwayNotShown } from "./analysis/notShown";
+import { FewDataMark } from "./FewDataMark";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -33,20 +38,53 @@ function fmtCov(v: number | null): string {
   return v == null ? "—" : v.toFixed(2);
 }
 
-export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
-  const { t } = useTranslation();
+export function HeadwayQualityPanel({ aid, ctx, showStatistics }: { aid: number; ctx: Scope; showStatistics: boolean }) {
   const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);
+  const tier = useCapabilityTier(aid);
+  const isAdmin = useIsAdmin();
+  return (
+    <HeadwayQualityView isAdmin={isAdmin} showStatistics={showStatistics} data={data} isLoading={isLoading} error={error} onRetry={() => void refetch()} routeNames={routeNames} tier={tier} />
+  );
+}
+
+/** The panel from its response, fetched by the live screen or stored by a
+ *  snapshot, with the route labels and the agency's capability tier its
+ *  wording reads. */
+export function HeadwayQualityView({
+  data,
+  isLoading = false,
+  error = null,
+  onRetry,
+  routeNames,
+  tier,
+  isAdmin = false,
+  showStatistics,
+}: {
+  data: HeadwayQualityResponse | undefined;
+  isLoading?: boolean;
+  error?: Error | null;
+  onRetry?: () => void;
+  routeNames: RouteNames;
+  tier: TierState;
+  /** Whether the viewer may see the probe state; a stored snapshot is read by anyone, so it is off there. */
+  isAdmin?: boolean;
+  /** Whether the spacing's coefficient of variation and the count of gaps
+   *  behind it show beside the excess wait and the long-gap rate. */
+  showStatistics: boolean;
+}) {
+  const { t } = useTranslation();
+  const notShown = data ? headwayNotShown(t, data, tier, isAdmin) : null;
 
   return (
     <div style={{ marginTop: 20, background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16 }}>
       <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>{t("reports.headway_quality.title")}</h3>
       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>{t("reports.headway_quality.subtitle")}</p>
       {isLoading && <Skeleton height={80} />}
-      {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
+      {error && <ErrorBanner error={error} onRetry={onRetry} />}
       {data && data.rows.length === 0 && (
         <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-          {headwayNotShown(t, data)?.text ??
+          {notShown?.text ??
             t((data.routes_off_timetable ?? 0) > 0 ? "reports.headway_quality.empty_off_timetable" : "reports.headway_quality.empty")}
         </p>
       )}
@@ -58,6 +96,16 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
           {t("reports.headway_quality.some_off_timetable", { count: data.routes_off_timetable })}
         </p>
       )}
+      {data && !notShown && (data.days_timetable_not_kept ?? 0) > 0 && (
+        <p style={{ margin: data.rows.length > 0 ? "0 0 8px" : "8px 0 0", fontSize: 12, color: "var(--text-tertiary)" }}>
+          {t("reports.headway_quality.timetable_not_kept", { count: data.days_timetable_not_kept })}
+        </p>
+      )}
+      {data && data.rows.length > 0 && (data.days_scheduled_wait_not_kept ?? 0) > 0 && (
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-tertiary)" }}>
+          {t("reports.headway_quality.scheduled_wait_not_kept", { count: data.days_scheduled_wait_not_kept })}
+        </p>
+      )}
       {data && data.rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
           <table style={SHARED_TABLE}>
@@ -65,9 +113,9 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
               <tr style={{ background: "var(--bg-soft)" }}>
                 <th style={th({ align: "left" })}>{t("common.route")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.ewt")}</th>
-                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>
+                {showStatistics && <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>}
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.long_gap_rate")}</th>
-                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.samples")}</th>
+                {showStatistics && <th style={th({ align: "right" })}>{t("reports.headway_quality.col.samples")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -79,10 +127,22 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
                       <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 400, color: "var(--text-tertiary)" }}>{t(DAY_TYPE_KEY[r.day_type])}</span>
                     )}
                   </td>
-                  <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
-                  <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>
-                  <td style={td({ align: "right" })}>{fmtRatioPct(r.long_gap_rate)}</td>
-                  <td style={td({ align: "right" })}>{formatNumber(r.samples)}</td>
+                  {/* No floor upstream: a thin route carries the few-data mark, on
+                      the count while it shows, else on its headline figure. */}
+                  <td style={td({ align: "right" })}>
+                    {fmtSignedMin(r.ewt_sec, t)}
+                    {!showStatistics && <FewDataMark figure={r.ewt_sec} samples={r.samples} />}
+                  </td>
+                  {showStatistics && <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>}
+                  <td style={td({ align: "right" })}>
+                    {fmtRatioPct(r.long_gap_rate)}
+                  </td>
+                  {showStatistics && (
+                    <td style={td({ align: "right" })}>
+                      {formatNumber(r.samples)}
+                      <FewDataMark figure={r.samples} samples={r.samples} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -31,7 +31,7 @@ const SEVERE_VAR = "var(--delay-severe)";
 // mirrored in the other by hand. tokens.test.ts holds them to it.
 const SEVERE_FALLBACK = "#A8391F";
 const SURFACE_FALLBACK = "#ffffff";
-const ACCENT_FALLBACK = "#2750C2";
+const ACCENT_FALLBACK = "#3355E0";
 
 /** Resolve a CSS custom property to a concrete color for callers that need a
  *  real, parseable string -- MapLibre paint expressions, which can't consume
@@ -107,7 +107,7 @@ export const DELAY_RAMP = {
   severe: SEVERE_VAR, // >= 5 min, per-theme via --delay-severe
 } as const;
 
-type DelayBand = "ok" | "mild" | "moderate" | "severe";
+export type DelayBand = "ok" | "mild" | "moderate" | "severe";
 
 // The band-boundary minute values `delayBand()` applies below. Exported so any
 // UI that displays the cutoffs as text (e.g. a heatmap legend) can read them

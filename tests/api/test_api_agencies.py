@@ -725,3 +725,30 @@ async def test_every_agency_mutation_records_the_actors_ip_and_browser(agencies_
         (kind, "127.0.0.1", "admin-console/1")
         for kind in ("agency_created", "agency_updated", "agency_deleted", "agency_restored")
     ]
+
+
+@pytest.mark.asyncio
+async def test_the_catalogue_states_each_agencys_capability_tier(agencies_client):
+    """The picker and every agency page read the tier from the catalogue, so
+    the list and the single read both carry it, derived from the agency's
+    ingest strategy and its RT coverage probe verdicts."""
+    from api.main import app
+    from tests.conftest import confirm_rt_field_coverage
+
+    client, _sid = agencies_client
+    async with app.state.pool.acquire() as conn:
+        ids = {}
+        for name, strategy in (("Joined", "static_join"), ("Regex", "aomori_regex"), ("Refuted", "static_join")):
+            ids[name] = await conn.fetchval(
+                "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES ($1, $2, $3) RETURNING agency_id",
+                name,
+                f"http://{name.lower()}.example.com/rt",
+                strategy,
+            )
+        await confirm_rt_field_coverage(conn, ids["Joined"], ids["Regex"])
+        await confirm_rt_field_coverage(conn, ids["Refuted"], confirmed=False)
+
+    listed = {a["agency_id"]: a["capability_tier"] for a in (await client.get("/api/agencies")).json()}
+    assert listed == {ids["Joined"]: "full", ids["Regex"]: "basic", ids["Refuted"]: "basic"}
+    for name, tier in (("Joined", "full"), ("Regex", "basic")):
+        assert (await client.get(f"/api/agencies/{ids[name]}")).json()["capability_tier"] == tier

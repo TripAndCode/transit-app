@@ -1,15 +1,20 @@
 import { use, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayRampVar } from "../../styles/tokens";
+import { DEFAULT_WINDOW, earlyParam, scopeWindow } from "../../api/onTimeDefault";
 import { DataEndContext, WEEKDAYS, defaultPeriod, isoDaysBefore, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
 import { timetableChoices } from "../../api/serviceDays";
 import type { ScopeSummary } from "../../api/types";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { RoutesPicker } from "../RoutesPicker";
+import { Segmented } from "../ui/Segmented";
 import { buildTimeBandOptions } from "../timeBandOptions";
 import { sinceStart } from "./brushMath";
 import { PeriodBrush } from "./PeriodBrush";
-import { toleranceLabel } from "./scopePhrases";
+import { dirLabel, earlyLabel, stopLabel, toleranceLabel } from "./scopePhrases";
+import { usePlaceLabels } from "../../api/usePlaceLabels";
+import { useAgencyId } from "../../api/useAgencyId";
+import { useIsAdmin } from "../../api/useIsAdmin";
 import "./scope.css";
 import { fixedTenth, roundTenth } from "../../utils/format";
 
@@ -18,20 +23,23 @@ export type ControlProps = {
   update: (patch: ScopePatch) => void;
   /** The controls' data, while it is loaded; every control works without it. */
   summary?: ScopeSummary;
+  /** Closes the popover this control renders in. A control that stages a
+   *  draft uses it so its Apply commits and dismisses together. Absent for a
+   *  control rendered pinned in the scope strip, which has no popover to
+   *  close. */
+  close?: () => void;
+  /** Set while the scope bar is disabled; a control whose input is not a form
+   *  element, which the surrounding fieldset cannot disable, reads it. */
+  disabled?: boolean;
 };
 
 const PERIOD_PRESETS = [7, 14, 30] as const;
 const TOLERANCE_PRESETS_MIN = [1, 3, 5] as const;
-const DEFAULT_LATE_SEC = 60;
+const DEFAULT_LATE_SEC = DEFAULT_WINDOW.late_sec;
 const MAX_LATE_SEC = 600;
-
-function Pill({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: string }) {
-  return (
-    <button type="button" className="scope-pill" aria-pressed={pressed} onClick={onClick}>
-      {children}
-    </button>
-  );
-}
+/** The early tolerance the early-departure choice offers: the industry
+ *  window's, one minute. */
+const EARLY_LIMIT_SEC = 60;
 
 /** A small bar coloured by the delay ramp, with the mean beside it. */
 function DelayBar({ minutes }: { minutes: number }) {
@@ -49,34 +57,41 @@ function DelayBar({ minutes }: { minutes: number }) {
  *  then the last seven days that have data, never a week that has not
  *  arrived or a day still under way, and the default period is one of the
  *  presets. */
-export function PeriodControl({ scope, update, summary }: ControlProps) {
+export function PeriodControl({ scope, update, summary, disabled }: ControlProps) {
   const { t } = useTranslation();
   const anchor = defaultPeriod(use(DataEndContext)).to;
   const collectionStart = summary?.earliest ? sinceStart(summary.earliest, anchor) : null;
+  const presetChoices = PERIOD_PRESETS.map((days) => ({
+    value: `last-${days}`,
+    label: t("scope.control.last_days", { count: days }),
+    from: isoDaysBefore(anchor, days - 1),
+    to: anchor,
+  }));
+  // One choice per range: a single-choice group can check only one of two
+  // identical ranges, so the collection choice gives way to a preset that
+  // spans the same days.
+  const periodChoices =
+    collectionStart && !presetChoices.some((choice) => choice.from === collectionStart)
+      ? [...presetChoices, { value: "since-start", label: t("scope.control.since_start"), from: collectionStart, to: anchor }]
+      : presetChoices;
+  const periodValue = periodChoices.find((choice) => choice.from === scope.from && choice.to === scope.to)?.value ?? null;
   function setDate(edge: "from" | "to", value: string) {
     const next = { from: scope.from, to: scope.to, [edge]: value };
     if (value && next.from <= next.to) update({ [edge]: value });
   }
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {PERIOD_PRESETS.map((days) => {
-          const from = isoDaysBefore(anchor, days - 1);
-          return (
-            <Pill key={days} pressed={scope.from === from && scope.to === anchor} onClick={() => update({ from, to: anchor })}>
-              {t("scope.control.last_days", { count: days })}
-            </Pill>
-          );
-        })}
-        {collectionStart && (
-          <Pill
-            pressed={scope.from === collectionStart && scope.to === anchor}
-            onClick={() => update({ from: collectionStart, to: anchor })}
-          >
-            {t("scope.control.since_start")}
-          </Pill>
-        )}
-      </div>
+      <Segmented
+        aria-label={t("scope.popover.period")}
+        options={periodChoices}
+        // Two to a row, for the same narrow popover as the time bands.
+        columns={2}
+        value={periodValue}
+        onChange={(value) => {
+          const choice = periodChoices.find((c) => c.value === value);
+          if (choice) update({ from: choice.from, to: choice.to });
+        }}
+      />
       {summary && summary.days.length > 0 && (
         <PeriodBrush
           days={summary.days}
@@ -85,6 +100,7 @@ export function PeriodControl({ scope, update, summary }: ControlProps) {
           from={scope.from}
           to={scope.to}
           onCommit={(from, to) => update({ from, to })}
+          disabled={disabled}
         />
       )}
       <WholeDayNote scope={scope} update={update} summary={summary} />
@@ -109,33 +125,107 @@ function selectedDays(dow: Scope["dow"]): Set<Weekday> {
   return new Set(dow.split(",") as Weekday[]);
 }
 
-export function DaysControl({ scope, update, summary }: ControlProps) {
+const DOW_PRESETS = ["all", "weekday", "weekend"] as const;
+
+function dowPreset(dow: Scope["dow"]): (typeof DOW_PRESETS)[number] | null {
+  return (DOW_PRESETS as readonly string[]).includes(dow) ? (dow as (typeof DOW_PRESETS)[number]) : null;
+}
+
+function sameDays(a: Set<Weekday>, b: Set<Weekday>): boolean {
+  if (a.size !== b.size) return false;
+  for (const day of a) if (!b.has(day)) return false;
+  return true;
+}
+
+/** The Cancel/Apply footer of a control that stages a draft. Apply is
+ *  disabled while the draft matches what is committed; discarding,
+ *  committing and closing the popover are the caller's, through `onCancel`
+ *  and `onApply`. */
+function ApplyFoot({
+  hint,
+  applyLabel,
+  disabled,
+  onApply,
+  onCancel,
+}: {
+  hint?: string;
+  applyLabel: string;
+  disabled: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="scope-apply">
+      {hint && <span className="scope-apply__hint">{hint}</span>}
+      <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel}>
+        {t("common.cancel")}
+      </button>
+      <button type="button" className="btn btn--primary btn--sm scope-apply__button" disabled={disabled} onClick={onApply}>
+        {applyLabel}
+      </button>
+    </div>
+  );
+}
+
+/** A draft of the staged weekdays, committed only on Apply. When the
+ *  committed days change outside this control (a reset, or the pinned
+ *  strip and an open popover sharing one scope), the draft starts over from
+ *  them during render. A preset pick is instant, as the timetable select
+ *  already is, and replaces the draft too so a stale toggle can't linger
+ *  under a freshly picked preset. No preset shows as checked while a draft is
+ *  pending, since the chips no longer match the committed days. */
+export function DaysControl({ scope, update, summary, close }: ControlProps) {
   const { t } = useTranslation();
   const serviceId = useId();
-  const on = selectedDays(scope.dow);
+  const committedDays = selectedDays(scope.dow);
+  const [draft, setDraft] = useState<Set<Weekday>>(() => committedDays);
+  const [committed, setCommitted] = useState(scope.dow);
+  if (committed !== scope.dow) {
+    setCommitted(scope.dow);
+    setDraft(committedDays);
+  }
   const weekdayMeans = new Map(summary?.weekdays.map((w) => [w.dow, w.avg_min]) ?? []);
   const timetable = timetableChoices(scope.service, summary?.day_types);
   function toggle(day: Weekday) {
-    const next = new Set(on);
+    const next = new Set(draft);
     if (next.has(day)) next.delete(day);
     else next.add(day);
     if (next.size === 0) return;
-    update({ dow: WEEKDAYS.filter((d) => next.has(d)).join(",") as Scope["dow"] });
+    setDraft(next);
+  }
+  const unchanged = sameDays(draft, committedDays);
+  function commit() {
+    if (unchanged) return;
+    update({ dow: WEEKDAYS.filter((d) => draft.has(d)).join(",") as Scope["dow"] });
+    close?.();
+  }
+  function cancel() {
+    setDraft(committedDays);
+    close?.();
   }
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {(["all", "weekday", "weekend"] as const).map((preset) => (
-          <Pill key={preset} pressed={scope.dow === preset} onClick={() => update({ dow: preset })}>
-            {t(`scope.control.${preset === "all" ? "days_all" : preset}`)}
-          </Pill>
-        ))}
-      </div>
-      <div className="scope-pills">
+      <Segmented
+        aria-label={t("scope.popover.days")}
+        options={DOW_PRESETS.map((preset) => ({ value: preset, label: t(`scope.control.${preset === "all" ? "days_all" : preset}`) }))}
+        value={unchanged ? dowPreset(scope.dow) : null}
+        onChange={(preset) => {
+          update({ dow: preset });
+          setDraft(selectedDays(preset));
+        }}
+      />
+      <div className="scope-days">
         {WEEKDAYS.map((day) => {
           const mean = weekdayMeans.get(day);
           return (
-            <button key={day} type="button" className="scope-pill" aria-pressed={on.has(day)} onClick={() => toggle(day)}>
+            <button
+              key={day}
+              type="button"
+              className="btn btn--secondary btn--sm"
+              aria-pressed={draft.has(day)}
+              onClick={() => toggle(day)}
+            >
               {t(`forecast.dow_${day}`)}
               {mean != null && (
                 <>
@@ -160,6 +250,7 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
         ))}
       </select>
       <WholeDayNote scope={scope} update={update} summary={summary} />
+      <ApplyFoot applyLabel={t("scope.control.days_apply", { count: draft.size })} disabled={unchanged} onApply={commit} onCancel={cancel} />
     </div>
   );
 }
@@ -168,32 +259,62 @@ export function TimeControl({ scope, update }: ControlProps) {
   const { t } = useTranslation();
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {buildTimeBandOptions(t).map((band) => (
-          <Pill
-            key={band.value}
-            pressed={scope.hour == null && scope.time_band === band.value}
-            onClick={() => update({ time_band: band.value, hour: null })}
-          >
-            {band.label}
-          </Pill>
-        ))}
-      </div>
+      <Segmented
+        aria-label={t("scope.popover.time")}
+        options={buildTimeBandOptions(t)}
+        value={scope.hour == null ? scope.time_band : null}
+        onChange={(value) => update({ time_band: value, hour: null })}
+        // Two to a row: the popover is narrow at every width, and four en
+        // labels such as "Late morning (09–12)" don't fit side by side in it.
+        columns={2}
+      />
     </div>
   );
 }
 
-export function RoutesControl({ scope, update, summary }: ControlProps) {
+function sameRoutes(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = new Set(a);
+  return b.every((code) => sa.has(code));
+}
+
+/** A draft of the picked routes, committed only on Apply. When the
+ *  committed routes change outside this control (a reset, or the pinned
+ *  strip and an open popover sharing one scope), the draft starts over from
+ *  them during render; the picker's search and expanded lines stay as the
+ *  user left them. */
+export function RoutesControl({ scope, update, summary, close }: ControlProps) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<string[]>(() => scope.routes);
+  const [committed, setCommitted] = useState(scope.routes);
+  if (!sameRoutes(committed, scope.routes)) {
+    setCommitted(scope.routes);
+    setDraft(scope.routes);
+  }
   const delays = summary ? new Map(summary.routes.map((r) => [r.route_code, r])) : undefined;
+  const unchanged = sameRoutes(draft, scope.routes);
+  function commit() {
+    if (unchanged) return;
+    update({ routes: draft.length > 0 ? draft : null });
+    close?.();
+  }
+  function cancel() {
+    setDraft(scope.routes);
+    close?.();
+  }
+  const applyLabel =
+    draft.length === 0 ? t("filters.routes.apply_all") : t("filters.routes.apply_count", { count: draft.length });
   return (
     <div className="scope-control">
       <RoutesPicker
-        selected={scope.routes}
-        onChange={(routes) => update({ routes: routes.length > 0 ? routes : null })}
+        selected={draft}
+        onChange={setDraft}
         delays={delays}
         renderDelay={(minutes) => <DelayBar minutes={minutes} />}
+        onSubmit={commit}
       />
       <WholeDayNote scope={scope} update={update} summary={summary} />
+      <ApplyFoot hint={t("filters.routes.apply_hint")} applyLabel={applyLabel} disabled={unchanged} onApply={commit} onCancel={cancel} />
     </div>
   );
 }
@@ -249,28 +370,20 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
   }
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {TOLERANCE_PRESETS_MIN.map((min) => {
+      {/* Marks the applied tolerance, not the slider's draft. */}
+      <Segmented
+        aria-label={t("scope.control.tolerance")}
+        options={TOLERANCE_PRESETS_MIN.map((min) => {
           const share = summary?.tolerance.find((p) => p.late_sec === min * 60)?.on_time_pct;
-          return (
-            <button
-              key={min}
-              type="button"
-              className="scope-pill"
-              aria-pressed={current === min * 60}
-              onClick={() => write(min * 60)}
-            >
-              {t("scope.control.minutes", { n: min })}
-              {share != null && (
-                <>
-                  {" "}
-                  <span className="scope-share">{t("scope.control.share", { pct: Math.round(share) })}</span>
-                </>
-              )}
-            </button>
-          );
+          return {
+            value: String(min),
+            label: t("scope.control.minutes", { n: min }),
+            meta: share == null ? undefined : t("scope.control.share", { pct: Math.round(share) }),
+          };
         })}
-      </div>
+        value={TOLERANCE_PRESETS_MIN.find((min) => min * 60 === current)?.toString() ?? null}
+        onChange={(min) => write(Number(min) * 60)}
+      />
       {summary && summary.tolerance.length > 0 && (
         <>
           {/* Stretched to the slider's full width, so the marker sits above
@@ -326,7 +439,39 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
         onKeyUp={commit}
         onBlur={commit}
       />
+      <EarlyChoice scope={scope} update={update} />
     </div>
+  );
+}
+
+/** Whether an early departure counts as on time: none more than a minute
+ *  early, which with the five-minute late tolerance is the window operators
+ *  publish and the default, or every one, which with the one-minute late
+ *  tolerance is the legacy definition. An early tolerance a link set to
+ *  anything else presses neither and is named beneath them. */
+function EarlyChoice({ scope, update }: ControlProps) {
+  const { t } = useTranslation();
+  const early = scopeWindow(scope).early_sec;
+  const earlyLabelText = t("scope.control.early_label");
+  const earlyValue = early == null ? "counted" : early === EARLY_LIMIT_SEC ? "limited" : null;
+  return (
+    <>
+      <span className="scope-field">{earlyLabelText}</span>
+      <Segmented
+        aria-label={earlyLabelText}
+        options={[
+          { value: "counted", label: t("scope.control.early_counted") },
+          { value: "limited", label: t("scope.control.early_limited", { n: EARLY_LIMIT_SEC / 60 }) },
+        ]}
+        value={earlyValue}
+        onChange={(value) => update({ early: value === "counted" ? earlyParam(null) : earlyParam(EARLY_LIMIT_SEC) })}
+        // One to a row: each choice is a sentence, too long to share a row.
+        columns={1}
+      />
+      {early != null && early !== EARLY_LIMIT_SEC && (
+        <p className="scope-note">{t("scope.control.early_current", { value: earlyLabel(early, t) })}</p>
+      )}
+    </>
   );
 }
 
@@ -335,7 +480,7 @@ function ClearValue({ value, onClear }: { value: string; onClear: () => void }) 
   return (
     <div className="scope-control">
       <span className="scope-field">{value}</span>
-      <button type="button" className="scope-pill" onClick={onClear}>
+      <button type="button" className="btn btn--secondary btn--sm" onClick={onClear}>
         {t("scope.control.clear")}
       </button>
     </div>
@@ -343,13 +488,22 @@ function ClearValue({ value, onClear }: { value: string; onClear: () => void }) 
 }
 
 export function StopControl({ scope, update }: ControlProps) {
-  return <ClearValue value={scope.stop ?? ""} onClear={() => update({ stop: null })} />;
+  const { t } = useTranslation();
+  const id = useAgencyId();
+  const place = usePlaceLabels(id, scope.stop != null);
+  return <ClearValue value={scope.stop ? stopLabel(scope.stop, { t, ...place }) : ""} onClear={() => update({ stop: null })} />;
 }
 
 export function EarlyControl({ scope, update }: ControlProps) {
-  return <ClearValue value={scope.early == null ? "" : String(scope.early)} onClear={() => update({ early: null })} />;
+  return (
+    <div className="scope-control">
+      <EarlyChoice scope={scope} update={update} />
+    </div>
+  );
 }
 
 export function DirControl({ scope, update }: ControlProps) {
-  return <ClearValue value={scope.dir == null ? "" : String(scope.dir)} onClear={() => update({ dir: null })} />;
+  const { t } = useTranslation();
+  const showIds = useIsAdmin();
+  return <ClearValue value={scope.dir == null ? "" : dirLabel(scope.dir, { t, showIds })} onClear={() => update({ dir: null })} />;
 }

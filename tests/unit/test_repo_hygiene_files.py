@@ -190,6 +190,23 @@ def test_dependabot_leaves_a_postgres_major_to_a_planned_migration():
     assert all(rule.get("update-types") == ["version-update:semver-major"] for rule in rules), rules
 
 
+def test_dependabot_keeps_clickhouse_server_on_an_lts_line():
+    """Each ClickHouse minor carries backward-incompatible changes, and only
+    YY.3 and YY.8 are LTS. A typo in the ignore rule would still parse and let
+    a non-LTS minor through; ignoring majors too would drop the PR that cues
+    the planned move to the next year's LTS."""
+
+    config = yaml.safe_load((REPO_ROOT / ".github" / "dependabot.yml").read_text())
+    compose = next(entry for entry in config["updates"] if entry["package-ecosystem"] == "docker-compose")
+    pin = re.search(r"image:\s*([^\s:@]*clickhouse[^\s:@]*):(\d+)\.(\d+)", (REPO_ROOT / "compose.yml").read_text())
+    assert pin, "compose.yml has no clickhouse-server pin"
+    assert pin.group(3) in {"3", "8"}, f"{pin.group(0)} is not an LTS release"
+
+    rules = [rule for rule in compose.get("ignore", []) if fnmatch(pin.group(1), rule["dependency-name"])]
+    assert rules, f"docker-compose: nothing stops Dependabot proposing a {pin.group(1)} minor"
+    assert all(rule.get("update-types") == ["version-update:semver-minor"] for rule in rules), rules
+
+
 def test_gitattributes_normalizes_line_endings_and_marks_binaries():
     path = REPO_ROOT / ".gitattributes"
     assert path.is_file()

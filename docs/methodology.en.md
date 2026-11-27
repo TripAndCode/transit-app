@@ -1,0 +1,547 @@
+# Methodology and publication policy
+
+## About this document
+
+This document sets out two things about the figures Delay Dashboard ("the Service") produces: what they are computed from and by which rules, and how an operator is told before its figures are published and how an error is reported and corrected.
+
+- **Readers**: municipal staff preparing material for a regional public-transport council (地域公共交通協議会), the members and researchers who read that material, and the operators the figures name.
+- **Version**: each CSV fetched with "Download CSV", each council report and each delay record names the method version its figures were made with (for example `2026.11.4`; see [Definition stamp](#definition-stamp)). The [Changelog](#changelog) at the end shows what each version changed. The text describes the current version listed there.
+- **Language**: the Japanese version is [methodology.md](methodology.md). Where the two differ, the Japanese version is authoritative.
+- **Implementation detail**: the developer-facing explanation is [DELAY_ANALYSIS.md](../DELAY_ANALYSIS.md).
+
+## Data
+
+### Sources and licences
+
+The Service uses only the GTFS (timetable) and GTFS-Realtime feeds the operators publish. It uses nothing from the operators' internal systems.
+
+| Operator | Source | Licence | Poll interval |
+|---|---|---|---|
+| 青森市バス (Aomori City Bus) | 青森市企業局交通部, 「青森市営バス路線情報」 and 「【リアルタイム情報】青森市営バス路線情報」 (the realtime data fetched from the Public Transportation Open Data Center's public API) | CC BY 4.0 | 30 s |
+| 広島電鉄, 広島バス, 広島交通, 芸陽バス, 備北交通, エイチ・ディー西広島, フォーブル, JRバス中国, ささき観光, 呉市生活バス, 廿日市市自主運行バス, おのみちバス, 朝日交通 | 公益社団法人広島県バス協会 (Hiroshima Bus Association), 「広島県バス協会GTFSオープンデータサイト」 | CC0 | 60 s |
+
+The credit is shown in the app's data-sources section, in the preamble of each CSV fetched with "Download CSV", and at the end of a printed page.
+
+### How the data is collected
+
+- **Realtime data**: a collector polls each operator's TripUpdates at the interval above and keeps every poll.
+- **Timetables**: fetched once a day, each version kept.
+- **Two paths for observations**:
+  - **Archive**: every poll the collector made.
+  - **Live**: only what the app received in real time, which is sparser than the archive.
+  - The figures' stamp says, day by day, which path the day's figures were computed from ([Definition stamp](#definition-stamp)).
+- **Dates and times**: every date and time is Japan Standard Time (JST).
+
+### Value basis and validation status
+
+Every figure the Service produces is computed from **the delay the operator's feed last predicted for each stop**.
+
+- It is not an observation of the bus passing the stop.
+- The Service does not compute the delay; it is the feed's own value, which the Service collects and summarises.
+- The figures' stamp names the value basis as feed prediction (`feed_prediction`).
+
+How far the predictions are from what the buses did is checked by reconstructing stop passages from the vehicles' positions (VehiclePositions). Each operator's status:
+
+| Operator | Validation status |
+|---|---|
+| 広島電鉄, 広島バス, 広島交通 | Compared. The predictions sit off the observed passages, and the on-time rate they give differs from the observed one by a different amount for each operator. Position collection continues. |
+| Every other operator | Not validated, and no positions collected. |
+
+Because that difference is not the same for every operator, and an operator's own data cannot show it, the agency comparison screen ranks no operator on predicted figures ([Comparability conditions](#comparability-conditions)). Read every operator's figures as resting on feed predictions. The comparison's procedure is in [docs/features/prediction-validation.md](features/prediction-validation.md).
+
+### Feed quality
+
+A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) and shown in each operator's entry on the admin pages. Each month gives:
+
+- **Trips reported**: the share of the trips the timetable planned that the feed reported a plausible departure for, by the same rule as the coverage in the [Comparability conditions](#comparability-conditions);
+- **Stop events reported**: the share of the stops the planned trips call at that the feed reported, each counted on the day its departure counts on (see [Service day and time](#service-day-and-time), from method `2026.11.13`), and not from a report received long after the departure (see [Reports received after the departure](#reports-received-after-the-departure), from method `2026.11.14`);
+- **Message age**: per poll, the time it was captured minus the feed header's timestamp (the median and the 95th percentile). A poll from the collector's archive is timed by its file name, which records when the poll began; a poll whose name records no time is left out and counted (from method `2026.11.8`);
+- **Polls over 65 s**: of the polls message age measures, the share whose message was more than 65 seconds old when captured. This is the freshness threshold used by Cal-ITP and by the MobilityData GTFS-RT validator (warning W008). It shows a feed header that stayed frozen for too short a time to move the 95th percentile (from method `2026.11.12`);
+- **Implausible readings**: the share of reports dropped as in [Excluding implausible values](#excluding-implausible-values);
+- **Field coverage**: for each of four fields separately, the share of reports carrying that field; the four are never combined into one figure:
+  - the stop ID (`stop_id`);
+  - the arrival delay (`arr_delay`);
+  - the trip's status (the trip's `schedule_relationship`);
+  - the stop's status (the stop's `schedule_relationship`);
+- **Poll success**: of the polls the collector should have made during the operator's planned service, the share it recorded (from method `2026.11.17`);
+- **Outage minutes**: the time inside planned service in which nothing arrived from the feed, the feed's apart from the collector's own (from method `2026.11.17`).
+
+Poll success and outage minutes are counted as follows. Neither affects the grade:
+
+- **Days.** From the operator's first observed day through the newest day any listed agency has observations for, each day whose hours the timetable in force that day gives: from its first planned departure to its last planned arrival, within the service day. The time on a calendar day (JST) holding any poll that came through the live path is left out: the collector's archive replaces a day's live polls whole once it arrives, and the collector forwards only one poll in every few to the live path, so the gaps of a day that keeps them are there by design.
+- **Polls.** A poll is timed as message age times it: an archived poll by its file name, a live one by its stored capture time. Each distinct time counts once. A poll the feed answers with nothing stores no row, so a gap can also be a feed with nothing to say; only gaps inside planned service count, where an empty feed is itself a fault.
+- **Interval.** The median gap between consecutive polls inside service over the month.
+- **Poll success.** The polls recorded inside service, of the time in service divided by the interval, at most 100%.
+- **Outage.** A gap inside service longer than 5 minutes and longer than 3 intervals, including the time from the start of service to the first poll and from the last poll to the end of service. It counts from one interval after the last poll, when the next poll was due, or from the start of service if that is later. A few polls missed in a row are a slow response or a retry, not an outage anyone acts on, and the 3 intervals keep a slowly polled feed from being charged for one or two missed polls. The longest outage is the longest single gap's.
+- **Ours or the feed's.** Where, inside an outage, no other listed operator was polled for more than 5 minutes, the collector was down: that time is counted apart as our outage, so an operator is not charged with our downtime. Late at night, when every other feed is empty too, a gap can read as ours. In a month with an outage but no other operator polled, whose it was is unknown, and both are left empty.
+
+A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. Trips reported and the implausible share are also stated in every figure's [definition stamp](#definition-stamp), over that figure's own period. Poll success and outage minutes are defined above; the other figures' definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
+
+Each month is graded A to F from these figures by four criteria, each passing or failing on its own. Each threshold is inclusive, except the arrival-delay band in field coverage, which excludes both its ends: 0% and 50% fail. The implausible share is judged as printed to a tenth, as in the comparability conditions, and every other figure as it is shown:
+
+| Criterion | Passes when | Basis |
+|---|---|---|
+| Trips reported | at least 95% | Cal-ITP's realtime completeness bar: no more than 5% of planned trips missing. Over 100% passes. The 70% in the [Comparability conditions](#comparability-conditions) answers a different question: whether delays can be ranked |
+| Polls over 65 s | at most 5% | Cal-ITP's freshness threshold and the validator's W008, with Cal-ITP's 5% as the tolerance |
+| Implausible readings | at most 5% | The same condition as in the [Comparability conditions](#comparability-conditions) |
+| Field coverage | the stop ID and both statuses on at least 99% of reports, and the arrival delay on some but fewer than half of them | The rule the Service uses to confirm that a feed carries the fields its figures need. A feed sending the arrival delay on every report is not sending the sparse arrival estimate the Service reads it as, so it does not pass |
+
+- A month meeting all four criteria is an A. Each criterion missed costs one letter: B, C, D, and F for all four.
+- Each criterion a month misses is shown with the figure it was judged on, and for field coverage, each field that fell short.
+- A month missing a figure that a criterion needs is not graded rather than given a guessed grade, and the reason is shown.
+- Stop events reported and the message-age median and percentile are shown beside the grade, but do not affect it.
+- The thresholds start from those of Cal-ITP, the California programme that publishes a monthly GTFS quality report per operator. The grade is recomputed from the stored figures, under the current thresholds, each time it is shown. Changing a threshold changes no aggregate, so it is not a new method version. A change is announced by amending this section.
+- **Shown to admins only.** The grade is not published. Publishing it to operators waits on the [advance notice](#advance-notice) to each operator and the operator's right to reply.
+
+Each day, MobilityData's GTFS Realtime validator also checks one hour of each operator's archived trip updates: the polls from 09:00 to 10:00 JST, against the newest timetable the collector had stored by that day. For each operator and day, it records how many times each of the validator's rules fired and in how many polls. The validator publishes no numbered release, so each record names the image that ran by its digest, its source revision and the checksum of its jar. The validator's counts do not affect the grade:
+
+- The validator skips a poll identical to the one before it. A feed that stops changing is therefore validated only on the first poll of the run, when its header is usually still fresh, so W008 (header older than 65 seconds) undercounts frozen feeds. Freshness is judged by the share of polls over 65 s above, not by W008.
+- E022 (stop times not increasing from one stop to the next, which also fires on two stops given the same time), E039 (`is_deleted` in a full dataset), W001 (no timestamp on a trip update) and W002 (no vehicle ID) follow from how a feed's vendor platform writes it rather than from the service an operator runs. W007 (header timestamps more than 35 seconds apart from one poll to the next) fires whenever the collector polls less often than every 35 seconds, whatever the feed does. These are recorded but not graded.
+
+## Processing
+
+Under each rule's heading is the method version that introduced it.
+
+### Deduplication and withdrawal
+
+(the last report deciding: `2026.11.0`; withdrawal by a cancellation or skip: `2026.11.4`)
+
+A feed sends its prediction for the same trip and stop many times. For each trip, stop and service day, the stop's departure is therefore decided by **the last report received** among these:
+
+- a report of a delay in the plausible range: the stop departed with that delay;
+- a report of the trip cancelled (`CANCELED`) or the stop skipped (`SKIPPED`): the stop had no departure, and any prediction before it is withdrawn. A prediction received after it restores the departure.
+
+A report carrying neither a delay nor a cancelled or skipped status counts neither way: the report before it stands.
+
+**A trip not run** is one of these:
+
+- a trip whose last status is `CANCELED`;
+- a trip whose every stop reported with a delay or a status was last reported `SKIPPED`.
+
+A trip that skipped only some stops ran. A trip reported cancelled without listing any stop also counts as not run. Its cancellation withdraws the predictions received before it at each stop the timetable schedules the trip at whose scheduled departure was still to come when the cancellation arrived; a stop whose scheduled departure had passed keeps its departure (`2026.11.6`). The departures are those of the trip's own service day, the one its first departure is filed under: a cancellation received shortly before 04:00 for a trip starting soon after it is the next day's run. Only the stops whose own report files under that day are withdrawn by that report; a later one, nearer their departure, withdraws the rest, except a stop with no scheduled time, whose report always files under the day it is received in. A cancellation kept as the trip's own record, with no stop, carries the trip's last scheduled departure, so it is filed under the trip's day too. The scheduled time decides, because the cancellation carries no delay: a trip running late and cancelled between a stop's scheduled and its delayed departure keeps that stop's last prediction. A trip whose last status is `CANCELED` counts as not run even when it was cancelled partway through, or after its last stop, as long as the cancellation is received within 130 minutes of its last scheduled departure (see [Reports received after the departure](#reports-received-after-the-departure), from method `2026.11.14`).
+
+### Excluding implausible values
+
+(`2026.11.0`)
+
+A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped before deduplication. Such values come from a feed that has stopped updating and keeps resending the same prediction, not from real delays. A dropped report counts in no delay or on-time figure, so the stop's departure is decided by the reports before it. The share of dropped reports is one of the comparability conditions.
+
+### Reports received after the departure
+
+(`2026.11.14`)
+
+A report received more than 130 minutes after the stop's scheduled departure is ignored. A departure within the 120-minute range is last reported by its scheduled time plus 120 minutes, and a feed drops a stop within minutes of its departure, so ten more minutes cover that. Some feeds list a trip again hours after it ran, at a delay of their own, which would otherwise replace the stop's last real report. The stop's departure is decided by the reports received before then, and a stop reported only that late has no departure and is not a stop event reported. A trip reported cancelled without listing any stop is held to its last scheduled departure that day by the same 130 minutes: a cancellation received after the trip ran does not count it as not run, while a trip none of whose stops was reported keeps its cancellation. A report of a stop whose scheduled departure is not known keeps counting: a trip not matched to the timetable, and a feed whose scheduled time is the trip's first departure rather than the stop's. The share of implausible reports and the message age still count every report.
+
+### Service day and time
+
+(`2026.11.0`; after-midnight times `2026.11.1`; the stop event's day `2026.11.13`)
+
+- **Service day**: turns over at 04:00 JST, so a trip running from 23:40 to 00:30 falls in one service day.
+- **The day a departure counts on**: its trip's service day, the day of its scheduled departure, not the day each report was received on. A feed predicts a stop from before 04:00 for a departure after it, and reports a late night departure after 04:00; either departure counts once, on its own day. A report counts toward the service day before or after the one it was received on when the stop's scheduled departure that day is within four hours of it, which only a report received between 00:00 and 08:00 can be. A report with no scheduled time stays on the day it was received. The share of implausible reports counts each report on the day it was received.
+- **Hours**: a departure scheduled at 24:00 or later counts under its service day's hour 24, 25, and so on. A time band such as morning or evening is taken from the clock time (24:30 is late night).
+
+### Matching the timetable
+
+(`2026.11.3`)
+
+Each observation is matched with the timetable in force on its service day: the newest loaded timetable whose validity period (`feed_info`'s dates, or else `calendar`) covers that day.
+
+- A timetable published ahead of its first day is never applied to the day before.
+- A day no known timetable covers keeps the timetable its observations were ingested against.
+- Figures read from the aggregates and figures scanned directly from the observations, such as a time-band filter, follow the same rule.
+- The stamp names each timetable version in force over the period, with the number of days it covered.
+  Where the timetable archive knows the version's contents, it adds a short content hash: the first eight characters of a fingerprint of the timetable's contents. Two versions with the same hash have the same contents, even under different names, and a version fetched again under its name with other contents shows another hash. A version the archive does not know shows none. Beside figures from the aggregates, the hash is shown only when the aggregates were built under that content: after a version is fetched again with other contents, it shows none until the aggregates are rebuilt.
+
+### Where the observations came from
+
+(`2026.11.2`)
+
+Each day's observations are counted by the path they came from, archive or live, and the path holding most of them is that day's source. No delay or on-time figure changes under this rule.
+
+### Rebuild record
+
+When the method changes, every aggregate it changed is rebuilt over its whole retained history. Figures exported under an earlier version may therefore differ from today's for the same period. Dates before an operator's retention floor, whose raw readings are no longer kept, are not rebuilt: they keep the figures of the method they were built under, and an export reaching them names that method.
+
+When a rebuild rewrites the aggregate behind the operator-wide on-time rate and average delay, it records the following for each operator, shown on the admin board's run timeline:
+
+- the operator-wide on-time rate and average delay, before and after, over the days the rebuild rewrote;
+- the on-time definition they were counted under.
+
+## Metrics
+
+### On-time definition
+
+| Name | On time when | Used |
+|---|---|---|
+| `standard_m1_p5` (industry standard) | no more than 1 minute early and no more than 5 minutes late | by default, on every screen and export |
+| `legacy_60s` (legacy) | any early departure, and no more than 1 minute late | only when asked for |
+
+- A request may also give its own early and late tolerances in seconds. A window equal to a named one is called by that name; any other is called `custom`.
+- Choosing a definition changes no aggregate, so it is not a new method version. A figure is identified by its method version and its on-time definition together, and the stamp names both.
+
+### Main metrics
+
+An "observation" here is one departure: one trip, at one stop, on one day. It is not a count of trips.
+
+| Metric | Computed as |
+|---|---|
+| On-time rate | departures within the on-time window ÷ observations |
+| Average delay | sum of delays ÷ observations, early departures counted as negative |
+| Median, 90th percentile | from the distribution of observed delays |
+| Early-departure rate | the share of observations more than the definition's early tolerance early; under a definition that counts every early departure as on time, more than 1 minute early |
+| Share more than 5 minutes late | the share of observations more than 5 minutes late, whatever the on-time definition |
+| Service delivered | (planned trips − trips not run) ÷ planned trips, where planned trips are those the timetable in force plans for each day |
+| On-time rate interval (used by the comparability conditions) | the 95% Wilson interval. Stops of one trip run late together, so the sample size is the number of trips, not of observations |
+
+Service delivered is shown only for an operator whose feed has been confirmed to report cancellations and has reported at least one trip not run in the 90 days up to the period's last day (or within the period, when it is longer). Otherwise it is shown as "—" with the reason.
+
+A route's service delivered is the same ratio on the route's own trips. A trip not run counts under the route its latest report names, so the routes add up to the operator. Its planned trips come from each day's saved split by route, or from the timetable loaded now. A period with a day saved before its split was saved has no route figure. The performance standards judge only a route with at least 100 planned trips and 100 observations.
+
+**Headway metrics**: a route is high-frequency on a day when the median scheduled headway of the timetable in force that day is 12 minutes or less. Over a period, these metrics pool the days a route is high-frequency on:
+
+- actual headways, reconstructed from consecutive departures at the same stop;
+- Excess Waiting Time (EWT): actual mean wait − scheduled mean wait, the scheduled side taken from each pooled day's own timetable;
+- the coefficient of variation of headways;
+- the long-gap rate: the share of gaps longer than 1.75 times the scheduled headway of that day's timetable.
+- bunching: the share of gaps shorter than a quarter of the scheduled headway of that day's timetable (from method `2026.11.20`), the definition of the Bus Turnaround report cards: the second bus arrives so close behind the first that it carries few of the passengers who gathered for it. Each day stores how many gaps were bunched and how many were judged, and a period adds them up. A day whose timetable keeps no scheduled headway judges none. A day built before `2026.11.20`, or before the retention floor, which is never rebuilt, has no count; a period that includes one shows bunching as not measured, never as 0.
+
+A headway median is taken the same way for scheduled and actual gaps: for an even count of gaps, it is the mean of the two middle gaps (from method `2026.11.9`).
+
+Each day is judged by the timetable in force that day, not by the one loaded now (from method `2026.11.10`). A day whose timetable's scheduled headways were not kept is not judged by another timetable instead: it is left out, and the panel says how many days were. For a timetable kept before `2026.11.10`, only its median was kept, so its days are still classified and their gaps count, but EWT is not shown for a route whose period includes them, and the panel says how many such days there are.
+
+**Dwell and running time**: each stop's actual arrival and departure are its scheduled times plus the reported delays. Dwell time is the actual departure minus the actual arrival at the same stop, counted only for a departure reported after the arrival, and running time is the actual arrival minus the previous stop's actual departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
+
+**Running time per timetable segment**: a segment is the pair of stops a trip calls at in turn under the timetable in force that day. Trips of one route through the same pair share one segment, whatever their variant. Its running time is, as in the split above, the actual arrival at the segment's last stop minus the actual departure from its first. A trip whose first stop of the segment the feed did not report gives no running time for it, so a time spanning two segments never counts as one. The time band is that of the scheduled departure from the first stop.
+
+- Median and 85th-percentile running time: from every running time observed in the period, linearly interpolated.
+- Scheduled running time: the mean, over the same trips, of the scheduled arrival at the last stop minus the scheduled departure from the first.
+- Padding: scheduled running time − median running time. Positive is slack, negative too tight.
+- Held-for-schedule rate: of the trips reaching the first stop on time or early, the share that stayed more than 60 seconds beyond the scheduled dwell, counting only trips whose departure was reported after the arrival and whose next stop the feed reported.
+- Terminus early-arrival rate: the share of arrivals at a trip's last stop at least 60 seconds ahead of the timetable.
+
+When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them while they rest on predictions.
+
+A route's page shows these in its "Timetable fit" tab, one time band at a time, with the segments in the route's order rather than ranked. Each run of consecutive stops, such as one direction or one branch, is listed apart from the others.
+
+**Slow segments** (**Why**, "Slow segments"): the running time per segment above, taken per stop pair of the agency over every route through it. It is read per time band (of the scheduled departure from the first stop) and per day type (weekdays, or weekends and holidays, by the calendar).
+
+- The period is the newest 8 complete weeks (Monday to Sunday). A week is complete once the Monday after it has closed too: a Sunday service day's runs after midnight arrive with Monday's. A week not yet over is not read.
+- Each week gives the median of every running time observed on its dates of the day type, and the mean scheduled running time of the same trips. When the timetable is revised within a week, only the days of the timetable in force on the last day read that week are used.
+- Over the timetable: the week's median running time − the scheduled running time (the padding above with its sign reversed).
+- **Slow week**: a week with 21 or more runs, on a segment the timetable gives at least 60 seconds, that is 60 seconds or more over the timetable. Timetables are often written to the minute, which alone can put nearly a minute on one segment and take it off the next, hence the one-minute floor. A segment the timetable gives under a minute is mostly rounding, so it is not judged.
+- **Segment that stayed slow**: one whose newest 3 or more weeks in a row were slow weeks. A week with no observation or too few runs ends the streak, since it cannot show the segment stayed slow. When all 8 weeks were slow, it may have started earlier.
+- Runs per day: the week's observed runs ÷ the days with an observation. Trips the feed did not report are not counted, so it can fall short of the timetable's trips.
+- Minutes lost per day: the excess (0 when negative) × runs per day ÷ 60.
+- Distance and speed: the distance is the straight line between the two stops of the timetable loaded now. It is shorter than the road, so the speed (distance ÷ median running time) reads low on a winding road. A road distance from the timetable's shapes would need one shape picked per stop pair, and a loop route leaves the stops' places on it ambiguous, so the straight line is used. The slow-segment rule does not read the distance.
+
+The list is ordered by how many weeks a segment has stayed slow. It is not ranked by minutes lost, and no bus-priority (bus lane, transit signal priority) candidates are chosen from it, while its values rest on predictions. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)).
+
+### Route report card
+
+Each route gets one grade, A to F, per calendar month (**Routes** → "Report cards", and on the route's own page). It is shown to admins only, until operators have had the advance notice and right of reply of the [publication process](#publication-process). It is computed when it is read, from the figures above over the month's days, and is not stored. The rules and their sources are in [docs/features/route-report-card.md](features/route-report-card.md).
+
+- **Class**: a route is high-frequency for the month when it is high-frequency (headway metrics above) on at least half the days its timetable in force judges. A route with no such day takes the class of the timetable loaded now; a route the timetable gives no headway is low-frequency.
+- **High-frequency**: excess waiting time and bunching each get a letter, and the route takes the worse, so an F on either is an F.
+- **Low-frequency**: the on-time rate under the industry standard (`standard_m1_p5`) and the early-departure rate each get a letter, and the route takes the worse. An early departure counts in the on-time rate too: it is graded twice on purpose, as on a route that runs rarely it makes a passenger who came on time wait a whole headway.
+- **Service delivered** caps the letter: under 95% it is at best D, under 90% it is F.
+- Each figure is judged as printed, to a tenth, and every edge is inclusive.
+- **No grade (N/A)**, with its reason, in this order: no observation in the month; a feed that reports only zero delay for the route; fewer than 100 observations (the floor the performance standards judge at); then the [comparability conditions](#comparability-conditions) on the route's own trips: coverage unknown, under 70% of its planned trips observed, or an on-time interval wider than 3.0 points either side. The implausible-readings condition is the whole operator's, so it does not decide a route.
+- A route that passes those but lacks a figure its grade needs, such as bunching not measured, a feed that has never reported a trip not run, or fewer than 100 planned trips (service delivered is judged, as the performance standards judge it, only on at least 100 planned trips and 100 observations), gets no grade either and names the figure. A missing figure is never taken as a pass.
+- **Intervals**: 95% Wilson intervals, counting the route's trips as the sample size, since the stops of one trip move together. Excess waiting time and bunching have no interval: bunching pools only the days the route is high-frequency on and of its dominant day type, whose trips are not counted apart, so the month's trips would give too narrow an interval.
+- **What would raise it**: for each figure below the next letter, the value it must reach.
+
+Changing a rule changes no aggregate, so it is not a new method version; a change is announced by amending this section.
+
+### A timetable's typical day
+
+Both the timetable revision comparison and the planned departures at stops read a timetable on a typical day of each day type. They read the timetables alone, never the observations.
+
+- **Day type**: weekday, Saturday, and Sunday & holiday. Sundays and public holidays (substitute holidays included) are Sunday & holiday. Every operator is split the same way, by the date alone, so what is compared always lines up on the same day types. The day types elsewhere follow each operator's calendar and may merge Saturday with Sunday & holiday; these are fixed by the date alone.
+- **Typical day**: for each day type, days of the type on which the timetable is in force are taken: up to five of each weekday Monday to Friday (twenty-five) for weekdays, and up to five for Saturday and for Sunday & holiday. Where they are sought is given in each section. The typical day is the one running the same trips as most of them, the one taken first on a tie, so a holiday-timetable weekday, the year-end break or a one-off service day does not stand for the type.
+- A day outside the timetable calendar's extent (from the first day it names to the last) is never picked. A day inside it that runs no trip counts as a day with no departures: in a timetable that lists only the days its services run in `calendar_dates`, a day it does not list runs nothing.
+- A day type with no typical day (no day of that type within the calendar's extent while that timetable is in force), or any day type of a timetable whose calendar was not kept, is unknown, never zero.
+- **Departure**: one trip running on the typical day scheduled to leave one stop. A trip's last stop is not a departure, nor is a stop with no time given.
+- **Time**: the service day's time ([Service day and time](#service-day-and-time)). A departure written past 24:00 reads as written, and one written at face value between 00:00 and 03:59 reads as that night's 24:00 to 27:59: a 00:40 trip is the night's last, never the morning's first.
+
+### Comparing timetable revisions
+
+Each timetable revision is compared stop by stop, the timetable before it against the one after (**Reports**, “Timetable revisions”). It reads the timetables alone, never the observations.
+
+- **Revision**: a day whose timetable in force ([Matching the timetable](#matching-the-timetable)) differs from the day before's. Either its content (content hash) or its service calendar differing makes a revision; two names with the same content and calendar do not. Only versions whose content and calendar the timetable archive keeps are compared, so a timetable just loaded is compared once the next analyze has kept it.
+- **Typical day**: one day per day type from each timetable, as in [A timetable's typical day](#a-timetables-typical-day). Days are read back from the day before the revision for the timetable before it, and on from the revision day for the one after, so a tie goes to the day nearest the revision.
+- **Hour**: by the scheduled departure's service-day time. A departure written at face value as 00:40 falls in that night's 24:00 hour too.
+- **Departures lost and gained**: per stop and hour, the fall from before to after is lost, and the rise gained. A departure moved to another hour is one lost and one gained.
+- **Last departure**: the stop's latest departure on that day type. Its shift is given only for a stop with departures on both sides.
+- **Stops left with none**: stops with departures before and none after. On Saturday or Sunday & holiday, these are the stops that lost their weekend service.
+- Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under the old ID and gaining them under the new one. Stop names are the loaded timetable's, so a stop it no longer has shows its ID.
+
+### New service gaps
+
+The stops a timetable revision left with a long stretch without service in a band of hours (**Reports**, “Timetable revisions”, “New service gaps”). The list also downloads as CSV, for monitoring gaps in local transport. Day types and typical days are those of [Comparing timetable revisions](#comparing-timetable-revisions).
+
+- **Band and gap**: a band of hours (10:00 to 16:00 by default) and a gap (60 minutes by default). Hours are service-day hours, 24:00 being midnight. The gap must be shorter than the band.
+- **New gap**: a stop whose [longest gap](#planned-departures-at-stops) over the band was at most the gap on the typical day before the revision and exceeds it on the one after. A gap exactly equal to it does not exceed it. A stop left with no departure in the band has the whole band as its gap. A stop with no departure in the band before the revision already exceeded the gap, so it is not listed.
+- **Order**: the longest gap after the revision first, then the gap that grew most.
+- **CSV**: every day type's stops, after lines naming the versions, the typical days, the band and the gap. Gaps are in minutes, and departures are those within the band. A day type without a typical day under either timetable is not compared.
+- Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under its old ID, so it can be listed with the whole band as its gap.
+
+### Routes before and after a revision
+
+For each timetable revision, each route's timetable change is set beside how its trips ran before and after (**Reports**, “Timetable revisions”, **Routes**). Day types and typical days are those of [Comparing timetable revisions](#comparing-timetable-revisions).
+
+- **Route**: the timetable's `route_id` mapped to the route code the aggregates use (for Aomori City Bus's “…(1021)” form, the number in the brackets).
+- **Trips and last trip**: the route's trips running on the typical day, and the start of the latest of them. A trip starts at its first departure, read as a service-day time (“Time” in [A timetable's typical day](#a-timetables-typical-day)).
+- **Longest gap at the main stop**: the longest time between two consecutive departures at the stop the route departs from most on the typical day before the revision (the lower stop ID on a tie; for a route with no departure before, the stop is chosen on the after side). Both sides are measured at that one stop. A side with fewer than two departures there shows none. This is neither the median headway nor the long-gap rate of the [headway metrics](#main-metrics).
+- **Change**: decided by the route's trips on the typical days of the day type shown. A route with no trips before is “New route”, one with none after “No trips left”; otherwise fewer trips is “Fewer trips”, more “More trips”, and the same “Same trips”. Decided per day type, so a route cut only on Saturdays is “Same trips” on weekdays. A day type with no typical day compares no routes.
+- **Weeks compared**: whole weeks of equal length, ending on the last day of the timetable before the revision and starting on the revision day. At most four, and no more than both the days the timetable before it is in force and the operator's figures are aggregated, and the days aggregated while the timetable after it is in force. Nothing is shown before one whole week after it.
+- When a timetable's span or the day the operator's aggregates begin keeps the comparison under four weeks, the number of weeks that can be compared and the reason are shown, with no promise of more. Weeks that can be compared but are not aggregated yet are shown with the day they will be.
+- **On-time rate and mean delay**: over those weeks, the aggregates' counts (observations, on-time departures and the sum of delays) added up per route over each side's days of the day type compared. The on-time definition is always the industry standard (`standard_m1_p5`). Like every other figure, the values are the delays the operator's real-time feed predicted, and each day is aggregated under the timetable in force that day.
+- A route's on-time rate and mean delay show a dash when that side has fewer than 100 observations. A shown on-time rate whose 95% Wilson interval is more than 5 points either side carries “wide margin”.
+- **Per change**: the counts of the “Fewer trips”, “More trips” and “Same trips” routes observed on both sides, added up; never the mean of route rates. “New route” and “No trips left” are not compared.
+
+### Planned departures at stops
+
+How much service each stop is planned to get, from the timetables alone (from method `2026.11.19`). An opened stop sets each hour's planned departures beside the departures observed in it (from method `2026.11.21`) and how long riders waited (from method `2026.11.22`).
+
+- **Timetable**: each operator's timetable version in force on the chosen date (today's service day by default). It is read from the kept timetables, so a version a later load replaced can still be read. An operator with no version in force that day is shown as such.
+- **Typical day**: as in [A timetable's typical day](#a-timetables-typical-day), taken on from the first day the version is in force, so a tie goes to the earliest day. A day type whose typical day runs nothing has no departures.
+- **Departures in a band and per hour**: the departures within a band of hours (for example 10:00 to 16:00), and that count divided by the band's hours.
+- **Longest gap**: the longest time in the band with no departure: between two consecutive departures within the band, from the band's start to its first departure, or from its last departure to the band's end, whichever is longest, and the whole band when there is no departure in it. Departures outside the band do not stretch a gap, so it never exceeds the band, and a gap that straddles the band's edge counts only its part inside the band.
+- **First and last departure**: the stop's first and last departure on the typical day. The last can be at 24:00 or later.
+- **Stops of several operators**: each operator's stops are shown on their own. The departures of different operators' stops at one place are not added together.
+- **Observed departures**: for each hour of the band (on the service day's clock, so 24:00 and later included), the stop's departures the feed reported a delay for. A departure counts in the hour of its scheduled time, matched against the timetable in force that day ([Matching the timetable](#matching-the-timetable)), so it lines up on the same clock as the planned departures.
+- **Days observed**: of the 30 days up to the newest day with the operator's aggregates on or before the chosen date, those of the day type shown on which the same timetable version as on the chosen date was in force. The day type follows the date alone, as in [A timetable's typical day](#a-timetables-typical-day). A day with no aggregates (the feed did not arrive) is not counted as a day, so it never reads as one with no departures. Departures per day are the observed departures over those days divided by their number. The definition shown beside them (timetables, sources, completeness) covers the whole period from the first of those days to the last, the other days in it included.
+- **On-time rate and mean delay**: the share of the observed departures that were on time, and their mean delay. On time always follows the industry standard (`standard_m1_p5`). A planned departure that was not observed counts neither as on time nor as late ([What is not observed](#what-is-not-observed)): a feed that did not report it says nothing of whether it ran. So when fewer departures are observed than planned, the on-time rate covers the observed ones alone.
+- The on-time rate is shown however few departures are observed, and carries “wide margin” when its 95% Wilson interval is more than 5 points either side. The observations at one stop in one hour are different trips or a trip on different days, so the sample size is the number of observations. An hour with no observation shows a dash.
+- **Waits**: how long a rider who reaches the stop at a random moment of the hour waits for the next departure of any route there, as run and as timetabled. As run, a departure leaves at its scheduled time plus the delay the feed last reported for it; as timetabled, the same departures leave at their scheduled times, so the two differ only by how they ran. Each day's riders arrive evenly through the hour, up to the earlier of that day's last departure as run and as timetabled, so both sides count the same riders, and a rider after the last departure, who has none to wait for, counts on neither. The waits of every day judged are pooled, and their median and 90th percentile are taken exactly, rounded to a tenth of a minute.
+- **Days judged for an hour**: a day counts for an hour only when the feed observed at least the typical day's planned departures in the hour, in the hour before (a late departure can serve its riders) and in the next hour with a planned departure. A departure the feed missed would merge two gaps into one and make the wait look longer than it was. An hour with no day judged, or none whose last departure left after the hour began both as run and as timetabled, shows a dash. The check compares counts, so a day that missed one departure but saw an unplanned one in the same hour is still judged. A departure the operator cancelled is never observed, so a day with a cancellation in those hours is not judged rather than counted as a longer wait: the waits describe the departures that ran.
+- **Random arrival**: the waits assume riders arrive without checking the times, as they do for frequent service. Riders of infrequent service time their arrival, so there the figures describe the gaps between departures rather than what riders wait. The waits carry no grade: Excess Waiting Time's bands describe frequent service (a median scheduled headway of 12 minutes or less), and a stop's waits pool every route there.
+- A terminal stop shows no observed departures, since feeds report no departure from the last stop.
+
+### Connections at transfer hubs
+
+For a transfer an administrator defines, a rider leaving route A at its hub stops and boarding route B at its own, how often the planned connection held (**Day types & agencies**, “Transfers”). Each side names its own operator's stop IDs; the Service does not match a place across operators. Every figure is computed from feed predictions, never from observed passings ([Value basis and validation status](#value-basis-and-validation-status)), and is read when asked for rather than kept as an aggregate.
+
+- **Plan**: each service day ([Service day and time](#service-day-and-time)) the loaded timetables of both operators plan, A's scheduled arrivals at its hub stops and B's scheduled departures at its own, the arrival time when a stop gives one and else the departure time. A trip's first stop is no arrival, since nobody arrives on a trip where it starts, and its last stop is no departure, since it departs nowhere. A day either operator's loaded timetable does not plan is listed as not planned and enters no figure; it never counts as a day with no connections. Days follow the weekday rule (weekday, Saturday, Sunday & holiday, with public holidays as Sunday & holiday), the same for both operators.
+- **Planned connection**: for each A arrival, the first B departure at or after the arrival plus the walk set for the pair, on the same service day. An after-midnight arrival (24:20) connects to an after-midnight departure of the same service day. An arrival with no later B departure that day plans no connection and is counted apart.
+- **Predicted times**: a stop's scheduled time plus the delay the feed last predicted for it. A's arrival uses its arrival delay. Without one, it uses the departure delay plus the time the timetable holds the bus at the stop (its scheduled departure minus its scheduled arrival there): a bus arrives no later than it leaves, so this is the latest it can have arrived, and it can only make A look later. Arrival delays are an optional realtime field, so they are read only from an operator whose feed has been checked to send them (that check alone, whatever the other optional fields' checks found), and every other operator's arrivals use the departure delay. A route ending at the hub then has no reading at its last stop, so its connections read not observed; the screen and the CSV say why arrivals were not read. B uses its departure delay. Reports are matched to the plan by trip and stop sequence, not by stop ID, which some feeds leave out.
+- **Held**: B's predicted departure is at or after A's predicted arrival plus the walk. **Missed**: it is earlier, or the feed withdrew the planned B departure (its trip reported cancelled or the stop skipped in its latest report), whatever A did. A withdrawn departure is passed over when finding the trip a rider caught.
+- **Not observed**: A's arrival or B's planned departure has no prediction. It is counted on its own and is never held or missed. The held share is held over held plus missed.
+- **Realised wait**: from A's predicted arrival to the predicted departure of the first B trip a rider could still catch, the walk included. B's trips are read in timetable order from the planned one; when a trip with no prediction comes before a catchable one, the wait is unknown, since it may have been the one caught. An earlier trip predicted to leave late enough to catch counts too. A missed connection with no B trip left to catch that day, later or late, has no wait and is counted as stranded.
+- **Survey bands**: the share of known waits at or under 5, 10 and 20 minutes, the waits riders said they would tolerate.
+- **Buffer that would have held 95%**: each observed connection whose B departed needed a planned buffer (B's scheduled departure minus A's scheduled arrival) of at least A's lateness minus B's lateness plus the walk. The buffer given is, in whole minutes rounded up, the smallest at which at least 95% of the observed connections would have held (the nearest-rank 95th percentile of those needs), and never less than the walk. It takes each day's delays as given, as if B ran as late under another buffer.
+- **Small samples**: with fewer than 21 observed connections, the held share and the buffer are not given; with fewer than 21 known waits, the wait figures are not. Each hour and each day still shows its counts, marked when fewer than 21 were observed. The worst days are those with the most missed connections, a count rather than an estimate.
+- Trips are matched by the trip ID and stop sequence the feed reports against the loaded timetable, so a day whose trips the current timetable no longer has reads as not observed. The predictions are read as they were received, not re-matched to the timetable in force on each date as the delay figures are ([Matching the timetable](#matching-the-timetable)): re-matching changes a report's schedule and route, never its delay, and the plan a connection is judged against is the loaded timetable's, so re-matched reports would judge one connection against two timetables. Like the other figures over a period, only closed days are read.
+
+### What is not observed
+
+- A stop with no delay report counts neither as on time nor as late.
+- A planned trip that never appears in the realtime data is not counted as not run. Service delivered subtracts from the plan only the trips the feed reported as not run.
+
+## What is never computed
+
+The Service neither computes nor publishes the following. Changing this rule starts with changing this document.
+
+- **Figures per vehicle or per driver**:
+  - No figure is made per vehicle or per driver.
+  - The feeds' vehicle descriptors are not ingested. No database holds a column for a vehicle's identifier (`vehicle_id`), its licence plate (`license_plate`) or a driver's identifier (`driver_id`).
+- **Passenger identity**:
+  - No passenger identifier (`passenger_id`) or IC card number is held.
+  - The only passenger weighting is a relative weight per route, entered by hand by an admin.
+- **Fares**: nothing about fares (`fare`) is computed.
+
+A test ([tests/unit/test_never_computed.py](../tests/unit/test_never_computed.py)) checks that no such column is in the schemas and that no vehicle descriptor survives into an ingested row.
+
+**Raw archives**: the raw data collected is kept exactly as the operator published it.
+
+- The realtime archive can carry vehicle descriptors the operator included. The Service does not ingest them.
+- Positions are collected only to check the predictions against observed passages. They are not ingested into the app. Each day of them is kept for 180 days, much shorter than the realtime archive's 1,825.
+- Any release of the archives as a public dataset strips the vehicle descriptors.
+
+### The original fourteen gaps
+
+Early in development, the perspectives a cross-operator delay analysis was missing were listed as fourteen items. Their current status follows. The `vehicle_id` column proposed then was never added, and is ruled out as above.
+
+| Perspective | Status | Missing or notes |
+|---|---|---|
+| The on-time definition and early departures | Done | The industry-standard and legacy definitions, and any tolerance; the early-departure rate |
+| High-frequency headways, EWT and long gaps | Done | Routes whose median scheduled headway is 12 minutes or less |
+| The denominator: cancellations, missed trips and skipped stops | Partial | Cancellations and skips are counted. Service delivered per route serves the performance standards only; no screen lists it. A planned trip absent from the realtime data is not counted |
+| Passenger weighting | Partial | Only hand-entered relative weights per route, used only by the weighted on-time rate on the agency comparison screen. No ridership import |
+| Splitting running time from dwell time | Partial | The split exists. Whether a feed's arrival and departure delays are independent has not been checked feed by feed |
+| External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
+| Quality of the predictions | Partial | The stamp names the value basis. The operators whose positions are collected are validated against them, and no operator is ranked on predicted figures. The monthly feed-quality scorecard and its A–F grade are on the admin pages and are not published |
+| Stating the measurement point and definitions | Partial | "Download CSV" files, the council report, the delay record and the screens' "How this is calculated" block carry the definition stamp. CSVs a screen builds on the spot and chart images do not |
+| Transfers and total travel time | Partial | Connection reliability for the hub transfers an administrator defines, from feed predictions. Total travel time and origin-destination journeys are not computed: passengers are not the Service's primary users |
+| Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
+| Data coverage | Partial | The Hiroshima Bus Association's thirteen operators and Aomori City Bus. 中国バス and 井笠バスカンパニー, on the association's list, are not ingested |
+| Timetable slack and holding | Partial | Padding, the held-for-schedule rate and the terminus early-arrival rate per segment are aggregated daily and shown in the route page's "Timetable fit" tab and on the Notebook screen. They are feed-based estimates, and no timetable recommendation is made from them |
+| Supply: planned trips, vehicle-km, timetable changes | Partial | Planned trips and vehicle-km per timetable version, and the change dates, exist. Only the current version is shown, with no comparison of which routes lost trips between versions. Vehicle-km delivered is approximated from the trip ratio |
+| Contracts and incentives | Partial | Per-route standards (on-time rate, EWT, service delivered, vehicle-km delivered) with an achievement and bonus/deduction simulation. Service-delivered and vehicle-km standards are judged on the route's own service delivered |
+
+## Comparability conditions
+
+The agency comparison screen ranks only the operators whose data supports a comparison. It lists the rest unranked, each with the first condition it failed. The conditions are checked in this order, so one operator always gets the same reason:
+
+| Order | Reason | Condition |
+|---|---|---|
+| 1 | No data | no observation in the period |
+| 2 | Coverage unknown | planned and observed trips cannot be matched. Only operators ingested by a strategy whose trip IDs match the timetable's (`static_join`) can be compared |
+| 3 | Coverage low | under 70% of planned trips observed |
+| 4 | Interval wide | the on-time rate's 95% Wilson interval is more than 3.0 points either side |
+| 5 | Implausible readings high | over 5% of reports dropped as implausible |
+| 6 | Predicted values | the figures are the feeds' predicted delays, not observed passings, as every operator's are today ([Value basis and validation status](#value-basis-and-validation-status)) |
+
+- Each threshold is inclusive: a figure exactly at it passes.
+- The predicted-values condition is checked last, so an operator given it meets every condition on its own data.
+- Each check reads the figure rounded as it is printed, so a reader can confirm the verdict from the row itself.
+- The on-time rate is counted under the default definition (`standard_m1_p5`).
+- The council report states whether the operator is comparable under these conditions, with the figures behind the verdict.
+- The thresholds' source is [pipeline/reports/comparability.py](../pipeline/reports/comparability.py). Changing a threshold changes no aggregate, so it is not a new method version. A change is announced by amending this section.
+
+## Definition stamp
+
+Figures shown or exported in the places listed below carry:
+
+- the on-time definition's name, and its early and late tolerances;
+- the threshold the early-departure rate counts past;
+- the measurement scope: all stops, all observations;
+- the deduplication rule, and the threshold for implausible values;
+- the value basis: feed prediction;
+- the prediction check, for an operator with one recorded: the service dates and on-time window of its newest, and how many points the on-time rate from the predictions stood above or below the one from observed passages ([Value basis and validation status](#value-basis-and-validation-status)); nothing for an operator with none;
+- the method version, and the day the aggregates were built, or "live scan" for figures scanned directly from the observations;
+- the timetable versions in force over the period, with their days and content hashes;
+- where the observations came from: days from the archive and days from the live path;
+- the feed's quality: the whole agency's observation coverage over the period (the coverage in the [Comparability conditions](#comparability-conditions)) and the share of implausible values dropped. A figure short of a comparability threshold says so in the words the agencies board uses; a figure that cannot be computed is never shown as 0 and gives its reason (no analyzed observations, trips that cannot be matched, no plan, or a plan that could not be read).
+
+The stamp appears in the places below. The CSV preambles and the footnotes also give this document's URL.
+
+- in the first-row preamble of each CSV fetched with "Download CSV";
+- in the council report's footnotes, and on its print;
+- in the delay record's footnotes;
+- in the screens' "How this is calculated" block;
+- on snapshot pages.
+
+CSVs a screen builds on the spot from its export menu or "CSV" button (the route page's stops, the Reports screen's period summary, Live and the Notebook) and chart images carry neither the stamp nor the credit. Quote figures from a stamped export or a snapshot.
+
+## Snapshots
+
+A snapshot freezes the figures a screen showed, together with their stamp. Its link shows the same figures after any later rebuild. Figures quoted in council material are kept as snapshots.
+
+- **Who creates them**: only admins. An admin's print of the council report takes one automatically and prints its link at the foot of the page.
+- **Who reads them**: anyone holding the link, without signing in. The link's identifier is an unguessable random value, and only admins can list snapshots.
+- **Compared with today**: a snapshot's page can compare its figures with today's, naming each side's method version and on-time definition.
+- **Retention**: 2 years by default (provisional, awaiting the maintainer's confirmation). Nothing yet deletes a snapshot past that age; today a snapshot stays until an admin deletes it. Each creation and deletion is in the admin audit log.
+
+The screens' behaviour is in [docs/features/snapshots.md](features/snapshots.md).
+
+## Publication process
+
+### Advance notice
+
+At least **14 days** before the Service first makes an operator's figures public, the operator is sent:
+
+- its figures;
+- this document;
+- a contact for reporting errors.
+
+"Making public" means a page anyone can read without signing in, a published dataset, or an announcement by the maintainer. Opening the Service's own screens to anyone without signing in counts too.
+
+- **Courtesy letter first**: before the first notice, a courtesy letter goes to the Hiroshima Bus Association explaining this process ([Courtesy letter to the association and operators](#courtesy-letter-to-the-association-and-operators)).
+- **During the notice period**: the operator can point out errors in the figures or the method. Errors confirmed are corrected before publication.
+- **Statement alongside**: the operator can send a short statement to be shown beside its figures.
+
+The Service is not open to the public today. The public page and the public dataset are both in preparation. Until the first notice is sent, neither is published and the Service is not opened to the public.
+
+### Reporting errors and takedown
+
+- **Contact**: the Service's own address, [devyolouis@gmail.com](mailto:devyolouis@gmail.com). Bugs are also welcome on [GitHub Issues](https://github.com/TripAndCode/transit-app/issues), but Issues are public, so please leave personal information out.
+- **Takedown**: a figure confirmed wrong is taken down or corrected **within 5 working days**.
+- **Correction log**: each correction is recorded in this document's [Correction log](#correction-log). Once the public page exists, the log moves there. Each entry records:
+  - the date;
+  - the operator, figures and period affected;
+  - what was wrong;
+  - what was done;
+  - the method version.
+
+### Method changes
+
+A method change does three things:
+
+- it gets a new version number;
+- what it changes is written down;
+- every aggregate it changes is rebuilt over its whole retained history.
+
+The changelog is at the end of this document, and each version's description is in [DELAY_ANALYSIS.md's "Method versions"](../DELAY_ANALYSIS.md#method-versions). How a rebuild moved each operator's on-time rate and average delay is recorded as in [Rebuild record](#rebuild-record).
+
+## Governance
+
+- **Maintainer**: the method and each publication are signed off by the operator of the Service, TripAndCode (an individual), as maintainer, until anyone else shares the role.
+- **How to cite**: give the stamp's method version, build day and on-time definition, and the data source, for example "Delay Dashboard, method `2026.11.4`, aggregates built 2026-11-09, on-time definition `standard_m1_p5`". Add the snapshot link where there is one, so the figures can be checked later.
+- **Reporting a problem**: through the contact in [Reporting errors and takedown](#reporting-errors-and-takedown).
+
+### Personal data
+
+- The Service's figures are about operators' services; it handles no passenger's personal data.
+- Readers use it without signing in; only admins sign in.
+- What personal data the Service handles, and how, is in the [privacy policy](../frontend/public/legal/privacy.en.md).
+
+## Courtesy letter to the association and operators
+
+Using CC0 data needs no one's legal consent. Even so, the Service avoids an operator finding its name and figures in public without having heard of them first. Before publication, a courtesy letter therefore goes to the Hiroshima Bus Association, explaining the Service's purpose and the process in this document.
+
+The letter's text (in Japanese) is [templates/courtesy-letter.md](templates/courtesy-letter.md).
+
+## Where this document is linked
+
+This document is linked from:
+
+- the app's footer (the welcome page's footer and the account page);
+- the preamble of each CSV fetched with "Download CSV";
+- the council report's and the delay record's footnotes, and their prints.
+
+The public page will link to it once it exists.
+
+## Correction log
+
+No entries yet.
+
+| Date | Affected | Error | Action | Method version |
+|---|---|---|---|---|
+
+## Changelog
+
+What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"](../DELAY_ANALYSIS.md#method-versions).
+
+<!-- method-changelog:start -->
+<!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
+
+The current method is `2026.11.22`. Newest first, each version with the inputs it set.
+
+| Version | Inputs set |
+|---|---|
+| `2026.11.22` | `agg_stop_departures_daily` = 1 |
+| `2026.11.21` | `agg_stop_hour_daily` = 1 |
+| `2026.11.20` | `agg_route_headway_daily` 6 → 7 |
+| `2026.11.19` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
+| `2026.11.18` | `agg_route_daily_dwell_run` 5 → 6, `agg_route_segment_runtime` = 1 |
+| `2026.11.17` | `feed_quality_monthly` 8 → 9 |
+| `2026.11.16` | `feed_quality_monthly` 7 → 8 |
+| `2026.11.15` | `agg_route_band_daily` = 1 |
+| `2026.11.14` | `agg_daily_trend` 4 → 5, `agg_hour_daily` 5 → 6, `agg_route_daily` 4 → 5, `agg_route_daily_dist` 4 → 5, `agg_route_daily_dwell_run` 4 → 5, `agg_route_headway_daily` 5 → 6, `agg_route_hour` 5 → 6, `agg_route_hour_dow` 5 → 6, `agg_route_stats` 4 → 5, `agg_route_stop_daily` 5 → 6, `agg_service_delivered_daily` 4 → 5, `agg_stop_daily` 5 → 6, `feed_quality_monthly` 6 → 7, `route_delay_counts` 5 → 6 |
+| `2026.11.13` | `agg_daily_trend` 3 → 4, `agg_hour_daily` 4 → 5, `agg_route_daily` 3 → 4, `agg_route_daily_dist` 3 → 4, `agg_route_daily_dwell_run` 3 → 4, `agg_route_headway_daily` 4 → 5, `agg_route_hour` 4 → 5, `agg_route_hour_dow` 4 → 5, `agg_route_stats` 3 → 4, `agg_route_stop_daily` 4 → 5, `agg_schedule_revision_daily` 2 → 3, `agg_service_delivered_daily` 3 → 4, `agg_stop_daily` 4 → 5, `agg_stop_routes` 2 → 3, `feed_quality_monthly` 5 → 6, `route_delay_counts` 4 → 5, `stop_route_days` 2 → 3 |
+| `2026.11.12` | `feed_quality_monthly` 4 → 5 |
+| `2026.11.11` | `feed_quality_monthly` 3 → 4 |
+| `2026.11.10` | `agg_route_headway` 2 → 3, `agg_route_headway_daily` 3 → 4 |
+| `2026.11.9` | `agg_route_headway` 1 → 2 |
+| `2026.11.8` | `feed_quality_monthly` 2 → 3 |
+| `2026.11.7` | `agg_service_delivered_daily` 2 → 3 |
+| `2026.11.6` | `feed_quality_monthly` 1 → 2 |
+| `2026.11.5` | `feed_quality_monthly` = 1 |
+| `2026.11.4` | `agg_daily_trend` 2 → 3, `agg_hour_daily` 3 → 4, `agg_route_daily` 2 → 3, `agg_route_daily_dist` 2 → 3, `agg_route_daily_dwell_run` 2 → 3, `agg_route_headway_daily` 2 → 3, `agg_route_hour` 3 → 4, `agg_route_hour_dow` 3 → 4, `agg_route_stats` 2 → 3, `agg_route_stop_daily` 3 → 4, `agg_service_delivered_daily` 1 → 2, `agg_stop_daily` 3 → 4, `route_delay_counts` 3 → 4 |
+| `2026.11.3` | `agg_daily_trend` 1 → 2, `agg_hour_daily` 2 → 3, `agg_route_daily` 1 → 2, `agg_route_daily_dist` 1 → 2, `agg_route_daily_dwell_run` 1 → 2, `agg_route_headway_daily` 1 → 2, `agg_route_hour` 2 → 3, `agg_route_hour_dow` 2 → 3, `agg_route_stats` 1 → 2, `agg_route_stop_daily` 2 → 3, `agg_schedule_revision_daily` 1 → 2, `agg_stop_daily` 2 → 3, `agg_stop_routes` 1 → 2, `route_delay_counts` 2 → 3, `stop_route_days` 1 → 2 |
+| `2026.11.2` | `agg_feed_health` 1 → 2 |
+| `2026.11.1` | `agg_hour_daily` 1 → 2, `agg_route_hour` 1 → 2, `agg_route_hour_dow` 1 → 2, `agg_route_stop_daily` 1 → 2, `agg_stop_daily` 1 → 2, `route_delay_counts` 1 → 2 |
+| `2026.11.0` | `MAX_PLAUSIBLE_DELAY_SEC` = 7200, `agg_daily_trend` = 1, `agg_feed_health` = 1, `agg_hour_daily` = 1, `agg_route_daily` = 1, `agg_route_daily_dist` = 1, `agg_route_daily_dwell_run` = 1, `agg_route_headway` = 1, `agg_route_headway_daily` = 1, `agg_route_hour` = 1, `agg_route_hour_dow` = 1, `agg_route_stats` = 1, `agg_route_stop_daily` = 1, `agg_schedule_revision_daily` = 1, `agg_service_delivered_daily` = 1, `agg_stop_daily` = 1, `agg_stop_routes` = 1, `route_delay_counts` = 1, `stop_route_days` = 1 |
+
+<!-- method-changelog:end -->

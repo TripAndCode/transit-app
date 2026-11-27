@@ -3,12 +3,13 @@
 ``POST /internal/cron/ingest`` is the daily history path as well as a live
 fallback. Per agency it fetches the feed into ``updates_live`` (``ingest_live``),
 promotes every closed JST day from ``updates_live`` into ``updates``
-(:mod:`pipeline.promote`), then runs ``analyze``. Nothing else promotes, so a
-deployment must poke it at least once a day after JST midnight;
-``updates_live``'s TTL drops a day that is never promoted. A poke that lands
-in service hours also renews lapsing RT field-coverage verdicts
-(:mod:`pipeline.rt_coverage_reprobe`), so a deployment needs one daytime poke
-as well. Every endpoint is gated by :envvar:`CRON_SECRET` passed via the
+(:mod:`pipeline.promote`), then runs ``analyze``. A poke that lands in service
+hours also renews lapsing RT field-coverage verdicts
+(:mod:`pipeline.rt_coverage_reprobe`). A deployment that pokes this needs one
+poke a day after JST midnight, since ``updates_live``'s TTL drops a day never
+promoted, and one in the daytime. The standalone poller (:mod:`pipeline.poller`)
+does both itself, so a deployment running it needs no poke; an admin run
+promotes too. Every endpoint is gated by :envvar:`CRON_SECRET` passed via the
 ``X-Cron-Secret`` header — anything without the matching header gets 401.
 
 The actual ingest + analyze work runs as a FastAPI ``BackgroundTask`` so
@@ -21,7 +22,6 @@ import hmac
 import logging
 import os
 import pathlib
-import re
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import Any, NamedTuple
@@ -29,21 +29,22 @@ from typing import Any, NamedTuple
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
+from pipeline.collector_push import (
+    MAX_POLL_BYTES,
+    SOURCE_FILE_RE,
+    UnknownAgency,
+    ingest_pushed_poll,
+)
 from pipeline.locks import try_lock_ingest_analyze_timed
 from pipeline.ml_evaluation_ingest import ingest_evaluations, ingest_live_evaluations
 from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env, store_configured
+from pipeline.rt_validation_ingest import ingest_validation
 from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
 collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], include_in_schema=False)
 
 _log = logging.getLogger(__name__)
-_SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
-_MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
-
-
-class UnknownAgency(ValueError):
-    """A push for an agency that does not exist or is disabled."""
 
 
 class SweepOutcome(NamedTuple):
@@ -72,47 +73,20 @@ def _check_collector_secret(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid collector secret")
 
 
-def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file_name: str) -> int:
-    import psycopg2
-
-    from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest_live_payload
+def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, source_file: str) -> int:
+    from pipeline.stores import open_stores
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         raise RuntimeError("DATABASE_URL is not configured")
-    conn = None
-    ch_client = None
-    try:
-        conn = psycopg2.connect(db_url)
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
-            cur.execute(
-                "SELECT 1 FROM agencies WHERE agency_id = %s AND deleted_at IS NULL",
-                (agency_id,),
-            )
-            if cur.fetchone() is None:
-                raise UnknownAgency(f"Unknown or deleted agency_id={agency_id}")
+    with open_stores(db_url) as stores:
         # No advisory lock: a push writes updates_live, which analyze never
         # reads (pipeline/locks.py). ingest_live_payload's check-then-insert
         # over the last 10 minutes of captured_at absorbs a sequential
         # second arrival of the same file_name within that window; two
         # pushes that overlap in flight can both insert, and analyze's
         # argMax dedup on captured_at absorbs the duplicate from there.
-        ch_client = get_client()
-        return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
-    finally:
-        # Nested try/finally: if conn.close() raises, ch_client.close() must
-        # still run -- an unguarded `conn.close(); ch_client.close()` would
-        # skip the ClickHouse close on a Postgres close error, leaking the
-        # client + its HTTP pool inside this long-lived API process.
-        try:
-            if conn is not None:
-                conn.close()
-        finally:
-            if ch_client is not None:
-                ch_client.close()
+        return ingest_pushed_poll(agency_id, raw, captured_at, source_file, stores)
 
 
 @collector_router.post("/updates/{agency_id}")
@@ -125,7 +99,7 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     """
     _check_collector_secret(request)
     source_file = request.headers.get("X-Source-File") or ""
-    if not _SOURCE_FILE_RE.fullmatch(source_file):
+    if not SOURCE_FILE_RE.fullmatch(source_file):
         raise HTTPException(status_code=400, detail="Invalid X-Source-File")
     captured_header = request.headers.get("X-Captured-At") or ""
     try:
@@ -140,26 +114,25 @@ async def collector_update(agency_id: int, request: Request) -> dict:
             declared_length = int(content_length)
         except ValueError:
             declared_length = None
-        if declared_length is not None and declared_length > _MAX_COLLECTOR_PAYLOAD:
+        if declared_length is not None and declared_length > MAX_POLL_BYTES:
             raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     chunks = bytearray()
     async for chunk in request.stream():
         chunks.extend(chunk)
-        if len(chunks) > _MAX_COLLECTOR_PAYLOAD:
+        if len(chunks) > MAX_POLL_BYTES:
             raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     raw = bytes(chunks)
     if not raw:
         raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
-    file_name = f"oracle/{source_file}"
     try:
         inserted = await asyncio.to_thread(
             _ingest_collector_payload,
             agency_id,
             raw,
             captured.astimezone(timezone.utc).isoformat(),
-            file_name,
+            source_file,
         )
     # 404 and 422 tell the collector that resending the same request cannot
     # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither
@@ -270,7 +243,10 @@ def _ingest_and_analyze_sweep(
     the whole run, so one broken agency or stage doesn't starve the others.
     Returns the outcome the umbrella row should record: ``skipped`` when the
     advisory lock turned this sweep away or no active agency was in scope,
-    ``error`` naming every stage that failed, ``ok`` otherwise.
+    ``error`` naming every stage that failed, ``ok`` otherwise. An analyze
+    that leaves aggregates still lagging the newest completed day fails, on
+    its own row too; only for an agency whose earlier stages succeeded, since
+    one already named is reported through that stage.
 
     ``kind="analyze"`` re-aggregates what is already stored without fetching —
     the one case where skipping the feed pull and the weather pass is what was
@@ -278,7 +254,7 @@ def _ingest_and_analyze_sweep(
 
     ``agency_ids`` narrows the run, which is what the admin drawer's
     per-agency re-analyze action uses: the same lock, the same JST session
-    pin, and the same post-run freshness check as a scheduled poke, rather
+    pin, and the same freshness check as a scheduled poke, rather
     than a second implementation of them. A scoped run skips the weather
     pass — observed weather is per station, not per agency, so one agency's
     re-analyze has no reason to re-drive a third-party fetch for the whole
@@ -304,7 +280,7 @@ def _ingest_and_analyze_sweep(
 
     from pipeline.analyze import analyze
     from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC, get_client
-    from pipeline.freshness import check_agg_freshness
+    from pipeline.freshness import stale_verdict
     from pipeline.ingest import StaticTimetableMissing, ingest_live
     from pipeline.promote import promote_closed_days
 
@@ -372,6 +348,7 @@ def _ingest_and_analyze_sweep(
             return pipeline_runs.record_run(conn, stage, agency_id=aid, requested_by=requested_by, parent_run_id=run_id)
 
         for aid in agency_ids:
+            failures_before = len(failed)
             stopped = False
             if kind == "ingest":
                 try:
@@ -394,31 +371,20 @@ def _ingest_and_analyze_sweep(
                         failed.append(f"promote agency {aid}")
                         stopped = stop_on_failure
             if not stopped:
+                clean = len(failed) == failures_before
+                stale = None
                 try:
-                    with _stage("analyze", aid):
-                        analyze(aid, conn, ch_client)
+                    with _stage("analyze", aid) as run:
+                        run.rebuild_headline = analyze(aid, conn, ch_client, db_url=db_url)
+                        stale = stale_verdict(conn, ch_client, aid) if clean else None
+                        if stale:
+                            run.status, run.error = "error", stale
                 except Exception:
                     _log.exception("cron: analyze failed for agency %s", aid)
                     failed.append(f"analyze agency {aid}")
-
-        # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
-        # completed day, surface it loudly. Read-only; never aborts the run.
-        # Isolated in its own try/except, like the per-agency loop above: a
-        # failure here (e.g. a transient ClickHouse error) must not also
-        # suppress the weather pass below, which has nothing to do with
-        # aggregate freshness.
-        try:
-            stale = check_agg_freshness(conn, ch_client, agency_ids)
-            if stale:
-                _log.error(
-                    "cron: %d agency(ies) have stale aggregates after analyze: %s",
-                    len(stale),
-                    [s.agency_id for s in stale],
-                )
-            else:
-                _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
-        except Exception:
-            _log.exception("cron: check_agg_freshness failed")
+                if stale:
+                    _log.error("cron: analyze failed for agency %s: %s", aid, stale)
+                    failed.append(f"analyze agency {aid} (aggregates still stale)")
     finally:
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock
@@ -458,10 +424,10 @@ def _ingest_and_analyze_sweep(
     # not what an operator asked for by pressing one button.
     if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
-    # The ML store's forecast and evaluation summaries are fleet-wide too
-    # (published once for every agency, not once per agency) -- same scoping
-    # as weather, but its own gate rather than run_weather's: an operator who
-    # asked to skip the weather fetch hasn't said anything about the ML store.
+    # The ML store's documents are fleet-wide too (one listing reads every
+    # agency's) -- same scoping as weather, but its own gate rather than
+    # run_weather's: an operator who asked to skip the weather fetch hasn't
+    # said anything about the ML store.
     if kind == "ingest" and requested_agency_ids is None:
         _run_ml_forecast_ingest(db_url)
         # Fleet-wide like the two passes above, and it fetches the agencies'
@@ -564,7 +530,8 @@ def _run_agency_update(
 
 def _ingest_ml_forecast(conn: Any) -> None:
     """Best-effort: the ML store's latest forecast, its weekly evaluation
-    summaries and its weekly live scorecards, each step guarded on its own, so a
+    summaries, its weekly live scorecards and the daily GTFS-RT validator
+    summaries, each step guarded on its own, so a
     missing/misconfigured bucket, a transient R2 failure, or one step failing
     never aborts the others or the surrounding ingest+analyze sweep. Each ingest already logs
     and swallow their own read/write failures; these guards cover building
@@ -589,13 +556,17 @@ def _ingest_ml_forecast(conn: Any) -> None:
         _log.info("cron: ml_live_evaluation ingest upserted %d scorecard(s)", ingest_live_evaluations(conn, s3, bucket))
     except Exception:
         _log.exception("cron: ml_live_evaluation ingest failed")
+    try:
+        _log.info("cron: rt_validation ingest upserted %d summary(ies)", ingest_validation(conn, s3, bucket))
+    except Exception:
+        _log.exception("cron: rt_validation ingest failed")
 
 
 def _run_ml_forecast_ingest(db_url: str) -> None:
     """Reads the ML workbench's latest published forecast, its weekly
-    evaluation summaries and its weekly live scorecards from R2 into
-    `agg_route_forecast_ml`, `ml_evaluations` and `ml_live_evaluations`, on its
-    own connection opened
+    evaluation summaries, its weekly live scorecards and the daily GTFS-RT
+    validator summaries from R2 into `agg_route_forecast_ml`, `ml_evaluations`,
+    `ml_live_evaluations` and `rt_validation_daily`, on its own connection opened
     only after `_run_ingest_and_analyze`'s advisory lock has already been
     released -- same reasoning as `_run_weather_ingest`'s own dedicated
     connection just below: a slow R2 round trip must not extend the

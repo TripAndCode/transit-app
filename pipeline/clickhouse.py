@@ -9,18 +9,22 @@ here are where every reader learns which table a service day lives in.
 import os
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
-from pipeline.service_day import service_date_of
+from pipeline.service_day import FILING_REACH_HOURS, filed_date_ch, service_date_of
 
 _JST = ZoneInfo("Asia/Tokyo")
 
 UPDATES_TABLE = "updates"
 LIVE_TABLE = "updates_live"
 _OBSERVATION_TABLES = frozenset({UPDATES_TABLE, LIVE_TABLE})
+
+#: The longest one read of the observations outside analyze may run: the API's
+#: ClickHouse client caps each query at it (api.clickhouse.get_ch_client).
+LIVE_READ_MAX_EXECUTION_SECONDS = 30
 
 
 # ClickHouse's TIMEOUT_EXCEEDED server error code.
@@ -34,6 +38,20 @@ def is_query_timeout(exc: BaseException) -> bool:
     the question" rather than "retry later".
     """
     return getattr(exc, "code", None) == CH_TIMEOUT_EXCEEDED
+
+
+# ClickHouse's TOO_MANY_ROWS_OR_BYTES server error code.
+CH_TOO_MANY_ROWS_OR_BYTES = 396
+
+
+def is_result_overflow(exc: BaseException) -> bool:
+    """Whether a ClickHouse error is a result past the client's ``max_result_rows``.
+
+    ``api.clickhouse.get_ch_client`` raises rather than truncating there, so a
+    caller that can answer from a smaller query can catch this one error and
+    try that instead.
+    """
+    return getattr(exc, "code", None) == CH_TOO_MANY_ROWS_OR_BYTES
 
 
 def checked_table(table: str) -> str:
@@ -104,6 +122,21 @@ UPDATE_COLUMNS = [
     "scheduled_sec",
     "static_version_id",
 ]
+
+
+# GTFS-RT's TripDescriptor.ScheduleRelationship CANCELED and
+# StopTimeUpdate.ScheduleRelationship SKIPPED, as schedule_relationship_trip
+# and schedule_relationship_stop store them.
+TRIP_CANCELED = 3
+STOP_SKIPPED = 1
+
+# The stop_sequence of a trip-level row: the one row a CANCELED trip that
+# stores no stop row gets when no stop of its timetable is still to come, so
+# the cancellation is kept (pipeline.strategies.static_join.parse_feed). No
+# stop row carries it (pipeline.strategies._pb._uint16), and the row has no
+# stop, delay or schedule, so no reader of departures or stop visits takes it
+# for one.
+TRIP_LEVEL_STOP_SEQUENCE = 0xFFFF
 
 
 def ch_conn_kwargs() -> dict:
@@ -234,7 +267,17 @@ def distinct_file_names(client, agency_id: int, since: date | None = None) -> se
 # `live_<timestamp>`. Promotion copies those names into `updates` unchanged,
 # while archive ingest writes `<YYYYMMDD>/<member>`. The prefix is therefore
 # the source of a row in `updates`.
-LIVE_SOURCED = "(startsWith(file_name, 'oracle/') OR startsWith(file_name, 'live_'))"
+COLLECTOR_PUSHED = "startsWith(file_name, 'oracle/')"
+LIVE_SOURCED = f"({COLLECTOR_PUSHED} OR startsWith(file_name, 'live_'))"
+
+
+def majority_source(archive_rows: int | None, live_rows: int | None) -> Literal["archive", "live"] | None:
+    """The source most of a day's observations came from, or None when none
+    is recorded. A tie reads live, the sparser source, so a day is called
+    archive only when archive rows outnumber live ones."""
+    if archive_rows is None or live_rows is None or archive_rows + live_rows == 0:
+        return None
+    return "archive" if archive_rows > live_rows else "live"
 
 
 def days_with_source(client, agency_id: int, days: Iterable[date], *, live_sourced: bool) -> set[date]:
@@ -287,8 +330,8 @@ def max_captured_at(client, agency_id: int) -> datetime | None:
     `updates` holds only closed JST days; the current day lives in
     `updates_live`, so this never reflects today and is not a feed-liveness
     probe (the async twin in `api.clickhouse` takes a `table` argument for
-    that). For "what's the latest COMPLETED day" checks, use
-    `max_captured_at_before` instead — do not add a same-day exclusion here,
+    that). For "what's the newest COMPLETED day" checks, use
+    `newest_filed_date_before` instead — do not add a same-day exclusion here,
     it would silently change this function's meaning for existing callers.
 
     Uses `ORDER BY captured_at DESC LIMIT 1` rather than `maxOrNull(captured_at)`:
@@ -309,28 +352,25 @@ def max_captured_at(client, agency_id: int) -> datetime | None:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def max_captured_at_before(client, agency_id: int, before: datetime) -> datetime | None:
-    """Latest `captured_at` strictly before `before` (a tz-aware UTC cutoff).
+# The newest service date a stop event of the agency's rows captured before
+# {before} is filed under (pipeline.service_day.filed_date_ch): the day the
+# aggregates' newest date answers to. Read over the rows captured within
+# FILING_REACH_HOURS of the newest such capture, the scalar subquery, which
+# the sort index serves and the range then prunes on. Every reading filed
+# under a later day than the newest capture's own lies in that reach; one
+# filed under that day from further back, while every reading in the reach
+# files under the day before, reads a day early, which can only call stale
+# aggregates current, never current ones stale. NULL with no row before it.
+NEWEST_FILED_DATE_BEFORE_SQL = (
+    f"SELECT maxOrNull({filed_date_ch('u.')}) FROM updates AS u "
+    "WHERE u.agency_id = {agency_id:UInt16} AND u.captured_at < {before:DateTime64} AND u.captured_at >= ("
+    "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64} "
+    f"ORDER BY captured_at DESC LIMIT 1) - INTERVAL {FILING_REACH_HOURS} HOUR"
+)
 
-    For "what's the latest COMPLETED day" freshness checks: filtering rows
-    BEFORE taking the max means the result already IS the latest completed
-    day's max, with no further accept/reject needed by the caller — unlike
-    calling `max_captured_at` and then checking `< before` in Python, which
-    would incorrectly return "no completed day" whenever a later (e.g.
-    today's, still-ingesting) row also exists, instead of falling back to
-    the latest prior completed day.
 
-    Same `ORDER BY captured_at DESC LIMIT 1` index-served form as
-    `max_captured_at` (see its docstring) instead of `maxOrNull` — the
-    `captured_at < {before}` predicate composes fine with the sort-key scan.
-    """
-    result = client.query(
-        "SELECT captured_at FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64} "
-        "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id, "before": before},
-    )
-    if not result.result_rows:
-        return None
-    value = result.result_rows[0][0]
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+def newest_filed_date_before(client, agency_id: int, before: datetime) -> date | None:
+    """The newest service date the agency's rows captured before *before* (a
+    tz-aware UTC cutoff) file a stop event under (NEWEST_FILED_DATE_BEFORE_SQL)."""
+    rows = client.query(NEWEST_FILED_DATE_BEFORE_SQL, parameters={"agency_id": agency_id, "before": before}).result_rows
+    return rows[0][0] if rows else None

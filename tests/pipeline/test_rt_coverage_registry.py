@@ -2,7 +2,7 @@
 
 Covers `rt_field_coverage_probes` end to end: what
 `pipeline.strategies.static_join.record_field_coverage_probe` writes, and
-what `rt_field_coverage_confirmed`/`rt_field_coverage_confirmed_agencies`
+what `rt_field_coverage_confirmed_agencies`
 then trust, plus what `invalidate_field_coverage_probes` withdraws. The
 point of the registry is that verifying a feed is a probe run rather than a
 code change, so these tests drive it exclusively through those public entry
@@ -17,9 +17,9 @@ from pipeline.strategies.static_join import (
     RT_COVERAGE_FIELDS,
     invalidate_field_coverage_probes,
     record_field_coverage_probe,
-    rt_field_coverage_confirmed,
     rt_field_coverage_confirmed_agencies,
     rt_field_coverage_gap,
+    rt_field_coverage_states,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -48,7 +48,7 @@ async def test_unprobed_agency_is_not_confirmed(aconn, aagency_id):
     untrusted, so a newly onboarded feed can never inherit another
     agency's verified coverage just by sharing its wire shape."""
     await _set_strategy(aconn, aagency_id, "static_join")
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert aagency_id not in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
 
 async def test_recorded_probe_makes_an_agency_confirmed(aconn, aagency_id):
@@ -57,7 +57,7 @@ async def test_recorded_probe_makes_an_agency_confirmed(aconn, aagency_id):
     verdicts = await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin")
 
     assert verdicts == dict.fromkeys(RT_COVERAGE_FIELDS, True)
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is True
+    assert aagency_id in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
 
 async def test_recorded_probe_persists_provenance(aconn, aagency_id):
@@ -101,7 +101,7 @@ async def test_expired_verdict_is_not_trusted(aconn, aagency_id):
         "UPDATE rt_field_coverage_probes SET expires_at = now() - INTERVAL '1 day' WHERE agency_id = $1",
         aagency_id,
     )
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert aagency_id not in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
 
 async def test_non_expiring_verdict_stays_trusted(aconn, aagency_id):
@@ -114,7 +114,7 @@ async def test_non_expiring_verdict_stays_trusted(aconn, aagency_id):
         "SELECT expires_at FROM rt_field_coverage_probes WHERE agency_id = $1 LIMIT 1", aagency_id
     )
     assert row["expires_at"] is None
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is True
+    assert aagency_id in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
 
 async def test_refuted_field_blocks_the_whole_agency(aconn, aagency_id):
@@ -130,7 +130,7 @@ async def test_refuted_field_blocks_the_whole_agency(aconn, aagency_id):
 
     assert verdicts["stop_id"] is True
     assert verdicts["schedule_relationship_trip"] is False
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert aagency_id not in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
 
 async def test_re_probing_can_withdraw_trust(aconn, aagency_id):
@@ -138,10 +138,10 @@ async def test_re_probing_can_withdraw_trust(aconn, aagency_id):
     code change and no leftover row from the earlier affirmative run."""
     await _set_strategy(aconn, aagency_id, "static_join")
     await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin")
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is True
+    assert aagency_id in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
     await record_field_coverage_probe(aconn, aagency_id, _cov(stop_id_coverage=0.0), "https://feed.example/tu.bin")
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert aagency_id not in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
     count = await aconn.fetchval("SELECT count(*) FROM rt_field_coverage_probes WHERE agency_id = $1", aagency_id)
     assert count == len(RT_COVERAGE_FIELDS)
 
@@ -155,7 +155,7 @@ async def test_partial_verdict_is_not_enough(aconn, aagency_id):
         "DELETE FROM rt_field_coverage_probes WHERE agency_id = $1 AND field_name = 'arr_delay'",
         aagency_id,
     )
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert aagency_id not in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
 
 async def test_ingest_strategy_half_of_the_gate_still_applies(aconn, aagency_id):
@@ -164,7 +164,7 @@ async def test_ingest_strategy_half_of_the_gate_still_applies(aconn, aagency_id)
     row says."""
     await _set_strategy(aconn, aagency_id, "aomori_regex")
     await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin")
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert aagency_id not in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
 
 async def test_empty_capture_is_refused_rather_than_recorded(aconn, aagency_id):
@@ -187,12 +187,12 @@ async def test_invalidation_closes_the_gate_again(aconn, aagency_id):
     the old one's coverage."""
     await _set_strategy(aconn, aagency_id, "static_join")
     await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin", ttl_days=None)
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is True
+    assert aagency_id in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
 
     dropped = await invalidate_field_coverage_probes(aconn, aagency_id)
 
     assert dropped == len(RT_COVERAGE_FIELDS)
-    assert await rt_field_coverage_confirmed(aagency_id, aconn) is False
+    assert aagency_id not in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id])
     assert await invalidate_field_coverage_probes(aconn, aagency_id) == 0
 
 
@@ -247,7 +247,7 @@ async def test_gap_names_the_reason_exactly_when_the_gate_is_closed(
 
     gap = await rt_field_coverage_gap(aagency_id, aconn)
 
-    assert (gap is None) is await rt_field_coverage_confirmed(aagency_id, aconn)
+    assert (gap is None) is (aagency_id in await rt_field_coverage_confirmed_agencies(aconn, [aagency_id]))
     assert (gap.reason if gap else None) == reason
     if reason in ("probe_expired", "probe_refuted"):
         probed_day = await aconn.fetchval(
@@ -257,3 +257,23 @@ async def test_gap_names_the_reason_exactly_when_the_gate_is_closed(
         assert gap.last_checked == probed_day
     elif gap is not None:
         assert gap.last_checked is None
+
+
+async def test_states_are_read_for_many_agencies_at_once_and_judge_as_the_gate_does(aconn, aagency_id):
+    """One batch read serves every agency asked for, each judged by the same
+    rule the per-agency gap reader applies; an id with no agency is left out."""
+    await _set_strategy(aconn, aagency_id, "static_join")
+    await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin")
+    other = await aconn.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+        "VALUES ('Other', 'http://other.example/rt', 'aomori_regex') RETURNING agency_id"
+    )
+
+    states = await rt_field_coverage_states(aconn, [aagency_id, other, 999_999])
+
+    assert set(states) == {aagency_id, other}
+    assert {f["field_name"] for f in states[aagency_id].probes} == set(RT_COVERAGE_FIELDS)
+    assert states[aagency_id].gap() is None
+    assert states[other].probes == []
+    assert states[other].gap().reason == "feed_unsupported"
+    assert await rt_field_coverage_states(aconn, []) == {}

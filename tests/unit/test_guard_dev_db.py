@@ -75,7 +75,7 @@ BLOCKED = [
     pytest.param("make db", id="make-db"),
     pytest.param("make analyze-all", id="make-analyze-all"),
     pytest.param("make seed-agencies", id="make-seed-agencies"),
-    pytest.param("make lint && make build-rag-index", id="make-second-command-build-rag-index"),
+    pytest.param("make lint && make prune-query-log", id="make-second-command-prune-query-log"),
     # A quoted script, a renamed make, and the CLI run as a module.
     pytest.param('bash -c "make prune-query-log"', id="make-target-inside-bash-c"),
     pytest.param("gmake prune-query-log", id="gmake-prune-query-log"),
@@ -362,6 +362,20 @@ BLOCKED = [
         "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test poetry run python gtfs_pipeline.py "
         "analyze_all",
         id="cli-analyze-all-postgres-redirected-only",
+    ),
+    # Loading a timetable archives the outgoing one and records the incoming
+    # one's span in ClickHouse (pipeline.static_archive).
+    *[
+        pytest.param(
+            f"DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test poetry run python gtfs_pipeline.py "
+            f"{sub}",
+            id=f"cli-{sub}-postgres-redirected-only",
+        )
+        for sub in ("refresh-static", "load_static x.zip", "add_agency --feed-url u --static-url s")
+    ],
+    pytest.param(
+        "make load_static STATIC_PATH=x.zip DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test",
+        id="make-load-static-postgres-redirected-only",
     ),
     # Postgres CLIs that mutate without ever spelling a SQL keyword.
     pytest.param("dropdb -h transit-pg transit", id="dropdb"),
@@ -676,6 +690,24 @@ ALLOWED = [
     pytest.param(
         "make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124",
         id="analyze-all-pointed-at-both-test-stores",
+    ),
+    pytest.param(
+        "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 poetry run python "
+        "gtfs_pipeline.py refresh-static",
+        id="cli-refresh-static-pointed-at-both-test-stores",
+    ),
+    *[
+        pytest.param(
+            "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 poetry run "
+            f"python gtfs_pipeline.py {sub}",
+            id=f"cli-{sub.split()[0]}-pointed-at-both-test-stores",
+        )
+        for sub in ("load_static x.zip", "add_agency --feed-url u --static-url s")
+    ],
+    pytest.param(
+        "make load_static STATIC_PATH=x.zip DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
+        id="make-load-static-pointed-at-both-test-stores",
     ),
     pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
     pytest.param(

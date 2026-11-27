@@ -1,7 +1,7 @@
 """FastAPI application bootstrap.
 
-Wires routers, middleware, lifespan (asyncpg pool + LLM provider validation), CORS,
-and an optional SPA static mount. In production the multistage Dockerfile copies
+Wires routers, middleware, lifespan (asyncpg pool + a warning when no LLM provider
+is configured), CORS, and an optional SPA static mount. In production the multistage Dockerfile copies
 the built React frontend into ``api/static/``; this module then mounts the SPA
 at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
 fetches keep getting structured errors instead of HTML index pages.
@@ -23,32 +23,32 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
 from api import activity, retention
 from api.aggregate_errors import aggregate_not_ready_handler
 from api.clickhouse import get_ch_client
 from api.logging_config import configure as configure_logging
-from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.forwarded import ForwardedClientMiddleware, forwarded_hops
 from api.middleware.locale import LocaleMiddleware
-from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_active
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
+from api.middleware.usage import UsageCountMiddleware
 from api.query_timeout import clickhouse_error_handler
+from api.range_not_retained import range_not_retained_handler, recheck_live_reads
 from api.routers.admin import router as admin_router
 from api.routers.admin_agencies import router as admin_agencies_router
 from api.routers.admin_ask import router as admin_ask_router
 from api.routers.admin_flags import router as admin_flags_router
+from api.routers.admin_transfers import router as admin_transfers_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
-from api.routers.ask_dashboard import router as ask_dashboard_router
-from api.routers.auth import local_admin_enabled, seed_local_admin
 from api.routers.auth import router as auth_router
+from api.routers.auth import seed_local_admin
 from api.routers.conversations import router as conversations_router
-from api.routers.copilot import router as copilot_router
 from api.routers.debug import router as debug_router
 from api.routers.internal import collector_router
 from api.routers.internal import router as internal_router
@@ -57,26 +57,31 @@ from api.routers.me import router as me_router
 from api.routers.ml import router as ml_router
 from api.routers.network import router as network_router
 from api.routers.overview import router as overview_router
+from api.routers.replay import router as replay_router
+from api.routers.report_cards import router as report_cards_router
 from api.routers.reports import router as reports_router
 from api.routers.scope_summary import router as scope_summary_router
+from api.routers.segments import router as segments_router
+from api.routers.snapshots import admin_router as admin_snapshots_router
+from api.routers.snapshots import router as snapshots_router
 from api.routers.static import router as static_router
+from api.routers.timetable_revisions import router as timetable_revisions_router
+from api.routers.transfers import router as transfers_router
 from api.security import cookie_secure
+from api.sso import DEV_SIGNING_KEY as _DEV_SIGNING_KEY
 from api.sso import SSO_ENV as _AUTH_ENV
+from api.sso import configured_signing_key, local_admin_enabled, session_signing_key, sign_in_enabled
 from api.sso import sso_status as auth_status
 from pipeline.db import DEFAULT_DATABASE_URL
-from pipeline.flags import flag
-from pipeline.query.llm_client import ProviderConfig
+from pipeline.flags import aflag, flag
+from pipeline.query.llm_client import llm_available
+from pipeline.retained_reads import RangeNotRetained
 from pipeline.runs import reap_abandoned_runs_best_effort
 
 _log = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-
-# The placeholder signing key used when SESSION_SIGNING_KEY is unset. Safe for
-# local/anonymous boots; refused at startup once SSO is enabled (see
-# _validate_session_signing_key) so a forgeable-cookie config can't reach prod.
-_DEV_SIGNING_KEY = "dev-only-not-secret"
 
 # Path prefixes the SPA fallback must NOT swallow. An unknown URL under one
 # of these prefixes returns a structured JSON 404 instead of the SPA's
@@ -113,21 +118,30 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
         )
 
 
-def _warn_if_login_gate_inactive(sso_enabled: bool) -> None:
-    """A deployment that asks for sign-in but has no SSO configured is open to
-    everyone; say so at boot rather than let it pass silently."""
-    if not sso_enabled and flag("login_required", True):
-        _log.warning("login_required is on but SSO is not configured: the API is open to signed-out callers")
+# `openssl rand -hex 32` yields 64 characters; anything under 32 is a
+# hand-typed value worth a warning, though refusing it would strand
+# deployments that already run on one.
+_MIN_SIGNING_KEY_LENGTH = 32
 
 
 def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
-    """Refuse to boot an auth-enabled deployment that still uses the dev signing
-    key — every session/OAuth cookie would be forgeable. No-op when auth is off
-    (anonymous-only mode never mints those cookies)."""
-    if enabled and signing_key == _DEV_SIGNING_KEY:
+    """Refuse to boot with any sign-in method on (OAuth or the break-glass local
+    admin) unless SESSION_SIGNING_KEY is a real secret. A missing key falls back
+    to the public dev key, which every cookie signer and keyed digest would then
+    use, so anyone could compute them. Warns about a short key without refusing
+    it. No-op when no sign-in method is on."""
+    if not enabled:
+        return
+    if signing_key is None or signing_key == _DEV_SIGNING_KEY:
         raise RuntimeError(
-            "SESSION_SIGNING_KEY is the dev default in an auth-enabled deployment. "
-            "Set a real secret (e.g. `openssl rand -hex 32`)."
+            "SESSION_SIGNING_KEY is missing or the public dev default while a sign-in method "
+            "(OAuth or DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD) is enabled. "
+            "Generate one with `openssl rand -hex 32` and set it."
+        )
+    if len(signing_key) < _MIN_SIGNING_KEY_LENGTH:
+        _log.warning(
+            "SESSION_SIGNING_KEY is shorter than %d characters; replace it with `openssl rand -hex 32`.",
+            _MIN_SIGNING_KEY_LENGTH,
         )
 
 
@@ -162,21 +176,6 @@ def _require_docs_enabled() -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
-def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
-    """Refuse to boot with zero usable LLM providers configured.
-
-    ``providers`` is the resolved ladder from
-    :func:`pipeline.query.llm_client._load_providers` — already filtered to
-    entries with a real API key. An empty ladder means the Ask tab has no
-    provider to fall back to at all.
-    """
-    if not providers:
-        raise RuntimeError(
-            "No usable LLM provider configured. Set at least one provider's "
-            "API key (e.g. GEMINI_API_KEY) — see .env.example."
-        )
-
-
 async def _close_startup_resources(app: FastAPI) -> None:
     """Close the ClickHouse client and the connection pool, tolerating either
     being absent or already failed. Shared by the startup-failure path and
@@ -199,21 +198,23 @@ async def _close_startup_resources(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
 
-    Auth env is optional in aggregate: all five vars present → SSO on; none
-    present → SSO off (anonymous-only mode, ``/api/auth/*`` returns 503). A
-    partial set is rejected as a misconfiguration since a half-wired OAuth
-    flow would leak state cookies without ever completing.
+    OAuth env is optional in aggregate: all four client vars present → SSO on;
+    none present → SSO off (the OAuth routes return 503). A partial set is
+    rejected as a misconfiguration since a half-wired OAuth flow would leak
+    state cookies without ever completing. Any sign-in method, SSO or the
+    local admin, also requires a real ``SESSION_SIGNING_KEY``.
     """
     from pipeline.flags import warm as warm_flags
-    from pipeline.query.llm_client import _load_providers
 
-    _validate_llm_providers(_load_providers())
-    enabled, missing = auth_status()
-    if not enabled and len(missing) != len(_AUTH_ENV):
+    if not llm_available():
+        _log.warning("No LLM provider key configured; LLM-backed Ask features are disabled")
+    sso_enabled, missing = auth_status()
+    if not sso_enabled and len(missing) != len(_AUTH_ENV):
         raise RuntimeError(
-            f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
+            f"Partial OAuth env: missing {', '.join(missing)}. "
+            "Set all four OAuth client variables or none — half-wired OAuth is unsafe."
         )
-    _validate_session_signing_key(enabled, os.environ.get("SESSION_SIGNING_KEY"))
+    _validate_session_signing_key(sign_in_enabled(), configured_signing_key())
     # max_size=20 (asyncpg default 10): a cold overview request holds at most
     # OVERVIEW_FANOUT_LIMIT connections at once. It takes no request
     # connection; each fanned-out stage acquires its own under that bound, and
@@ -233,7 +234,6 @@ async def lifespan(app: FastAPI):
         # that would otherwise land on the event loop -- inside whichever
         # request happened to touch a flag first.
         await asyncio.to_thread(warm_flags)
-        _warn_if_login_gate_inactive(enabled)
         # Non-fatal: ClickHouse only backs a subset of routes (live and
         # per-day reads, narrowed-filter report fallbacks, and the admin
         # board/ops freshness probe, which degrades without it). Postgres-only
@@ -274,11 +274,6 @@ async def lifespan(app: FastAPI):
         # are both set. See api.routers.auth.seed_local_admin.
         await seed_local_admin(app.state.pool)
 
-        from pipeline.query.embeddings import get_embedder
-
-        embedder = get_embedder()
-        if not embedder.available:
-            _log.warning("Embedder unavailable at startup — router degrades to LLM-only")
         activity.start(app)
         retention.start(app)
     except Exception:
@@ -311,6 +306,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    dependencies=[Depends(recheck_live_reads, scope="function")],
 )
 app.state.limiter = limiter
 # slowapi's handler is typed against its own exception class, not Starlette's
@@ -322,6 +318,9 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # A ClickHouse read that runs out its time budget answers a localized 504 the
 # client does not retry; any other ClickHouse error stays a 500.
 app.add_exception_handler(ClickHouseDatabaseError, clickhouse_error_handler)  # type: ignore[arg-type]
+# A live scan of `updates` over a range that starts before the agency's
+# retention floor answers a localized 422 naming the floor.
+app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. The add_middleware calls below, outermost
 # (runs first on a request) to innermost (closest to the routers):
@@ -330,24 +329,29 @@ app.add_exception_handler(ClickHouseDatabaseError, clickhouse_error_handler)  # 
 #   CORSMiddleware                 (cross-origin SSO headers)
 #   StarletteSessionMiddleware     (Authlib needs request.session)
 #   SessionMiddleware              (loads request.state.user from sid cookie)
-#   APIKeyMiddleware               (loads request.state.tier from X-API-Key)
-#   LoginRequiredMiddleware        (401s a signed-out caller while sign-in is required)
+#   UsageCountMiddleware           (counts each finished /api/ request, signed in or out)
 #   LocaleMiddleware               (parses Accept-Language → request.state.locale)
 #   CancelGETOnDisconnectMiddleware (cancels GET handler tasks when the client
 #                                    disconnects, so aborted SPA fetches also
 #                                    cancel the asyncpg query instead of letting
 #                                    heavy scans run to completion; GET-only by
 #                                    design — see api/middleware/cancel_on_disconnect.py)
+#   GZipMiddleware                 (compresses responses for clients that accept gzip)
 # That means require_user/require_admin see request.state.user before any
 # router runs, which is what we want.
+# Innermost, next to the routers, so it sees each response whole: the outer
+# middlewares stream the body, and a streamed body is compressed whatever its
+# size. Map and report payloads run to megabytes; small ones aren't worth the
+# CPU, and Starlette leaves event streams alone. Level 6: most of level 9's
+# saving, at a fraction of the event-loop time small bodies are compressed in.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
-app.add_middleware(LoginRequiredMiddleware)
-app.add_middleware(APIKeyMiddleware)
+app.add_middleware(UsageCountMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
     StarletteSessionMiddleware,
-    secret_key=os.environ.get("SESSION_SIGNING_KEY", _DEV_SIGNING_KEY),
+    secret_key=session_signing_key(),
     session_cookie="auth_tmp",
     max_age=600,
     # Secure when the deployment is HTTPS (PUBLIC_BASE_URL). TLS terminates at
@@ -366,7 +370,7 @@ app.add_middleware(
     allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_headers=["Content-Type"],
 )
 # Sees the final status after every inner middleware ran. Assigns
 # request_id, times the request, emits one INFO log to 'api.access' per
@@ -380,21 +384,27 @@ app.include_router(admin_router)
 app.include_router(admin_agencies_router)
 app.include_router(admin_ask_router)
 app.include_router(admin_flags_router)
+app.include_router(admin_transfers_router)
+app.include_router(admin_snapshots_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
-app.include_router(ask_dashboard_router)
 app.include_router(auth_router)
 app.include_router(conversations_router)
-app.include_router(copilot_router)
 app.include_router(debug_router)
 app.include_router(map_router)
 app.include_router(ml_router)
 app.include_router(me_router)
 app.include_router(network_router)
 app.include_router(overview_router)
+app.include_router(replay_router)
 app.include_router(reports_router)
 app.include_router(scope_summary_router)
+app.include_router(snapshots_router)
 app.include_router(static_router)
+app.include_router(timetable_revisions_router)
+app.include_router(transfers_router)
+app.include_router(segments_router)
+app.include_router(report_cards_router)
 app.include_router(internal_router)
 app.include_router(collector_router)
 
@@ -421,7 +431,20 @@ class HealthStatus(BaseModel):
 class ClientConfig(BaseModel):
     auth_enabled: bool
     local_admin_enabled: bool
-    login_required: bool
+    feedback_url: str | None
+    llm_enabled: bool
+    weather_enabled: bool
+
+
+# The SPA renders the feedback address as a link, so only these schemes leave the API
+# (compared case-insensitively, as URI schemes are).
+_FEEDBACK_SCHEMES = ("https://", "mailto:")
+
+
+def feedback_url() -> str | None:
+    """The deployment's feedback address (``FEEDBACK_URL``), or None when it names none the SPA should link to."""
+    url = os.environ.get("FEEDBACK_URL", "").strip()
+    return url if url.lower().startswith(_FEEDBACK_SCHEMES) else None
 
 
 @app.get("/health", response_model=HealthStatus)
@@ -433,13 +456,20 @@ async def health():
 @app.get("/api/config", response_model=ClientConfig)
 async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
-    show/hide the break-glass local-admin password form, and send signed-out
-    visitors to sign in while ``login_required`` says the API refuses them."""
+    show/hide the break-glass local-admin password form, and link to the
+    deployment's feedback address when it has one. ``llm_enabled`` is
+    False when no LLM provider is usable or the operator's kill switch is off, so
+    the SPA hides LLM-only affordances instead of offering ones that cannot answer.
+    ``weather_enabled`` carries the one feature flag a screen must know before it
+    fetches: with it off, Why mounts no weather panel and requests nothing. Only
+    UI-gating flags are published here."""
     enabled, _ = auth_status()
     return {
         "auth_enabled": enabled,
         "local_admin_enabled": local_admin_enabled(),
-        "login_required": await enforcement_active(),
+        "feedback_url": feedback_url(),
+        "llm_enabled": llm_available() and await aflag("ask_llm_enabled"),
+        "weather_enabled": await aflag("weather_ingest_enabled"),
     }
 
 

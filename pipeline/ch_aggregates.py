@@ -22,7 +22,10 @@ them into one partition per agency, which `swap_whole_history` replaces whole.
 
 Every copied table's value equals what the Postgres builder it replaced produced,
 column for column; tests/pipeline/ch_parity.py keeps those builders as the parity
-oracle.
+oracle. The one departure from them is on purpose: a departure scheduled at
+24:00:00 or later, which they left out of every hour and band, is filed under
+its hour of the service day and its wall-clock band (api.range.scheduled_hour_ch,
+api.range.time_band_ch).
 Means are rounded half away from zero from exact integer sums, which is what
 Postgres's ROUND(numeric) does; ClickHouse's round() on a float rounds half to
 even and is never used for them.
@@ -30,12 +33,12 @@ even and is never used for them.
 
 import logging
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Set
 from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timedelta
 from typing import NamedTuple
 
-from api.range import TIME_BAND_RANGES
+from api.range import scheduled_hour_ch, scheduled_sec_ch, time_band_ch
 from pipeline import static_archive
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
@@ -47,8 +50,8 @@ from pipeline.histogram import (
     N_BUCKETS,
     WIDTH,
 )
-from pipeline.service_day import service_date_ch, service_day_start_utc
-from pipeline.static_archive import ScheduleJoin
+from pipeline.service_day import filed_capture_span, service_date_ch, service_day_offset_ch
+from pipeline.static_archive import ScheduleJoin, Stamp, observation_rows
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +61,65 @@ def months_of(dates: Iterable[date]) -> list[int]:
     return sorted({d.year * 100 + d.month for d in dates})
 
 
-def version_names(ch, agency_id: int, where: str, params: dict) -> dict[str, int]:
-    """Each version name among the agency's `updates` rows matching *where* ('' for none), with its row count."""
+def version_names(
+    ch,
+    agency_id: int,
+    where: str,
+    params: dict,
+    join: ScheduleJoin | None = None,
+    stamp: Stamp = Stamp.INGESTED,
+    between: tuple[date, date] | None = None,
+) -> dict[str, int]:
+    """Each version name the agency's `updates` rows matching *where* are filed
+    under ('' for none), as *stamp* files them, with its row count. A *stamp*
+    other than INGESTED reads *join*'s versions in force over *between*, the
+    dates *where* can reach (`ScheduleJoin.force_params`). REFIT and FILED
+    file a row under the same name IN_FORCE does, so they are read as
+    IN_FORCE, without the schedule archive's join or the written rows."""
+    stamp = Stamp.IN_FORCE if stamp.refiles else stamp
     rows = ch.query(
-        f"SELECT ifNull(u.static_version_id, '') AS stem, count() FROM {UPDATES_TABLE} AS u "
-        f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where}) GROUP BY stem",
-        parameters={"agency_id": agency_id, **params},
+        "SELECT ifNull(u.static_version_id, '') AS stem, count() "
+        f"{observation_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', stamp)} GROUP BY stem",
+        parameters={"agency_id": agency_id, **params, **_filing_params(join, stamp, between=between)},
     ).result_rows
     return dict(rows)
+
+
+def _filing_params(
+    join: ScheduleJoin | None,
+    stamp: Stamp,
+    present: Iterable[str] | None = None,
+    between: tuple[date, date] | None = None,
+) -> dict:
+    if stamp is Stamp.INGESTED:
+        return {}
+    if join is None:
+        raise ValueError(f"reading rows {stamp.value} needs a ScheduleJoin")
+    return join.params(present, between)
+
+
+def month_span(month: int, days: list[date] | None = None) -> tuple[date, date]:
+    """The first and last service dates a read of *month*, or of only *days* within it, reaches."""
+    if days:
+        return min(days), max(days)
+    first, following = month_bounds(month)
+    return first, following - timedelta(days=1)
+
+
+def stamp_for(join: ScheduleJoin | None, refit: Set[date] | None, dates: Iterable[date]) -> Stamp:
+    """How a read of *dates* files its rows: INGESTED without versions in
+    force; IN_FORCE where *refit*, the dates whose rows need the archive's
+    schedule (static_archive.refit_dates), names none of them; FILED where
+    *join* names each one it does as written (ScheduleJoin.filed); else, or
+    with *refit* unknown (None), REFIT."""
+    if join is None or not join.force:
+        return Stamp.INGESTED
+    if refit is None:
+        return Stamp.REFIT
+    refiled = {day for day in dates if day in refit}
+    if not refiled:
+        return Stamp.IN_FORCE
+    return Stamp.FILED if refiled <= join.filed_dates() else Stamp.REFIT
 
 
 def month_bounds(month: int) -> tuple[date, date]:
@@ -75,17 +129,22 @@ def month_bounds(month: int) -> tuple[date, date]:
 
 
 def month_where(month: int) -> tuple[str, dict]:
-    """A predicate selecting the `updates` rows whose service date falls in *month*.
+    """A predicate selecting the `updates` rows filed under a service date of
+    *month* (`static_archive.FILED_DATE_SQL`).
 
-    A range on the stored instant rather than a test of the service date, so the
-    (agency_id, captured_at) sort key prunes the scan to the month. The bounds
-    bind as untyped DateTime64: clickhouse-connect renders an aware datetime in
-    the server's timezone, which is the zone an untyped value is read in.
+    With a range on the stored instant, the span those rows are captured in
+    (`filed_capture_span`), so the (agency_id, captured_at) sort key prunes the
+    scan to the month. The bounds bind as untyped DateTime64: clickhouse-connect
+    renders an aware datetime in the server's timezone, which is the zone an
+    untyped value is read in.
     """
     first, following = month_bounds(month)
+    last = following - timedelta(days=1)
+    start, end = filed_capture_span(first, last)
     return (
-        "u.captured_at >= {month_start:DateTime64} AND u.captured_at < {month_end:DateTime64}",
-        {"month_start": service_day_start_utc(first), "month_end": service_day_start_utc(following)},
+        "u.captured_at >= {month_start:DateTime64} AND u.captured_at < {month_end:DateTime64} "
+        f"AND {static_archive.FILED_DATE_SQL} BETWEEN {{month_first:Date}} AND {{month_last:Date}}",
+        {"month_start": start, "month_end": end, "month_first": first, "month_last": last},
     )
 
 
@@ -98,18 +157,42 @@ def _scope_where(month: int, scopes: Iterable[list[date] | None]) -> tuple[str, 
 
 
 def days_where(days: list[date]) -> tuple[str, dict]:
-    """A predicate selecting the `updates` rows whose service date is one of *days*.
+    """A predicate selecting the `updates` rows filed under one of *days*.
 
-    Ranges on the stored instant, for the reason `month_where` gives.
+    With ranges on the stored instant, one per run of consecutive days, for
+    the reason `month_where` gives. A single run, such as every date from a
+    retention floor on, tests the filed date against its two ends rather
+    than looking each row up in the list.
     """
-    clauses, params = [], {}
-    for i, day in enumerate(days):
+    runs = _runs(days)
+    if not runs:
+        return "0", {}
+    clauses: list[str] = []
+    params: dict = {}
+    for i, (first, last) in enumerate(runs):
         clauses.append(
             f"(u.captured_at >= {{day_start_{i}:DateTime64}} AND u.captured_at < {{day_end_{i}:DateTime64}})"
         )
-        params[f"day_start_{i}"] = service_day_start_utc(day)
-        params[f"day_end_{i}"] = service_day_start_utc(day + timedelta(days=1))
-    return " OR ".join(clauses), params
+        params[f"day_start_{i}"], params[f"day_end_{i}"] = filed_capture_span(first, last)
+    if len(runs) == 1:
+        params["run_first"], params["run_last"] = runs[0]
+        return (
+            f"{clauses[0]} AND {static_archive.FILED_DATE_SQL} BETWEEN {{run_first:Date}} AND {{run_last:Date}}",
+            params,
+        )
+    params["filed_days"] = sorted(set(days))
+    return f"({' OR '.join(clauses)}) AND has({{filed_days:Array(Date)}}, {static_archive.FILED_DATE_SQL})", params
+
+
+def _runs(days: Iterable[date]) -> list[tuple[date, date]]:
+    """*days* as runs of consecutive dates, each its first and last."""
+    runs: list[tuple[date, date]] = []
+    for day in sorted(set(days)):
+        if runs and runs[-1][1] + timedelta(days=1) == day:
+            runs[-1] = (runs[-1][0], day)
+        else:
+            runs.append((day, day))
+    return runs
 
 
 def _round_half_away(numerator: str, denominator: str, scale: int) -> str:
@@ -194,11 +277,10 @@ def _route_daily_dist(source: str) -> str:
     """
 
 
-# scheduled_time is a time of day written as hours, minutes and optionally
-# seconds, colon-separated, the hours with or without a leading zero, and never
-# past 23 (see pipeline/strategies/_time.py). Its field before the first colon is
-# the hour Postgres's EXTRACT(HOUR FROM scheduled_time) gave.
-_HOUR = "toInt16(splitByChar(':', assumeNotNull(d.scheduled_time))[1])"
+# The departure's hour on its service day's clock (api.range.scheduled_hour_ch):
+# a departure at 24:10:00 is hour 24 of the service day it belongs to.
+_SEC = scheduled_sec_ch("d.")
+_HOUR = f"toInt16(assumeNotNull({scheduled_hour_ch('d.')}))"
 
 
 def _hour_daily(source: str) -> str:
@@ -209,21 +291,10 @@ def _hour_daily(source: str) -> str:
         FROM (
             SELECT d.date AS date, {_HOUR} AS hour, sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
             FROM ({source}) AS d
-            WHERE d.scheduled_time IS NOT NULL
+            WHERE {_SEC} IS NOT NULL
             GROUP BY d.date, {_HOUR}
         )
     """
-
-
-# scheduled_time's seconds past midnight, from the same fields _HOUR reads: hours,
-# minutes and optional seconds. NULL when there is no scheduled time. The value
-# Postgres's `time` cast of the string takes, so two spellings of one time are one key.
-_SCHEDULED_SEC = (
-    "if(d.scheduled_time IS NULL, NULL, "
-    "toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[1]) * 3600 "
-    "+ toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[2]) * 60 "
-    "+ toInt32OrZero(splitByChar(':', assumeNotNull(d.scheduled_time))[3]))"
-)
 
 
 def _route_delay_counts(source: str) -> str:
@@ -235,7 +306,7 @@ def _route_delay_counts(source: str) -> str:
                dep_delay, toInt32(n) AS samples, toInt64(dep_delay) * toInt64(n) AS sum_delay_sec
         FROM (
             SELECT d.date AS date, assumeNotNull(d.route_code) AS route_code,
-                   assumeNotNull(d.service_type) AS service_type, {_SCHEDULED_SEC} AS scheduled_sec,
+                   assumeNotNull(d.service_type) AS service_type, {_SEC} AS scheduled_sec,
                    assumeNotNull(d.dep_delay) AS dep_delay, count() AS n
             FROM ({source}) AS d
             WHERE d.route_code IS NOT NULL AND d.service_type IS NOT NULL
@@ -244,21 +315,27 @@ def _route_delay_counts(source: str) -> str:
     """
 
 
-def _clock_sec(hhmm: str) -> int:
-    hours, minutes = hhmm.split(":")
-    return int(hours) * 3600 + int(minutes) * 60
+# The band of the departure's time on the wall clock (api.range.time_band_ch),
+# 'none' for no scheduled time.
+_TIME_BAND = time_band_ch("d.")
 
 
-# time_band_case_sql on the scheduled time's seconds: the first range holding it,
-# 'none' for no scheduled time or none of them.
-_TIME_BAND = (
-    f"multiIf({_SCHEDULED_SEC} IS NULL, 'none', "
-    + ", ".join(
-        f"{_SCHEDULED_SEC} >= {_clock_sec(start)} AND {_SCHEDULED_SEC} < {_clock_sec(end)}, '{band}'"
-        for band, (start, end) in TIME_BAND_RANGES.items()
-    )
-    + ", 'none')"
-)
+def _route_band_daily(source: str) -> str:
+    # Unlike the route tables above, a departure with no route is kept, under
+    # '': a time-band Pulse counts it in every figure but its route lists. The
+    # GROUP BY names the same ifNull, so NULL and '' never split a key.
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, date, route_code, time_band,
+               toInt32(n) AS samples, s AS sum_delay_sec, late AS sum_late_sec
+        FROM (
+            SELECT d.date AS date, ifNull(d.route_code, '') AS route_code, {_TIME_BAND} AS time_band,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n,
+                   sum(greatest(assumeNotNull(d.dep_delay), 0)) AS late
+            FROM ({source}) AS d
+            WHERE {_SEC} IS NOT NULL
+            GROUP BY d.date, ifNull(d.route_code, ''), time_band
+        )
+    """
 
 
 # Each row's timetable (static_archive.JOIN_CONTENT_SQL), computed once per row before the join.
@@ -288,6 +365,57 @@ def _stop_daily(source: str) -> str:
     """
 
 
+# The hour of the departure on the service day's clock, 4 to 27: a time written
+# at face value before the cutover (00:40) is the same night's hour 24, as the
+# planned departures it is set beside count it (pipeline.timetable_sampling).
+_SERVICE_DAY_HOUR = f"toInt16(intDiv(assumeNotNull({service_day_offset_ch(_SEC)}), 3600))"
+# agg_stop_hour_daily's early_count counts departures more than this many
+# seconds early: the default on-time window's early edge
+# (pipeline.reports.rankings), which a read takes from the stored counts with
+# pipeline.histogram.on_time_from_columns. pipeline.reports imports this module,
+# so the edge is restated here rather than read from there.
+STOP_HOUR_EARLY_SEC = 60
+
+
+def _stop_hour_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id, date, hour,
+               toInt32(n) AS samples, s AS sum_delay_sec, toInt32(on_time) AS on_time_count,
+               toInt32(late5) AS late5_count, toInt32(early) AS early_count
+        FROM (
+            SELECT st.stop_id AS stop_id, d.date AS date, {_SERVICE_DAY_HOUR} AS hour,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n,
+                   countIf(assumeNotNull(d.dep_delay) <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC}) AS on_time,
+                   countIf(assumeNotNull(d.dep_delay) > {LEGACY_SEVERE_LATE_TOLERANCE_SEC}) AS late5,
+                   countIf(assumeNotNull(d.dep_delay) < -{STOP_HOUR_EARLY_SEC}) AS early
+            FROM ({_with_join_content(source)}) AS d
+            {_STATIC_JOIN}
+            WHERE {_SEC} IS NOT NULL
+            GROUP BY stop_id, date, hour
+        )
+    """
+
+
+# Each departure as (scheduled time on the service day's clock, delay), the clock
+# _SERVICE_DAY_HOUR reads its hour from; sorted, so a rebuild writes the same arrays.
+_DEPARTURE = f"tuple(toInt32(assumeNotNull({service_day_offset_ch(_SEC)})), toInt32(assumeNotNull(d.dep_delay)))"
+
+
+def _stop_departures_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id, date,
+               arrayMap(x -> tupleElement(x, 1), deps) AS scheduled_secs,
+               arrayMap(x -> tupleElement(x, 2), deps) AS dep_delays
+        FROM (
+            SELECT st.stop_id AS stop_id, d.date AS date, arraySort(groupArray({_DEPARTURE})) AS deps
+            FROM ({_with_join_content(source)}) AS d
+            {_STATIC_JOIN}
+            WHERE {_SEC} IS NOT NULL
+            GROUP BY stop_id, date
+        )
+    """
+
+
 def _route_stop_daily(source: str) -> str:
     return f"""
         SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, stop_id, date, service_type, time_band,
@@ -305,6 +433,10 @@ def _route_stop_daily(source: str) -> str:
 
 
 def _stop_route_days(source: str) -> str:
+    """Each (service date, stop, route) a poll reports, read from every row
+    (`_raw_select`), untimely ones too (`pipeline.db.timely_reading_ch`): it
+    records which routes serve a stop, not a figure of its stop events, so a
+    trip the feed lists long after it ran still names a route that serves it."""
     return f"""
         SELECT DISTINCT toInt32({{agency_id:UInt16}}) AS agency_id, d.date AS date, st.stop_id AS stop_id,
                assumeNotNull(d.route_code) AS route_code
@@ -369,7 +501,9 @@ def _route_stats(source: str) -> str:
     """
 
 
-# Seconds past midnight as HH:MM:SS, the text form of a Postgres `time`.
+# Seconds from the service day's 00:00 as HH:MM:SS, the hours running past 23
+# for a departure after midnight: the text form of the Postgres `interval`
+# agg_route_hour keeps.
 _SCHEDULED_TIME = (
     "concat(leftPad(toString(intDiv(sec, 3600)), 2, '0'), ':', "
     "leftPad(toString(intDiv(sec, 60) % 60), 2, '0'), ':', leftPad(toString(sec % 60), 2, '0'))"
@@ -392,6 +526,8 @@ def _route_hour(source: str) -> str:
 
 
 def _stop_routes(source: str) -> str:
+    """Each stop's routes over its whole history, from stop_route_days: which
+    routes serve it, untimely readings included, as that table records them."""
     return f"""
         SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id,
                arrayStringConcat(arraySort(groupUniqArray(route_code)), ',') AS route_codes
@@ -429,6 +565,8 @@ class _Spec(NamedTuple):
     figures: _Figures = _DEFAULT_FIGURES
     # Read from every `updates` row (`_raw_select`) rather than from the dedup.
     raw: bool = False
+    # Reads the dedup's `scheduled_sec`, which alone holds a time past 24:00.
+    scheduled_sec: bool = False
 
 
 class _WholeSpec(NamedTuple):
@@ -474,16 +612,49 @@ _SPECS: dict[str, _Spec] = {
         ),
         _route_daily_dist,
     ),
-    "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
+    "agg_hour_daily": _Spec(
+        ("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily, scheduled_sec=True
+    ),
+    "agg_route_band_daily": _Spec(
+        ("agency_id", "date", "route_code", "time_band", "samples", "sum_delay_sec", "sum_late_sec"),
+        _route_band_daily,
+        scheduled_sec=True,
+    ),
     "agg_stop_daily": _Spec(
         ("agency_id", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
         _stop_daily,
         _DELAY_SUM_FIGURES,
+        scheduled_sec=True,
     ),
     "agg_route_stop_daily": _Spec(
         ("agency_id", "route_code", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
         _route_stop_daily,
         _DELAY_SUM_FIGURES,
+        scheduled_sec=True,
+    ),
+    "agg_stop_hour_daily": _Spec(
+        (
+            "agency_id",
+            "stop_id",
+            "date",
+            "hour",
+            "samples",
+            "sum_delay_sec",
+            "on_time_count",
+            "late5_count",
+            "early_count",
+        ),
+        _stop_hour_daily,
+        scheduled_sec=True,
+    ),
+    "agg_stop_departures_daily": _Spec(
+        ("agency_id", "stop_id", "date", "scheduled_secs", "dep_delays"),
+        _stop_departures_daily,
+        (
+            ("sum(length(scheduled_secs))", "sum(cardinality(scheduled_secs))"),
+            ("sum(arraySum(dep_delays))", "sum((SELECT sum(v) FROM unnest(dep_delays) AS v))"),
+        ),
+        scheduled_sec=True,
     ),
     "route_delay_counts": _Spec(
         (
@@ -497,6 +668,7 @@ _SPECS: dict[str, _Spec] = {
             "sum_delay_sec",
         ),
         _route_delay_counts,
+        scheduled_sec=True,
     ),
     "stop_route_days": _Spec(("agency_id", "date", "stop_id", "route_code"), _stop_route_days, raw=True),
 }
@@ -509,7 +681,14 @@ TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name not in INTERNAL_
 MONTHLY_TABLES: tuple[str, ...] = (*TABLES, *INTERNAL_TABLES)
 # The tables whose rows join the timetable archive by each row's version, so a build of one needs a ScheduleJoin.
 STATIC_JOINED_TABLES: frozenset[str] = frozenset(
-    {"agg_stop_daily", "agg_route_stop_daily", ROUTE_STOP_DAYS, "agg_stop_routes"}
+    {
+        "agg_stop_daily",
+        "agg_route_stop_daily",
+        "agg_stop_hour_daily",
+        "agg_stop_departures_daily",
+        ROUTE_STOP_DAYS,
+        "agg_stop_routes",
+    }
 )
 
 # Whole-history tables, finalized from their internal table by `build_whole_history`. Build and swap order.
@@ -563,9 +742,19 @@ WHOLE_HISTORY_TABLES: tuple[str, ...] = tuple(_WHOLE_SPECS)
 COPIED_TABLES: tuple[str, ...] = (*TABLES, *WHOLE_HISTORY_TABLES)
 ALL_TABLES: tuple[str, ...] = (*MONTHLY_TABLES, *WHOLE_HISTORY_TABLES)
 # Every persistent ClickHouse table besides the observation ones (`updates`,
-# `updates_live`): what analyze builds and the timetable archive. db/clickhouse/schema.sql
-# creates exactly these and the observation tables.
-STORE_TABLES: tuple[str, ...] = (*ALL_TABLES, static_archive.ARCHIVE, static_archive.VERSION_MAP)
+# `updates_live`): what analyze builds, the timetable archive, and the rows
+# analyze wrote refiled. db/clickhouse/schema.sql creates exactly these and the
+# observation tables.
+STORE_TABLES: tuple[str, ...] = (
+    *ALL_TABLES,
+    static_archive.ARCHIVE,
+    static_archive.SCHEDULE,
+    static_archive.VERSION_MAP,
+    static_archive.SPANS,
+    static_archive.FILED_TABLE,
+    static_archive.FILED_DATES,
+    static_archive.CALENDAR,
+)
 _ALL_SPECS: dict[str, _Spec | _WholeSpec] = {**_SPECS, **_WHOLE_SPECS}
 COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _ALL_SPECS.items()}
 
@@ -591,18 +780,26 @@ def work_table(table: str, agency_id: int) -> str:
     return f"{_checked(table)}__work_a{int(agency_id)}"
 
 
-def _dedup_select(where: str) -> str:
-    """The dedup of the agency's `updates` rows matching *where*, with every column a table reads."""
-    return build_dedup_ch_sql(extra_where=where, include_captured_at=True, include_static_version=True)
+def _dedup_select(where: str, *, scheduled_sec: bool = True, stamp: Stamp = Stamp.INGESTED) -> str:
+    """The dedup of the agency's `updates` rows matching *where*, with every column a table reads.
+
+    Without *scheduled_sec*, every column but `scheduled_sec`: what a table
+    whose `_Spec` does not read it dedups for itself."""
+    return build_dedup_ch_sql(
+        extra_where=where,
+        include_captured_at=True,
+        include_scheduled_sec=scheduled_sec,
+        include_static_version=True,
+        stamp=stamp,
+    )
 
 
-def _raw_select(where: str) -> str:
+def _raw_select(where: str, stamp: Stamp = Stamp.INGESTED) -> str:
     """The agency's `updates` rows matching *where*, with no dedup: every poll, delay or not."""
     return (
-        f"SELECT {service_date_ch('u.captured_at')} AS date, u.route_code AS route_code, u.trip_id AS trip_id, "
+        f"SELECT {static_archive.filed_date_sql(stamp)} AS date, u.route_code AS route_code, u.trip_id AS trip_id, "
         f"u.stop_sequence AS stop_sequence, ifNull(u.static_version_id, '') AS static_version_id "
-        f"FROM {UPDATES_TABLE} AS u "
-        f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where})"
+        f"{observation_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', stamp)}"
     )
 
 
@@ -614,6 +811,7 @@ def select_sql(
     *,
     join: ScheduleJoin | None = None,
     present: Iterable[str] | None = None,
+    stamp: Stamp = Stamp.INGESTED,
 ) -> tuple[str, dict]:
     """The SELECT computing *table*'s rows for the agency bound as `agency_id`:
     those of one month, or of only *days* within it.
@@ -626,6 +824,8 @@ def select_sql(
 
     A table in STATIC_JOINED_TABLES also binds *join*'s parameters, narrowed to
     the contents the version names in *present* join (`ScheduleJoin.params`).
+    Without *source*, *stamp* files the rows it reads (`stamp_for`), and any
+    but INGESTED binds *join*'s parameters too.
     """
     if _checked(table) not in _SPECS:
         raise ValueError(f"{table!r} is not built by month")
@@ -634,13 +834,18 @@ def select_sql(
         raise ValueError(f"{table!r} reads every `updates` row, not a dedup")
     if source is None:
         where, params = month_where(month) if days is None else days_where(days)
-        rows = _raw_select(where) if spec.raw else _dedup_select(where)
+        rows = (
+            _raw_select(where, stamp)
+            if spec.raw
+            else _dedup_select(where, scheduled_sec=spec.scheduled_sec, stamp=stamp)
+        )
     elif days is None:
         rows, params = f"SELECT * FROM {source}", {}
     else:
         rows, params = f"SELECT * FROM {source} WHERE has({{days:Array(Date)}}, date)", {"days": days}
-    if join is not None and table in STATIC_JOINED_TABLES:
-        params = {**params, **join.params(present)}
+    filed = source is None and stamp is not Stamp.INGESTED
+    if join is not None and (filed or table in STATIC_JOINED_TABLES):
+        params = {**params, **join.params(present, month_span(month, days))}
     return spec.select(rows), params
 
 
@@ -667,6 +872,7 @@ def build(
     rebuilds: dict[str, Rebuild],
     step: Callable[[str], AbstractContextManager] = _untimed,
     join: ScheduleJoin | None = None,
+    refit: Set[date] | None = None,
 ) -> None:
     """Compute each of *rebuilds* into its table's work table.
 
@@ -688,6 +894,9 @@ def build(
     first read for their version names, which narrow the archive side of the
     join to the contents those rows join; the rows whose name maps to no
     archived timetable are counted and logged once.
+
+    With *join*'s versions in force, each month's rows are read filed under the
+    version in force on their service date (`stamp_for`, given *refit*).
     """
     joined = sorted(table for table in rebuilds if table in STATIC_JOINED_TABLES)
     if joined and join is None:
@@ -709,21 +918,39 @@ def build(
             table: _days_in(rebuild.changed, month) for table, rebuild in rebuilds.items() if month in rebuild.months
         }
         stems = None
+        first, following = month_bounds(month)
+        scoped = (
+            [first + timedelta(days=i) for i in range((following - first).days)]
+            if any(table_days is None for table_days in days.values())
+            else sorted({day for table_days in days.values() for day in table_days or ()})
+        )
+        stamp = stamp_for(join, refit, scoped)
         joined_days = [table_days for table, table_days in days.items() if table in STATIC_JOINED_TABLES]
         if join is not None and joined_days:
             with step("ClickHouse version names"):
-                counts = version_names(ch, agency_id, *_scope_where(month, joined_days))
+                counts = version_names(
+                    ch, agency_id, *_scope_where(month, joined_days), join, stamp, month_span(month, scoped)
+                )
             stems = list(counts)
             unarchived.update({stem: n for stem, n in counts.items() if stem not in join.stems})
         deduped = {table: table_days for table, table_days in days.items() if not _SPECS[table].raw}
         if len(deduped) == 1:
             ((table, table_days),) = deduped.items()
             with step(f"{table}: ClickHouse build"):
-                _build_month(ch, table, agency_id, month, table_days, source=None, join=join, present=stems)
+                _build_month(
+                    ch, table, agency_id, month, table_days, source=None, join=join, present=stems, stamp=stamp
+                )
         elif deduped:
             where, params = _scope_where(month, deduped.values())
             with step("ClickHouse dedup"):
-                ch.command(f"INSERT INTO {dedup} {_dedup_select(where)}", parameters={"agency_id": agency_id, **params})
+                ch.command(
+                    f"INSERT INTO {dedup} {_dedup_select(where, stamp=stamp)}",
+                    parameters={
+                        "agency_id": agency_id,
+                        **params,
+                        **_filing_params(join, stamp, between=month_span(month, scoped)),
+                    },
+                )
             for table, table_days in deduped.items():
                 with step(f"{table}: ClickHouse build"):
                     _build_month(ch, table, agency_id, month, table_days, source=dedup, join=join, present=stems)
@@ -732,7 +959,9 @@ def build(
         for table, table_days in days.items():
             if _SPECS[table].raw:
                 with step(f"{table}: ClickHouse build"):
-                    _build_month(ch, table, agency_id, month, table_days, source=None, join=join, present=stems)
+                    _build_month(
+                        ch, table, agency_id, month, table_days, source=None, join=join, present=stems, stamp=stamp
+                    )
     with step("ClickHouse build setup"):
         ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
     if unarchived and join is not None:
@@ -759,6 +988,7 @@ def _build_month(
     source: str | None,
     join: ScheduleJoin | None = None,
     present: list[str] | None = None,
+    stamp: Stamp = Stamp.INGESTED,
 ) -> None:
     work = work_table(table, agency_id)
     columns = ", ".join(COLUMNS[table])
@@ -769,7 +999,7 @@ def _build_month(
             "AND NOT has({days:Array(Date)}, date)",
             parameters={"agency_id": agency_id, "month": month, "days": days},
         )
-    sql, params = select_sql(table, month, days, source=source, join=join, present=present)
+    sql, params = select_sql(table, month, days, source=source, join=join, present=present, stamp=stamp)
     ch.command(f"INSERT INTO {work} ({columns}) {sql}", parameters={"agency_id": agency_id, **params})
 
 
@@ -804,7 +1034,9 @@ def whole_history_sql(table: str, source: str | None = None) -> str:
         raise ValueError(f"{table!r} is not a whole-history aggregate")
     if source is None:
         internal = _SPECS[_WHOLE_SPECS[table].source]
-        source = internal.select(_raw_select("1") if internal.raw else _dedup_select("1"))
+        source = internal.select(
+            _raw_select("1") if internal.raw else _dedup_select("1", scheduled_sec=internal.scheduled_sec)
+        )
     return _WHOLE_SPECS[table].select(source)
 
 
@@ -869,13 +1101,15 @@ def source_months(ch, agency_id: int) -> list[int]:
     """Every month of service date from the agency's first `updates` row to its last.
 
     Two probes that the (agency_id, captured_at) sort key serves from either end
-    of the agency's rows, rather than a read of its whole history. A month in the
-    range that holds no row builds nothing, and `swap` then drops it.
+    of the agency's rows, rather than a read of its whole history. Each end is
+    taken a day further out, the furthest a row is filed from its capture's
+    service date (`static_archive.FILED_DATE_SQL`). A month in the range that
+    holds no row builds nothing, and `swap` then drops it.
     """
     ends = []
-    for direction in ("ASC", "DESC"):
+    for direction, step in (("ASC", -1), ("DESC", 1)):
         rows = ch.query(
-            f"SELECT toYYYYMM({service_date_ch()}) FROM {UPDATES_TABLE} "
+            f"SELECT toYYYYMM(addDays({service_date_ch()}, {step})) FROM {UPDATES_TABLE} "
             f"WHERE agency_id = {{agency_id:UInt16}} ORDER BY captured_at {direction} LIMIT 1",
             parameters={"agency_id": agency_id},
         ).result_rows
@@ -912,12 +1146,17 @@ def drop_work_tables(ch, agency_id: int) -> None:
         ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
 
 
-def _agency_rows(projection: str, table: str, agency_id: int, months: list[int] | None) -> tuple[str, dict]:
+def _agency_rows(
+    projection: str, table: str, agency_id: int, months: list[int] | None, since: date | None = None
+) -> tuple[str, dict]:
     sql = f"SELECT {projection} FROM {_checked(table)} WHERE agency_id = {{agency_id:Int32}}"
     params: dict = {"agency_id": agency_id}
     if months is not None:
         sql += " AND toYYYYMM(date) IN {months:Array(UInt32)}"
         params["months"] = months
+    if since is not None:
+        sql += " AND date >= {since:Date}"
+        params["since"] = since
     return sql, params
 
 
@@ -934,12 +1173,12 @@ def store_figures(table: str) -> _Figures:
     return _ALL_SPECS[_checked(table)].figures
 
 
-def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
+def totals(ch, table: str, agency_id: int, months: list[int] | None, since: date | None = None) -> tuple[int, int, int]:
     """(rows, and store_figures(table)'s ClickHouse figures) for the agency over
-    *months*, or all of them when None: what a store check compares with *table*'s
-    Postgres copy."""
+    *months*, or all of them when None, and only from *since* on when given:
+    what a store check compares with *table*'s Postgres copy."""
     (first, _), (second, _) = store_figures(table)
-    sql, params = _agency_rows(f"count(), {first}, {second}", table, agency_id, months)
+    sql, params = _agency_rows(f"count(), {first}, {second}", table, agency_id, months, since)
     count, one, two = ch.query(sql, parameters=params).result_rows[0]
     return int(count), int(one or 0), int(two or 0)
 

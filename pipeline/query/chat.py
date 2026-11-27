@@ -45,14 +45,7 @@ from pipeline.query.intent import IntentSignature, canonicalize, derive_confiden
 from pipeline.query.intent_cache import lookup as _cache_lookup
 from pipeline.query.intent_cache import lookup_by_question as _cache_lookup_by_question
 from pipeline.query.intent_cache import upsert as _cache_upsert
-from pipeline.query.llm_client import (
-    REQUEST_TIMEOUT,
-    _build_create_kwargs,
-    describe_provider_failure,
-    get_client,
-    log_usage,
-    provider_endpoint,
-)
+from pipeline.query.llm_client import get_client
 from pipeline.query.pooled_conn import UnsupportedConnectionMethod
 from pipeline.query.tools import (
     JSON_MODE_ADDENDUM,
@@ -64,7 +57,6 @@ from pipeline.query.tools import (
     dispatch,
     render_tool_result,
 )
-from pipeline.query.user_llm_keys import get_user_llm_key
 
 _log = logging.getLogger(__name__)
 
@@ -81,10 +73,7 @@ def _allowed_providers() -> set[str] | None:
     providers are tried, and an empty intersection with the configured
     ``CHAT_PROVIDERS`` ladder fails the request rather than falling back
     (see ``LLMClient.chat_completions``'s ``allowed_providers`` handling).
-    Also applied to a BYOK caller's own stored provider (see ``_call_llm``),
-    not just the shared ladder — an operator's restriction must hold
-    regardless of whose API key answers the request. Unset by default
-    (returns ``None``, i.e. no restriction) — some models have been shown
+    Unset by default (returns ``None``, i.e. no restriction) — some models have been shown
     to obey instructions injected into user text rather than the system
     prompt (see ``pipeline/query/followup.py``, which restricts its own
     allowed providers for exactly this reason); unlike the follow-up path,
@@ -99,9 +88,6 @@ def _allowed_providers() -> set[str] | None:
     return names or None
 
 
-_BUILD_SENTINEL = "__build__"
-
-
 def _as_args(value: Any) -> dict:
     """Tool arguments as a dict, or {} for anything else.
 
@@ -111,31 +97,6 @@ def _as_args(value: Any) -> dict:
     (likely a "missing required arg" empty result) rather than a 500.
     """
     return value if isinstance(value, dict) else {}
-
-
-def _parse_build_sentinel(question: str) -> tuple[str, dict] | None:
-    """Extract ``(tool, args)`` from a ``__build__ TOOL {json}`` question string.
-
-    The guided build form on the frontend submits the user's structured intent
-    as a question with this sentinel prefix so the orchestrator can dispatch it
-    **without calling the LLM** — the spec's "zero-LLM determinism path."
-    Returns ``None`` if the string doesn't match the format (caller falls
-    through to the normal LLM path).
-    """
-    if not question.startswith(_BUILD_SENTINEL):
-        return None
-    rest = question[len(_BUILD_SENTINEL) :].lstrip()
-    tool, _sep, json_part = rest.partition(" ")
-    if not tool:
-        return None
-    json_part = json_part.strip() or "{}"
-    try:
-        args = json.loads(json_part)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(args, dict):
-        return None
-    return tool, args
 
 
 # Extra per-call localisation strings. Keyed identically to the table in
@@ -231,47 +192,6 @@ def _get_client():
     return get_client()
 
 
-def _completion_with_key(
-    provider: str,
-    api_key: str,
-    *,
-    messages: list[dict],
-    tools: list[dict] | None = None,
-    tool_choice: str = "auto",
-    temperature: float = 0.0,
-    response_format: dict | None = None,
-) -> Any:
-    """Make one completion call against a signed-in user's own stored BYOK key.
-
-    Bypasses :class:`~pipeline.query.llm_client.LLMClient`'s shared provider
-    ladder entirely — a BYOK caller already supplies both the provider and
-    the key, so there is no ladder to fall back through and nothing shared
-    to meter. Returns the response message directly (mirroring
-    ``LLMClient.chat_completions``'s success shape, i.e.
-    ``resp.choices[0].message``) so the rest of this module's
-    ``msg.content``/``msg.tool_calls`` handling doesn't need a second code
-    path. Raises the underlying OpenAI SDK exception on failure; the caller
-    classifies it into the same ``error_kind`` vocabulary the shared-client
-    ladder uses. Never logs ``api_key`` — callers must only ever log whether
-    a per-user key was used, not its value.
-    """
-    import openai
-
-    base_url, model = provider_endpoint(provider)
-    one_off = openai.OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=REQUEST_TIMEOUT)
-    create_kwargs = _build_create_kwargs(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        tools=tools,
-        tool_choice=tool_choice,
-        response_format=response_format,
-    )
-    resp = one_off.chat.completions.create(**create_kwargs)
-    log_usage(provider, model, resp)
-    return resp.choices[0].message
-
-
 def _text_reply(body: str) -> dict:
     """Response for an LLM-authored plain-text answer, where no tool ran.
 
@@ -313,7 +233,7 @@ async def _dispatch_and_respond(
     verb_suffix: str = "",
 ) -> dict:
     """Call :func:`dispatch` and shape the response dict, handling the
-    failure modes shared by every non-build-mode call site in this module
+    failure modes shared by every call site in this module
     identically: an HTTPException(503) or a mid-query ClickHouse error both
     degrade to the ``service_unavailable`` string (never the raw exception
     text, which can carry SQL fragments or endpoint URLs — see
@@ -407,12 +327,9 @@ async def chat_with_tools(
     conn,
     agency_id: int,
     locale: str = "ja",
-    rag_examples: list | None = None,
     history: list | None = None,
     ch=None,
     force_tool_call: bool = False,
-    panel_ctx: dict | None = None,
-    user_id: int | None = None,
     llm_approved: bool = True,
 ) -> dict:
     """Run one round-trip Ask flow.
@@ -452,31 +369,13 @@ async def chat_with_tools(
     cached for that exact text — ignoring this conversation's actual prior
     turn — instead of the history-aware answer this parameter exists to get.
 
-    ``panel_ctx``, when supplied by the Copilot side panel, carries the
-    frontend's active-tab hint (e.g. ``{"tab": "overview"}``). The API layer
-    (``api/routers/ask.py``'s ``PanelCtx`` model) restricts ``tab`` to a
-    known enum of tab names before it ever reaches this function, so this
-    dict-typed parameter is safe to interpolate into the system prompt
-    without its own length/type check. It is appended to the system prompt
-    as a one-line grounding hint only — it never reaches the rules/embedding
-    routing stage (resolved before calling this function) or the
-    tool-dispatch args.
-
-    ``user_id``, when set by the API layer for a signed-in caller, is looked
-    up against :func:`~pipeline.query.user_llm_keys.get_user_llm_key`. When a
-    key is found, both real LLM-invocation sites below route through a
-    one-off :func:`_completion_with_key` call scoped to that caller's own
-    provider/key instead of the shared :class:`~pipeline.query.llm_client.LLMClient`
-    ladder. The raw key is never logged anywhere in this path.
-
     ``llm_approved``, set by the API layer from the caller's own
     ``users.llm_approved`` flag (``False`` for every anonymous caller — there
-    is no user row to check), gates both real LLM-invocation sites the same
-    way ``user_key`` does: checked inside :func:`_call_llm` before any
-    provider or BYOK key is touched. ``False`` short-circuits to the same
-    honest-degradation shape as a rate-limited/unconfigured ladder
-    (``error_kind="not_approved"``) without ever reaching a provider.
-    Defaults to ``True``
+    is no user row to check), gates both real LLM-invocation sites: checked
+    inside :func:`_call_llm` before any provider is touched. ``False``
+    short-circuits to the same honest-degradation shape as a rate-limited/
+    unconfigured ladder (``error_kind="not_approved"``) without ever reaching
+    a provider. Defaults to ``True``
     so internal callers/tests that don't construct the real value aren't
     silently gated — the API layer is the one place responsible for passing
     the caller's actual approval status.
@@ -499,158 +398,31 @@ async def chat_with_tools(
     """
     client = _get_client()
     # The operator's kill switch, checked inside _call_llm before any provider
-    # or BYOK key is touched. The rules/embedding routing stages (resolved by
-    # the caller before this function runs), the intent-cache pre-hit's
-    # undated rows, and the build sentinel never call _call_llm, so they keep
+    # is touched. The rules stage (resolved by
+    # the caller before this function runs) and the intent-cache pre-hit's
+    # undated rows never call _call_llm, so they keep
     # answering while it is off. A dated pre-hit row is nulled out by the
     # _carries_dates check below regardless of this flag, so it falls through
     # to _call_llm and surfaces "disabled" like any other question would.
     llm_enabled = await aflag("ask_llm_enabled")
-    # Skip the lookup (a DB round-trip + Fernet decrypt) entirely when the
-    # caller isn't approved: _call_llm below rejects them unconditionally
-    # before user_key is ever read, so fetching it would be wasted work on
-    # every request from a not-yet-approved signed-in caller.
-    user_key = await get_user_llm_key(conn, user_id) if user_id is not None and llm_approved and llm_enabled else None
 
     def _call_llm(**kwargs: Any) -> tuple[Any | None, str | None]:
-        """Dispatch one completion call, normalized to ``(message, error_kind)``.
-
-        Routes through the caller's own BYOK key (bypassing the shared
-        provider ladder) when ``user_key`` is set, else through the shared
-        :class:`~pipeline.query.llm_client.LLMClient` ladder. Both of
-        ``_sync``'s call sites go through here so they can't drift apart on
-        how a BYOK caller is handled, on the ``llm_approved`` gate, or on
-        provider-allowlist enforcement.
-
-        A BYOK caller's stored provider is still checked against
-        ``_allowed_providers()`` before use: an operator who restricts
-        ``ASK_CHAT_ALLOWED_PROVIDERS`` (e.g. to exclude a provider shown to
-        obey injected instructions) must not have that policy silently
-        bypassed just because the caller supplied their own key. Mirrors
-        the shared ladder's own "empty intersection degrades" behavior
-        (``"no_providers"``) rather than raising or falling back to the
-        shared ladder, so a disallowed BYOK provider fails the same
-        machine-readable way the caller already knows how to handle.
+        """Dispatch one completion call through the shared provider ladder,
+        normalized to ``(message, error_kind)``. Both of ``_sync``'s call
+        sites go through here so they can't drift apart on the
+        ``llm_approved`` gate or on provider-allowlist enforcement.
         """
         if not llm_enabled:
             return None, "disabled"
         if not llm_approved:
             return None, "not_approved"
-        if user_key is None:
-            return client.chat_completions(allowed_providers=_allowed_providers(), **kwargs)
-        allowed = _allowed_providers()
-        if allowed is not None and user_key.provider not in allowed:
-            return None, "no_providers"
-        from openai import APIConnectionError, APITimeoutError, BadRequestError, RateLimitError
-
-        try:
-            message = _completion_with_key(user_key.provider, user_key.raw_key, **kwargs)
-            return message, None
-        except APITimeoutError:
-            return None, "connection"
-        except APIConnectionError:
-            return None, "connection"
-        except RateLimitError:
-            return None, "rate_limit"
-        except BadRequestError:
-            return None, "bad_request"
-        except Exception as exc:
-            _log.warning("chat: BYOK completion failed (%s)", describe_provider_failure(exc))
-            return None, "unexpected"
+        return client.chat_completions(allowed_providers=_allowed_providers(), **kwargs)
 
     locale_addendum = _chat_str("locale_instruction", locale)
     # Normalize once so leading/trailing whitespace doesn't cause cache misses
     # or visible prompt differences; downstream uses (prompt, cache key, log) all
     # benefit. The frontend keeps its own copy of the user's raw input.
     question = question.strip()
-    # Build-mode synthetic questions (sent by the guided form with an ``__build__``
-    # prefix) must never be written to the intent cache as last_question, otherwise
-    # machine-generated strings surface as chips / autocomplete suggestions.
-    _skip_cache_write = question.startswith(_BUILD_SENTINEL)
-
-    # Build-mode short-circuit: when the question is a build-form sentinel,
-    # parse (tool, args) directly and dispatch without ever calling the LLM.
-    # This is the spec's "zero-LLM determinism path" — confidence=1.0 because
-    # the user constructed the query directly. The cache flag is irrelevant
-    # here: the sentinel is frontend-controlled and the path must always be
-    # deterministic regardless of cache configuration.
-    if _skip_cache_write:
-        parsed = _parse_build_sentinel(question)
-        if parsed is not None:
-            build_tool, build_args = parsed
-            try:
-                can_args = canonicalize(build_tool, build_args)
-            except ValueError:
-                # Unknown tool — fall back to dispatching with raw args so the
-                # tool handler can return its own "unknown" error string.
-                can_args = dict(build_args)
-            sig_hash = signature_hash(build_tool, can_args)
-            try:
-                result = await dispatch(build_tool, can_args, ctx, conn, agency_id, locale=locale, ch=ch)
-            except HTTPException as exc:
-                if exc.status_code != 503:
-                    raise
-                _log.warning("Build-mode dispatch for %s unavailable: %s", build_tool, exc.detail)
-                return {
-                    "answer": _chat_str("service_unavailable", locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            except clickhouse_connect.driver.exceptions.Error as exc:
-                _log.exception("Build-mode dispatch for %s: ClickHouse query error", build_tool)
-                return {
-                    "answer": ch_failure_str(exc, locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            except (asyncpg.exceptions.UndefinedTableError, UnsupportedConnectionMethod):
-                # An agg_* table missing (migration/analyze behind) must propagate
-                # to FastAPI's registered aggregate_not_ready_handler so the
-                # frontend gets the machine-readable {"code": "aggregate_not_ready"}
-                # 503 it reacts to — not a generic 200 tool_error that masks it,
-                # the same carve-out _dispatch_and_respond makes. A call the
-                # pooled connection cannot serve is a programming error and is
-                # re-raised for the same reason: it must not read as a tool failure.
-                raise
-            except Exception:
-                _log.exception("Build-mode dispatch failed for %s", build_tool)
-                return {
-                    "answer": _chat_str("tool_error", locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            # render_tool_result formats a dispatched ToolResult deterministically —
-            # never LLM-authored prose — so the numeric guard has nothing to check.
-            return {
-                "answer": render_tool_result(result, locale=locale),
-                "tool_call": {"name": build_tool, "arguments": can_args},
-                "result": _result_to_dict(result),
-                "success": result.kind != "empty",
-                "numeric_guard_triggered": None,
-                "signature_hash": sig_hash,
-                "confidence": 1.0,
-                "canonical_args": can_args,
-                "cache_outcome": "bypass",
-            }
-
     user_prelude = _chat_str(
         "user_prelude",
         locale,
@@ -661,25 +433,7 @@ async def chat_with_tools(
         question=question,
     )
 
-    # Few-shot block: when the upstream router supplied nearest-neighbour
-    # examples from the golden-set RAG index, append them to the system
-    # prompt so the model can pattern-match similar questions onto the
-    # right tool + arg shape. Kept off the static SYSTEM_PROMPT because
-    # the block is per-request and varies with retrieval.
     system_prompt = SYSTEM_PROMPT
-    if rag_examples:
-        lines = ["\n", "== 類似質問の例 (参考) =="]
-        for m in rag_examples:
-            args_compact = json.dumps(m.args, ensure_ascii=False, separators=(",", ":"))
-            lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
-        system_prompt = system_prompt + "\n" + "\n".join(lines)
-
-    # Copilot side-panel hint: a one-line grounding addendum naming the
-    # active tab, appended (never replacing the block above) so the
-    # rules/embedding routing stage — already resolved by the caller before
-    # this function runs — and tool-dispatch args stay untouched.
-    if panel_ctx and panel_ctx.get("tab"):
-        system_prompt += f"\nThe user is currently viewing the {panel_ctx['tab']} tab."
 
     # Bounded conversation memory: when the API layer threads prior turns,
     # fold the last few (question → tool(args)) into a dedicated system
@@ -695,7 +449,7 @@ async def chat_with_tools(
     # phrasing, but generic anaphora ("その路線は？") also needs the prior
     # turn and doesn't match it. That means this block is just as often
     # attached ahead of a genuinely NEW, unrelated question that merely
-    # failed to get a confident rules/embedding match, which risks the model
+    # matched no rule, which risks the model
     # answering from the attached (unrelated) history text instead of
     # recognizing that the current question needs a fresh tool call. The
     # trailing guard line below makes the scope of "use history" explicit
@@ -814,10 +568,8 @@ async def chat_with_tools(
             args = _as_args(pre_row["args"])
             sig_hash_pre = pre_row["signature_hash"]
             _pre_sig = IntentSignature(tool=name, args=args, confidence=float(pre_row.get("confidence") or 0.0))
-            if not _skip_cache_write:
-                await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
-            nn_dist_pre = _nn_distance_for_tool(rag_examples or [], name)
-            final_conf_pre = derive_confidence(nn_dist_pre, float(pre_row.get("confidence") or 0.0))
+            await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
+            final_conf_pre = derive_confidence(float(pre_row.get("confidence") or 0.0))
             return await _dispatch_and_respond(
                 name,
                 args,
@@ -925,19 +677,15 @@ async def chat_with_tools(
         # Upsert on a hit or a miss (a hit bumps hit_count), only when all hold:
         # - text_keyed: the args were resolved without history, so they are
         #   what this text means for any asker;
-        # - not a build-mode sentinel, so machine-generated strings never
-        #   become last_question;
         # - a tool we dispatch, or a hallucinated name would be cached and
         #   every similar question would collapse onto that one hash.
         from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
 
         _known_tool = sig.tool in _KNOWN_TOOLS
-        if text_keyed and not _skip_cache_write and _known_tool:
+        if text_keyed and _known_tool:
             await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
 
-        # Compute final confidence blending NN distance + LLM self-report.
-        nn_dist = _nn_distance_for_tool(rag_examples or [], name)
-        final_conf = derive_confidence(nn_dist, sig.confidence)
+        final_conf = derive_confidence(sig.confidence)
 
         return await _dispatch_and_respond(
             name,
@@ -963,7 +711,7 @@ async def chat_with_tools(
         # non-answer from the caller's perspective. success=False so
         # analytics don't count it either way.
         # Route by failure kind: quota exhaustion steers the user toward
-        # question types the rules/embedding routing stages answer without
+        # question types the rules stage answers without
         # any LLM; everything else falls back to the generic retry message.
         key = _ERROR_KIND_LOCALE_KEY.get(error_kind or "", "service_unreachable")
         return {
@@ -1020,22 +768,7 @@ def _result_to_dict(r: ToolResult) -> dict:
     }
 
 
-def _nn_distance_for_tool(rag_examples: list, tool: str) -> float | None:
-    """Return the smallest cosine distance among RAG examples whose tool matches.
-
-    Each element of ``rag_examples`` is expected to have ``.tool`` and
-    ``.distance`` attributes (a :class:`~pipeline.query.rag_index.Match`
-    enriched by :func:`~pipeline.query.router._enrich`).
-
-    Returns ``None`` when ``rag_examples`` is empty or no example maps to
-    ``tool``. Used by Stage 3 to derive a confidence score without calling
-    the LLM a second time — the NN distance is already computed upstream.
-    """
-    distances = [m.distance for m in rag_examples if getattr(m, "tool", None) == tool]
-    return min(distances) if distances else None
-
-
 # Re-export the locale lookup helper so tests / shared code can use the
 # same fallback semantics without reaching into the tools module's
 # private namespace.
-__all__ = ["_nn_distance_for_tool", "_summary", "chat_with_tools"]
+__all__ = ["_summary", "chat_with_tools"]

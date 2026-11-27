@@ -15,8 +15,6 @@ ENVELOPED = {
     "GET /api/{agency_id}/routes": "rows",
     "GET /api/{agency_id}/stops": "rows",
     "GET /api/{agency_id}/stops/bounds": "bounds",
-    "GET /api/{agency_id}/ask/suggest": "rows",
-    "GET /api/{agency_id}/reports/suggest": "suggestion",
     "GET /api/{agency_id}/delay_record/trips": "trips",
     "GET /api/{agency_id}/delay_record/stops": "stops",
     "GET /api/{agency_id}/today/service-hours": "hours",
@@ -37,12 +35,6 @@ def test_enveloped_endpoints_return_a_model_not_a_bare_array_or_null():
             "array/null on the wire — wrap it in a model instead"
         )
         assert field in model.model_fields, f"{endpoint}'s payload must live under {field!r}"
-
-
-def test_reports_suggest_envelope_carries_the_absent_case_inside_it():
-    """'No suggestion right now' is a populated 200 body, not a null one."""
-    model = _response_models()["GET /api/{agency_id}/reports/suggest"]
-    assert model.model_fields["suggestion"].is_required() is False
 
 
 def test_service_hours_envelope_carries_the_no_timetable_case_inside_it():

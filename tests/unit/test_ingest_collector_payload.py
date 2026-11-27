@@ -14,6 +14,8 @@ import pytest
 
 from api.routers.internal import _ingest_collector_payload
 
+_MEMBER = "20260919/TripUpdate_120000.pb"
+
 
 class FakeCursor:
     def __init__(self, conn):
@@ -70,8 +72,9 @@ def test_a_push_takes_no_advisory_lock(monkeypatch):
     conn = FakeConn()
     p1, p2, p3 = _patched(conn, MagicMock())
     with p1, p2, p3 as mock_ingest:
-        assert _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", "oracle/x") == 42
+        assert _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", _MEMBER) == 42
     mock_ingest.assert_called_once()
+    assert mock_ingest.call_args.args[3] == f"oracle/{_MEMBER}"
     assert not any("advisory_lock" in s.lower() or "lock_timeout" in s.lower() for s, _ in conn.executed)
 
 
@@ -82,7 +85,7 @@ def test_ch_client_still_closed_when_postgres_close_raises(monkeypatch):
     p1, p2, p3 = _patched(conn, ch_client)
     with p1, p2, p3:
         with pytest.raises(RuntimeError, match="boom closing postgres connection"):
-            _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", "oracle/x")
+            _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", _MEMBER)
 
     assert conn.closed is True
     ch_client.close.assert_called_once()
@@ -95,7 +98,7 @@ def test_unknown_agency_still_closes_both_clients(monkeypatch):
     p1, p2, p3 = _patched(conn, ch_client)
     with p1, p2, p3:
         with pytest.raises(ValueError, match="Unknown or deleted agency_id"):
-            _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", "oracle/x")
+            _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", _MEMBER)
 
     assert conn.closed is True
     ch_client.close.assert_not_called()

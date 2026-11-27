@@ -1,0 +1,164 @@
+.snapshot-page {
+  min-height: 100vh;
+  background: var(--bg-page);
+  color: var(--text-primary);
+}
+
+.snapshot-page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-surface);
+  font-size: var(--text-sm);
+}
+
+.snapshot-page__main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px 24px 64px;
+}
+
+/* A calm statement of what the page is, not a warning. */
+.snapshot-banner {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.snapshot-banner p {
+  margin: 0;
+}
+
+.snapshot-banner__stamp {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.snapshot-page__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  margin: 0 0 var(--space-1);
+}
+
+.snapshot-page__scope,
+.snapshot-page__note {
+  margin: 0 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.snapshot-page__notes {
+  margin-top: var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.snapshot-page__credit {
+  margin-top: var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.snapshot-page__credit h2 {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.snapshot-page__coverage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.snapshot-page__coverage > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+}
+
+/* The comparison with today: a toggle, then what the comparison rests on,
+   in the banner's calm register. */
+.snapshot-compare {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.snapshot-compare__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.snapshot-compare__note {
+  margin: var(--space-2) 0 0;
+}
+
+.snapshot-compare__status {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+.snapshot-compare__status p {
+  margin: 0 0 var(--space-2);
+}
+
+.snapshot-compare__status > :last-child {
+  margin-bottom: 0;
+}
+
+.snapshot-compare__sides {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+
+.snapshot-compare__sides dt {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.snapshot-compare__sides dd {
+  margin: 0;
+}
+
+.snapshot-compare__sides dd p {
+  margin: 0;
+}
+
+.snapshot-compare__count {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.snapshot-route__stops {
+  margin-top: var(--space-4);
+}
+
+.snapshot-route__stops h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.snapshot-route__absent {
+  margin-top: var(--space-4);
+}

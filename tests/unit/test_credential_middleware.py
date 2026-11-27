@@ -1,8 +1,8 @@
 """Middleware credential lookups resolve hashes, never raw bearer tokens.
 
-Both suites drive the real middleware over a mocked asyncpg pool, so they
-assert the SQL parameter that leaves the process as well as the decision
-made from the row that comes back. No database is involved.
+Drives the real middleware over a mocked asyncpg pool, so it asserts the SQL
+parameter that leaves the process as well as the decision made from the row
+that comes back. No database is involved.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -12,7 +12,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from api.middleware.auth import APIKeyMiddleware
 from api.middleware.session import SESSION_COOKIE_NAME, SessionMiddleware
 from api.security import token_hash
 
@@ -30,85 +29,9 @@ def _app(middleware, fetchrow_result):
     @app.get("/probe")
     async def probe(request: Request):
         user = getattr(request.state, "user", None)
-        return {"tier": getattr(request.state, "tier", None), "user_id": user.user_id if user else None}
+        return {"user_id": user.user_id if user else None}
 
     return app, pool
-
-
-# --- API keys -------------------------------------------------------------
-
-
-def _key_row(*, tier="pro", owner_user_id=None, revoked_at=None, expires_at=None, owner_suspended_at=None):
-    return {
-        "tier": tier,
-        "owner_user_id": owner_user_id,
-        "revoked_at": revoked_at,
-        "expires_at": expires_at,
-        "owner_suspended_at": owner_suspended_at,
-    }
-
-
-def test_no_api_key_is_free_tier_without_a_lookup():
-    app, pool = _app(APIKeyMiddleware, None)
-    resp = TestClient(app).get("/probe")
-    assert resp.status_code == 200
-    assert resp.json()["tier"] == "free"
-    pool.fetchrow.assert_not_called()
-
-
-def test_active_api_key_is_looked_up_by_hash_not_by_raw_key():
-    app, pool = _app(APIKeyMiddleware, _key_row())
-    resp = TestClient(app).get("/probe", headers={"X-API-Key": "raw-secret-key"})
-    assert resp.status_code == 200
-    assert resp.json()["tier"] == "pro"
-    sql, param = pool.fetchrow.call_args.args[0], pool.fetchrow.call_args.args[1]
-    assert param == token_hash("raw-secret-key")
-    assert "raw-secret-key" not in sql
-    assert "key_hash" in sql
-
-
-def test_unknown_api_key_is_rejected():
-    app, _ = _app(APIKeyMiddleware, None)
-    resp = TestClient(app).get("/probe", headers={"X-API-Key": "nope"})
-    assert resp.status_code == 401
-    assert resp.json()["detail"] == "Invalid API key"
-
-
-def test_a_suspended_owners_key_is_rejected():
-    """Suspending or soft-deleting a user kills their sessions; a key issued
-    to them must stop working on the same action, not outlive the account
-    until someone remembers to revoke it by hand."""
-    app, _ = _app(APIKeyMiddleware, _key_row(owner_suspended_at=NOW))
-    assert TestClient(app).get("/probe", headers={"X-API-Key": "sk_live"}).status_code == 401
-
-
-def test_a_legacy_key_with_no_owner_still_stands_on_its_own_columns():
-    """Hand-inserted rows predate owner_user_id; the LEFT JOIN leaves their
-    owner state NULL, which must not read as suspended."""
-    app, _ = _app(APIKeyMiddleware, _key_row(owner_suspended_at=None))
-    r = TestClient(app).get("/probe", headers={"X-API-Key": "sk_live"})
-    assert r.status_code == 200
-    assert r.json()["tier"] == "pro"
-
-
-def test_revoked_api_key_is_rejected():
-    app, _ = _app(APIKeyMiddleware, _key_row(revoked_at=NOW - timedelta(days=1)))
-    resp = TestClient(app).get("/probe", headers={"X-API-Key": "revoked"})
-    assert resp.status_code == 401
-    assert resp.json()["detail"] == "Invalid API key"
-
-
-def test_expired_api_key_is_rejected():
-    app, _ = _app(APIKeyMiddleware, _key_row(expires_at=NOW - timedelta(seconds=1)))
-    resp = TestClient(app).get("/probe", headers={"X-API-Key": "stale"})
-    assert resp.status_code == 401
-
-
-def test_api_key_with_future_expiry_is_accepted():
-    app, _ = _app(APIKeyMiddleware, _key_row(expires_at=NOW + timedelta(days=30)))
-    resp = TestClient(app).get("/probe", headers={"X-API-Key": "fresh"})
-    assert resp.status_code == 200
-    assert resp.json()["tier"] == "pro"
 
 
 # --- Sessions -------------------------------------------------------------

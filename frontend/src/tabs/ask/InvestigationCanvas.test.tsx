@@ -33,10 +33,10 @@ describe("investigation canvas", () => {
     const { unmount } = renderWithProviders(
       <InvestigationCanvas agencyId={9} messages={messages.slice(0, 2)} formatRoute={formatRoute} />,
     );
-    expect(screen.getByText("Investigation steps · 1 question")).toBeInTheDocument();
+    expect(screen.getByText("Investigation steps · 1 step")).toBeInTheDocument();
     unmount();
     renderWithProviders(<InvestigationCanvas agencyId={9} messages={messages} formatRoute={formatRoute} />);
-    expect(screen.getByText("Investigation steps · 2 questions")).toBeInTheDocument();
+    expect(screen.getByText("Investigation steps · 2 steps")).toBeInTheDocument();
   });
   it("retains the exact source chart beside a grounded follow-up answer", () => {
     const source: ConvMessage = { ...messages[1], tool: "segment_hotspots",

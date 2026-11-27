@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
 import { useTodayRouteSummary } from "../api/hooks";
 import type { TFunction } from "i18next";
 import type {
@@ -14,19 +15,22 @@ import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
 import { latestDayStanding, storyVerdict, topRoutesShare, windowDays } from "./overview/storySentence";
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
+import { HeadlineReference } from "./overview/HeadlineReference";
+import { MetricDefinition } from "./overview/MetricDefinition";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
+import { reportHref } from "../routes/destinations";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
 import { EM_DASH, fixedTenth, formatDate, formatHourRange, formatReportTime } from "../utils/format";
 
-/** A hero fact row, named for the card that explains it. */
-export type HeroFact = "peak_hour" | "concentration" | "late_routes";
+/** A hero fact row that opens something on Pulse, named for what it opens. */
+export type HeroFact = "concentration" | "late_routes";
 
 type Props = {
   headline: OverviewHeadline;
-  /** Routes over the routes-to-check list's top-band bound, out of every
-   *  route the list ranks (`routeCount`), not only the listed ones: the
-   *  figure that list's top-band header prints. */
+  /** Routes averaging at least the top band's bound, out of every route
+   *  ranked over the headline's window (`routeCount`), not only the five the
+   *  routes-to-check preview lists. */
   severeCount: number;
   /** That bound, in minutes. */
   severeThresholdMin: number;
@@ -49,6 +53,9 @@ type Props = {
   /** The period's days with data, oldest first: where the headline's last
    *  day stands among them. */
   daily: OverviewServiceSplitDay[];
+  /** Time's trend over the period's scope: where the sparkline and the
+   *  heaviest hour are drawn in full. */
+  trendHref: string;
   /** Opens the card behind a fact row. Each row exists only while that card
    *  has something to show. */
   onOpenFact: (fact: HeroFact) => void;
@@ -114,9 +121,11 @@ export function OverviewHeroRow({
   peakHour,
   concentration,
   daily,
+  trendHref,
   onOpenFact,
 }: Props) {
   const { t } = useTranslation();
+  const { search } = useLocation();
   const { data: feedSummary } = useTodayRouteSummary(agencyId, { autoRefresh: false });
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
@@ -185,6 +194,13 @@ export function OverviewHeroRow({
             })}
           </p>
         )}
+        <p className="ov-hero-pointer" data-tour="pulse-on-time">
+          <Trans
+            t={t}
+            i18nKey="overview.hero_row.on_time_pointer"
+            components={{ routes: <Link to={reportHref(agencyId, "on_time", search)} /> }}
+          />
+        </p>
       </div>
       <div className="ov-hero">
         {/* Both charts live in the figure column, which clips them: the fact
@@ -197,27 +213,41 @@ export function OverviewHeroRow({
             preserveAspectRatio="none"
             showEndDot={false}
             baseline={sparklineMean ?? undefined}
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+            glint
+            className="ov-hero-sparkline"
           />
           {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
           <div className="ov-hero-label">
-            {t("overview.hero_row.avg_delay_label", { count: windowDays(headline.window_from, headline.window_to), range })}
+            {t("overview.hero_row.avg_delay_label", { count: windowDays(headline.window_from, headline.window_to), range })}{" "}
+            <MetricDefinition
+              title={t("overview.definition.avg_delay.title")}
+              body={t("overview.definition.avg_delay.body")}
+              manual="delay_figures"
+            />
           </div>
-          <div className="ov-kpi-value num">
+          <div className="ov-kpi-value num" data-tour="pulse-delay">
             {headline.avg_min != null ? fixedTenth(avgMinDisplay) : "—"}
             <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
           </div>
+          <HeadlineReference headline={headline} hasBaseline={hasBaseline} />
           {sparklineMean != null && (
             <div className="ov-hero-baseline">
               {t("overview.hero_row.sparkline_baseline", { range: periodRange, value: fixedTenth(sparklineMean) })}
             </div>
           )}
+          <Link className="ov-card-link ov-card-link--small" to={trendHref}>
+            {t("overview.hero_row.see_trend")}
+          </Link>
           <div className="ov-hero-feed">
             {/* Green only for a live feed; a quiet or never-reporting one
-                keeps a neutral dot, and an unread status shows none. */}
+                keeps a neutral dot, and an unread status shows none.
+                Exclusive with the breath: see .ov-fresh-dot.live-dot in
+                overview.css. */}
             {feed.kind !== "unknown" && (
               <i
-                className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${feed.kind === "live" ? "" : " ov-fresh-dot--stale"}`}
+                className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${
+                  feed.kind === "live" ? (breathing ? "" : " live-dot") : " ov-fresh-dot--stale"
+                }`}
                 aria-hidden="true"
               />
             )}
@@ -231,7 +261,14 @@ export function OverviewHeroRow({
               <FactRow
                 label={t("overview.hero_row.fact_peak_hour")}
                 period={periodRange}
-                onClick={() => onOpenFact("peak_hour")}
+                to={trendHref}
+                definition={
+                  <MetricDefinition
+                    title={t("overview.definition.peak_hour.title")}
+                    body={t("overview.definition.peak_hour.body")}
+                    manual="pulse"
+                  />
+                }
               >
                 {formatHourRange(peakHour.peak_hour)}
               </FactRow>
@@ -241,6 +278,13 @@ export function OverviewHeroRow({
                 label={t("overview.hero_row.fact_concentration", { count: share.count })}
                 period={periodRange}
                 onClick={() => onOpenFact("concentration")}
+                definition={
+                  <MetricDefinition
+                    title={t("overview.definition.concentration.title")}
+                    body={t("overview.definition.concentration.body")}
+                    manual="pulse"
+                  />
+                }
               >
                 {share.share}
                 <span className="ov-hero-fact-unit">{t("overview.hero_row.fact_share_unit")}</span>
@@ -253,6 +297,13 @@ export function OverviewHeroRow({
               label={t("overview.hero_row.fact_late_routes", { min: severeThresholdMin })}
               period={t("overview.hero_row.fact_late_routes_period", { range, min: minSamples })}
               onClick={() => onOpenFact("late_routes")}
+              definition={
+                <MetricDefinition
+                  title={t("overview.definition.late_routes.title")}
+                  body={t("overview.definition.late_routes.body", { min: severeThresholdMin, floor: minSamples })}
+                  manual="pulse"
+                />
+              }
             >
               {severeCountDisplay}
               <span className="ov-hero-fact-unit">
@@ -266,28 +317,44 @@ export function OverviewHeroRow({
   );
 }
 
-/** One fact, dated: the facts count different windows, so each says which. */
+/** One fact, dated: the facts count different windows, so each says which.
+ *  It opens something on Pulse (`onClick`) or leads to another screen (`to`).
+ *  Its definition sits beside the control, never inside it: a control nested
+ *  in another would trigger both. */
 function FactRow({
   label,
   period,
-  onClick,
+  definition,
   children,
+  ...action
 }: {
   label: string;
   period: string;
-  onClick: () => void;
+  definition: ReactNode;
   children: ReactNode;
-}) {
+} & ({ onClick: () => void } | { to: string })) {
+  const content = (
+    <>
+      <span className="ov-hero-fact-label">
+        {label}{" "}
+        <span className="ov-hero-fact-period">{period}</span>
+      </span>
+      <span className="ov-hero-fact-value num">{children}</span>
+      <span className="ov-hero-fact-go" aria-hidden="true">›</span>
+    </>
+  );
   return (
     <li>
-      <button type="button" className="ov-hero-fact" onClick={onClick}>
-        <span className="ov-hero-fact-label">
-          {label}{" "}
-          <span className="ov-hero-fact-period">{period}</span>
-        </span>
-        <span className="ov-hero-fact-value num">{children}</span>
-        <span className="ov-hero-fact-go" aria-hidden="true">›</span>
-      </button>
+      {"to" in action ? (
+        <Link className="ov-hero-fact" to={action.to}>
+          {content}
+        </Link>
+      ) : (
+        <button type="button" className="ov-hero-fact" onClick={action.onClick}>
+          {content}
+        </button>
+      )}
+      {definition}
     </li>
   );
 }

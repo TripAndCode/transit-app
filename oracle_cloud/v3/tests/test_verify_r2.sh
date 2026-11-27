@@ -323,3 +323,67 @@ if command -v flock >/dev/null 2>&1; then
 else
     echo "SKIP: flock not installed on this platform, sync-r2 wait behavior not exercised"
 fi
+
+# --- VehiclePositions ---------------------------------------------------------
+reset_fixture() {
+    printf '1\taomori\t30\thttp://feed.test/tu.pb\t\thttp://ping.test/1\n' \
+        > "$COLLECTOR_BASE/etc/agencies.tsv"
+    printf '8\thiroden\t60\thttp://feed.test/tu8.pb\thttp://feed.test/s8.zip\thttp://ping.test/8\n' \
+        >> "$COLLECTOR_BASE/etc/agencies.tsv"
+    printf 'RTDATA-1' > "$COLLECTOR_BASE/data/1/rt/20260909.tar.gz"
+    printf 'RTDATA-8' > "$COLLECTOR_BASE/data/8/rt/20260909.tar.gz"
+    head -c 2048 /dev/zero > "$COLLECTOR_BASE/data/8/static/gtfs_static_20260909.zip"
+    ln -sfn gtfs_static_20260909.zip "$COLLECTOR_BASE/data/8/static/latest.zip"
+    rm -f "$COLLECTOR_BASE/etc/vehicle_positions.tsv"
+    rm -rf "$COLLECTOR_BASE/data/8/vp"
+    unset LS_vp_8_ LS_FIXTURE_DIR 2>/dev/null || true
+    seed_healthy
+}
+
+# No VP roster: R2's vp/ prefix is never listed, and nothing changes for RT.
+reset_fixture
+run_verify
+[ "$rc" -eq 0 ] || fail "no VP roster should still pass: $(cat "$TEST_BASE/out.log")"
+grep -q "vp/" "$AWS_LOG" && fail "vp/ was listed with no vehicle_positions.tsv: $(cat "$AWS_LOG")"
+pass "with no vehicle_positions.tsv, verify-r2.sh never lists vp/"
+
+# A configured VP feed whose days are fresh and intact in R2 passes, counts
+# its objects in the total, and is not counted as an agency.
+reset_fixture
+printf '# id\tname\tinterval\turl\n8\thiroden\t20\thttp://feed.test/8/vehicle_position.bin\n' \
+    > "$COLLECTOR_BASE/etc/vehicle_positions.tsv"
+mkdir -p "$COLLECTOR_BASE/data/8/vp"
+printf 'VPDATA-8' > "$COLLECTOR_BASE/data/8/vp/20260909.tar.gz"
+vp8_size=$(wc -c < "$COLLECTOR_BASE/data/8/vp/20260909.tar.gz" | tr -d ' ')
+export LS_vp_8_="$fresh $vp8_size vp/8/20260909.tar.gz"$'\n'
+run_verify
+[ "$rc" -eq 0 ] || fail "a fresh, intact VP mirror should exit 0: $(cat "$TEST_BASE/out.log")"
+grep -q "s3://test-bucket/vp/8/" "$AWS_LOG" || fail "vp/8/ was never listed"
+grep -q "2 agencies checked" "$TEST_BASE/out.log" || fail "a VP feed changed the agency count: $(cat "$TEST_BASE/out.log")"
+read -r _ _ marker_total < "$COLLECTOR_BASE/.verify-r2.last-result"
+[ "$marker_total" = "4" ] || fail "expected 4 objects (3 + one vp/), got '$marker_total'"
+pass "a configured VP feed fresh and intact in R2 passes"
+
+# Nothing under vp/<id>/ in R2 for a configured feed is a problem.
+unset LS_vp_8_
+run_verify
+[ "$rc" -eq 1 ] || fail "a configured VP feed with nothing in R2 should exit 1, got $rc"
+grep -q "PROBLEM a8 (hiroden): no VP objects in R2 under vp/8/" "$TEST_BASE/out.log" \
+    || fail "missing-VP reason absent: $(cat "$TEST_BASE/out.log")"
+pass "a configured VP feed with no vp/ objects in R2 fails"
+
+# A stale newest VP day is a problem, on the RT staleness limit.
+export LS_vp_8_="$(days_ago_ts 5) $vp8_size vp/8/20260909.tar.gz"$'\n'
+run_verify
+[ "$rc" -eq 1 ] || fail "a stale VP day should exit 1, got $rc"
+grep -q "PROBLEM a8 (hiroden): newest R2 VP object vp/8/20260909.tar.gz is 5d old" "$TEST_BASE/out.log" \
+    || fail "stale-VP reason absent: $(cat "$TEST_BASE/out.log")"
+pass "a stale newest VP day in R2 fails"
+
+# A VP object whose size differs from the local day file fails integrity.
+export LS_vp_8_="$fresh 3 vp/8/20260909.tar.gz"$'\n'
+run_verify
+[ "$rc" -eq 1 ] || fail "a size-mismatched VP object should exit 1, got $rc"
+grep -q "R2 VP object vp/8/20260909.tar.gz is 3 bytes but local" "$TEST_BASE/out.log" \
+    || fail "VP integrity reason absent: $(cat "$TEST_BASE/out.log")"
+pass "a VP object whose size differs from the local day fails integrity"

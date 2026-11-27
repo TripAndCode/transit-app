@@ -17,8 +17,6 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
-from api.sso import sso_status
-
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P, _SCRYPT_DKLEN = 2**14, 8, 1, 32
 
 
@@ -68,11 +66,11 @@ def verify_local_login_password(password: str, stored: str | None) -> bool:
 
 
 def token_hash(raw: str) -> str:
-    """SHA-256 hex digest of an opaque bearer credential (session id, API key).
+    """SHA-256 hex digest of an opaque bearer credential, a session id.
 
-    Session ids and API keys are high-entropy random strings, so a plain
-    digest -- not a slow password KDF -- is the right primitive: there is no
-    guessable pre-image to defend against, and this runs on every request.
+    Session ids are high-entropy random strings, so a plain digest -- not a
+    slow password KDF -- is the right primitive: there is no guessable
+    pre-image to defend against, and this runs on every request.
     Storing only the digest means a copy of the database cannot be replayed
     as a login.
 
@@ -118,16 +116,6 @@ def require_user(request: Request) -> User:
     return user
 
 
-def require_user_when_sign_in_exists(request: Request) -> User | None:
-    """``require_user`` while SSO is configured; otherwise the caller, if any.
-
-    In anonymous-only mode nobody can sign in, so a signed-in requirement
-    would refuse every caller for good instead of gating anyone.
-    """
-    enabled, _ = sso_status()
-    return require_user(request) if enabled else current_user(request)
-
-
 def require_admin(request: Request) -> User:
     """FastAPI dependency that 403s unless the caller has the ``admin`` role."""
     user = require_user(request)
@@ -152,7 +140,7 @@ def require_llm_approved(user: User | None) -> User:
     endpoint actually receives `user` through that dependency rather than
     this function re-deriving it from ``request.state`` itself.
 
-    Endpoints that must let Stage 1/2 (rules/embedding) through for
+    Endpoints that must let the rules stage through for
     anyone -- ``/ask`` -- check ``user.llm_approved`` themselves instead of
     calling this, since they can't reject the whole request upfront.
     """

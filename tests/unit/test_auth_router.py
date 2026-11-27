@@ -6,7 +6,11 @@ the OAuth-transaction signer reads its key lazily, and the failed-
 local-login audit fingerprint never retains the raw username.
 """
 
+import pytest
+from itsdangerous import BadSignature, URLSafeTimedSerializer
+
 from api.routers.auth import _get_signer, _username_fingerprint
+from api.sso import DEV_SIGNING_KEY
 
 
 def test_get_signer_reads_session_signing_key_at_call_time(monkeypatch):
@@ -23,6 +27,28 @@ def test_get_signer_falls_back_to_dev_key_when_unset(monkeypatch):
     monkeypatch.delenv("SESSION_SIGNING_KEY", raising=False)
     signer = _get_signer()
     assert signer.secret_keys == [b"dev-only-not-secret"]
+
+
+def test_get_signer_falls_back_to_dev_key_when_blank(monkeypatch):
+    """`.env.example` ships the variable empty; an empty key would sign as
+    forgeably as the dev key, so it is treated as unset."""
+    monkeypatch.setenv("SESSION_SIGNING_KEY", "")
+    assert _get_signer().secret_keys == [b"dev-only-not-secret"]
+
+
+def test_get_signer_uses_the_key_without_its_surrounding_whitespace(monkeypatch):
+    """The startup guard and every signer see one normalised value."""
+    monkeypatch.setenv("SESSION_SIGNING_KEY", "  padded-key \r")
+    assert _get_signer().secret_keys == [b"padded-key"]
+
+
+def test_an_oauth_tx_cookie_forged_with_the_dev_key_is_rejected_under_a_real_key(monkeypatch):
+    """The dev key is public, so anyone can sign with it; a deployment with a
+    real key must not accept what it signed."""
+    forged = URLSafeTimedSerializer(DEV_SIGNING_KEY, salt="oauth-tx").dumps({"state": "attacker"})
+    monkeypatch.setenv("SESSION_SIGNING_KEY", "a-real-random-secret")
+    with pytest.raises(BadSignature):
+        _get_signer().loads(forged, max_age=60)
 
 
 def test_get_signer_round_trips_payload(monkeypatch):

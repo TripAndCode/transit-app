@@ -15,13 +15,19 @@ cannot answer for.
 
 from __future__ import annotations
 
+import json
 import math
-import re
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
+from pipeline.feed_quality import COLUMNS as FEED_QUALITY_COLUMNS
+from pipeline.feed_quality_grade import grade_month
+from pipeline.reports.comparability import clamp_pct
+from pipeline.reports.performance_standard import METRIC_TYPES
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
+from pipeline.timetable_in_force import fetch_day
 
 __all__ = [
     "AGENCIES_HEALTH_SQL",
@@ -35,6 +41,8 @@ __all__ = [
     "CLAMP_HISTORY_DAYS",
     "CLAMP_HISTORY_SQL",
     "CURRENT_STATIC_VERSION_SQL",
+    "FEED_QUALITY_MONTHS",
+    "FEED_QUALITY_SQL",
     "METRIC_TYPES",
     "RT_COVERAGE_FIELDS",
     "RT_COVERAGE_SQL",
@@ -46,6 +54,7 @@ __all__ = [
     "WEIGHTS_SQL",
     "build_agency_health",
     "build_clamp_history",
+    "build_feed_quality",
     "build_rt_coverage",
     "build_static_versions",
     "build_weights_coverage",
@@ -54,10 +63,11 @@ __all__ = [
     "validate_weight_edits",
 ]
 
-#: Mirrors the CHECK constraint on ``route_performance_standards.metric_type``.
-#: Kept as an explicit allow-list so a bad value is a 422 with a readable
-#: message instead of a constraint violation surfacing as a 500.
-METRIC_TYPES = ("ewt_sec", "vehicle_km_delivered_pct")
+#: The targets that are shares, in percent: of departures on time, and of
+#: planned trips run. The table's own CHECKs hold them to the same range
+#: (migrations 0089 and 0094).
+_SHARE_METRICS = frozenset({"on_time_pct", "service_delivered_pct"})
+_SHARE_TARGET_RANGE = (0.0, 100.0)
 
 #: Width of the clamp-rate sparkline, in whole days ending today.
 CLAMP_HISTORY_DAYS = 14
@@ -84,6 +94,18 @@ CLAMP_HISTORY_SQL = """
     FROM agg_feed_health
     WHERE agency_id = $1 AND date >= $2 AND date <= $3
     ORDER BY date
+"""
+
+#: The drawer's feed-quality trend: the newest month built and the five before it.
+FEED_QUALITY_MONTHS = 6
+
+# Every scorecard column but the agency's id (pipeline.feed_quality.COLUMNS).
+FEED_QUALITY_SQL = f"""
+    SELECT {", ".join(column for column in FEED_QUALITY_COLUMNS if column != "agency_id")}
+    FROM feed_quality_monthly
+    WHERE agency_id = $1
+    ORDER BY month DESC
+    LIMIT $2
 """
 
 # `routes` and `calendar_until` are not columns of agg_static_version_summary
@@ -337,7 +359,35 @@ def build_clamp_history(
         row = by_date.get(day)
         raw = int(row["raw_samples"]) if row and row["raw_samples"] else 0
         clamp = int(row["clamp_count"]) if row and row["clamp_count"] else 0
-        out.append({"date": day.isoformat(), "clamp_pct": round(clamp / raw * 100, 2) if raw else None})
+        out.append({"date": day.isoformat(), "clamp_pct": clamp_pct(clamp, raw)})
+    return out
+
+
+def build_feed_quality(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The scorecard's months in the order read, each value as JSON carries
+    it: a date as ISO text, a NUMERIC share as a float, a missing figure as
+    ``None`` beside its reason. Each month carries its grade
+    (:func:`pipeline.feed_quality_grade.grade_month`), which only this admin
+    bundle states."""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        month: dict[str, Any] = {}
+        for key, value in row.items():
+            if isinstance(value, date):
+                month[key] = value.isoformat()
+            elif isinstance(value, Decimal):
+                month[key] = float(value)
+            elif key == "validator_rules" and isinstance(value, str):
+                # asyncpg hands JSONB over as its text.
+                month[key] = json.loads(value)
+            else:
+                month[key] = value
+        graded = grade_month(month)
+        month["grade"] = graded.grade
+        month["grade_failing"] = list(graded.failing)
+        month["grade_missing"] = [{"criterion": criterion, "reason": reason} for criterion, reason in graded.missing]
+        month["grade_failing_fields"] = list(graded.failing_fields)
+        out.append(month)
     return out
 
 
@@ -349,6 +399,12 @@ def _calendar_date(value: str | None) -> str | None:
     if len(value) == 8 and value.isdigit():
         return f"{value[0:4]}-{value[4:6]}-{value[6:8]}"
     return value
+
+
+def _fetched_on(version: Mapping[str, Any] | None) -> str | None:
+    """The day the loaded zip's version name says it was fetched, as an ISO date."""
+    day = fetch_day(version["version"] if version else None)
+    return day.isoformat() if day else None
 
 
 def build_static_versions(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -379,8 +435,10 @@ def build_weights_coverage(routes_with_weights: int | None, routes_total: int | 
 def validate_standard_edits(items: Sequence[Mapping[str, Any]]) -> None:
     """Raise ``ValueError`` for a standards payload the table would reject.
 
-    Checked here rather than left to the database so a bad edit is a 422
-    naming the offending field, and so the in-payload duplicate case is
+    ``metric_type`` must be one of :data:`METRIC_TYPES`, the values the
+    table's CHECK allows. Checked here rather than left to the database so a
+    bad edit is a 422 naming the offending field, and so the in-payload
+    duplicate case is
     caught before any row is written: the batched upsert is one INSERT ...
     ON CONFLICT, which cannot touch the same row twice and would otherwise
     fail with a CardinalityViolation.
@@ -398,6 +456,9 @@ def validate_standard_edits(items: Sequence[Mapping[str, Any]]) -> None:
         # figure derived from such a threshold would silently be NaN.
         if threshold is None or not math.isfinite(float(threshold)):
             raise ValueError("threshold_value must be a finite number")
+        low, high = _SHARE_TARGET_RANGE
+        if metric_type in _SHARE_METRICS and not low <= float(threshold) <= high:
+            raise ValueError(f"the {metric_type} threshold_value is a percentage, from {low:g} to {high:g}")
         rate = item.get("bonus_malus_rate")
         if rate is None or not math.isfinite(float(rate)) or float(rate) < 0:
             raise ValueError("bonus_malus_rate must be a finite, non-negative number")
@@ -433,22 +494,6 @@ def _group_by_agency(rows: Sequence[Mapping[str, Any]]) -> dict[int, list[Mappin
     for row in rows:
         grouped.setdefault(row["agency_id"], []).append(row)
     return grouped
-
-
-#: The fetchers name each zip they persist ``gtfs_static_YYYYMMDD`` after the
-#: day it was fetched, and the loader stamps that stem on every trip as its
-#: static version.
-_VERSION_DATE_RE = re.compile(r"(\d{4})(\d{2})(\d{2})$")
-
-
-def _version_date(version: str | None) -> str | None:
-    match = _VERSION_DATE_RE.search(version or "")
-    if match is None:
-        return None
-    try:
-        return date(int(match[1]), int(match[2]), int(match[3])).isoformat()
-    except ValueError:
-        return None
 
 
 def build_agency_health(
@@ -513,9 +558,7 @@ def build_agency_health(
                     if version is None
                     else {"version": version["version"], "analyzed_at": _iso(version.get("analyzed_at"))}
                 ),
-                "static_loaded_on": (
-                    jst_date(loads_by_agency.get(aid)) or _version_date(version["version"] if version else None)
-                ),
+                "static_loaded_on": jst_date(loads_by_agency.get(aid)) or _fetched_on(version),
             }
         )
     return out

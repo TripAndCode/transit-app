@@ -61,33 +61,6 @@ def _half_width_pp(successes: int, n: int) -> float:
     return (high - low) * 100 / 2
 
 
-def linear_percentile(values: list[float], q: float) -> float | None:
-    """Linear-interpolated quantile (0..1) of a raw (non-bucketed) sample.
-
-    Standard "closest ranks, linearly interpolated" estimator (numpy's
-    default ``'linear'`` method): sorts *values*, then interpolates between
-    the two data points that straddle rank ``q * (n - 1)``. Distinct from
-    ``pipeline.histogram.percentile_from_hist``, which interpolates a
-    quantile from pre-bucketed COUNT histograms (the ``agg_*`` write path's
-    representation) -- this operates on a raw in-memory list instead, for
-    callers building a distribution from live per-row values that were never
-    bucketed (e.g. a single Ask-tool request's ClickHouse row set, too small
-    and short-lived to justify materializing a histogram for). ``None`` for
-    an empty sample, since there's no quantile of nothing.
-    """
-    if not values:
-        return None
-    xs = sorted(values)
-    n = len(xs)
-    if n == 1:
-        return float(xs[0])
-    pos = q * (n - 1)
-    lo = int(pos)
-    hi = min(lo + 1, n - 1)
-    frac = pos - lo
-    return xs[lo] + frac * (xs[hi] - xs[lo])
-
-
 def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
     """Append a ``low_confidence`` bool to each on-time-style row.
 
@@ -96,8 +69,7 @@ def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
     live fallback (``pct`` a percentage 0..100, ``samples`` the route's
     observation count). Returns a NEW list of 6-tuples; the input rows and
     ``compute_on_time``'s own contract are untouched, so callers that read
-    its raw rows (e.g. ``pipeline.reports.suggest``'s fallback) are
-    unaffected -- this is a display-layer annotation only.
+    its raw rows are unaffected -- this is a display-layer annotation only.
 
     ``successes`` is back-derived from the already-rounded percentage
     (``round(pct/100 * samples)``) rather than re-read from an exact count

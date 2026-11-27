@@ -12,6 +12,8 @@ import pytest
 from api.range import RangeCtx
 from pipeline.query import tools
 
+pytestmark = pytest.mark.usefixtures("unstamped_tools")
+
 
 class _NoCalendarConn:
     async def fetch(self, *_args):

@@ -1,10 +1,7 @@
-"""Tests for GET/POST /api/admin/ask/* — admin Ask-ops query log, funnel,
-promote-to-intent-cache, and eval-result endpoints.
-"""
+"""Tests for GET /api/admin/ask/* — the admin Ask-ops query log and funnel."""
 
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -15,30 +12,10 @@ from httpx import ASGITransport
 from tests.conftest import _test_pool
 from tests.fixtures.users import seed_session
 
-_EMBED_DIM = 384  # matches rag_chunks.embedding vector(384)
-
-
-class _FakeEmbedder:
-    available = True
-    dim = _EMBED_DIM
-
-    def embed(self, text: str, *, mode: str) -> list[float]:
-        return [0.1] * _EMBED_DIM
-
-
-class _UnavailableEmbedder:
-    available = False
-
-    def embed(self, text: str, *, mode: str) -> list[float]:
-        raise RuntimeError("unavailable")
-
 
 @pytest.fixture
 async def ask_ops_client(apply_schema, monkeypatch):
     from api.main import app
-    from api.routers import admin_ask as admin_ask_mod
-
-    monkeypatch.setattr(admin_ask_mod, "get_embedder", lambda: _FakeEmbedder())
 
     pool = await _test_pool()
     app.state.pool = pool
@@ -105,8 +82,7 @@ async def test_queries_returns_derived_route_and_status(ask_ops_client):
     by_route = {r["route"]: r for r in body["rows"]}
     assert by_route["rules"]["status"] == "ok"
     assert by_route["nn"]["status"] == "error"
-    assert by_route["rag"]["promotable"] is True
-    assert by_route["rules"]["promotable"] is False
+    assert "promotable" not in body["rows"][0]
     assert "user" not in body["rows"][0]
     assert "latency_ms" not in body["rows"][0]
 
@@ -248,214 +224,6 @@ async def test_both_date_bounds_are_jst_days_whatever_the_process_zone(ask_ops_c
 
 
 @pytest.mark.asyncio
-async def test_promote_requires_admin(ask_ops_client):
-    c, *_ = ask_ops_client
-    resp = await c.post("/api/admin/ask/promote", json={"query_log_id": 1})
-    assert resp.status_code in (401, 403)
-
-
-@pytest.mark.asyncio
-async def test_promote_404_for_missing_log_row(ask_ops_client):
-    c, sid, *_ = ask_ops_client
-    resp = await c.post(
-        "/api/admin/ask/promote",
-        json={"query_log_id": 999999},
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_promote_400_for_non_rag_row(ask_ops_client):
-    c, sid, _uid, agency_id, pool = ask_ops_client
-    log_id = await _insert_log(pool, agency_id, router_stage="rules", signature_hash=None)
-    resp = await c.post(
-        "/api/admin/ask/promote",
-        json={"query_log_id": log_id},
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert resp.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_promote_503_when_embedder_unavailable(ask_ops_client, monkeypatch):
-    from api.routers import admin_ask as admin_ask_mod
-
-    monkeypatch.setattr(admin_ask_mod, "get_embedder", lambda: _UnavailableEmbedder())
-    c, sid, _uid, agency_id, pool = ask_ops_client
-    async with pool.acquire() as conn:
-        from pipeline.query import intent_cache
-        from pipeline.query.intent import IntentSignature
-
-        await intent_cache.upsert(
-            conn,
-            "dddddddddddddddd",
-            IntentSignature(tool="top_n", args={}, confidence=0.9),
-            {},
-            agency_id,
-            question="Q",
-        )
-    log_id = await _insert_log(pool, agency_id, router_stage="llm", signature_hash="dddddddddddddddd")
-    resp = await c.post(
-        "/api/admin/ask/promote",
-        json={"query_log_id": log_id},
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert resp.status_code == 503
-
-
-@pytest.mark.asyncio
-async def test_promote_success_marks_promoted_and_inserts_chunk(ask_ops_client):
-    c, sid, _uid, agency_id, pool = ask_ops_client
-    async with pool.acquire() as conn:
-        from pipeline.query import intent_cache
-        from pipeline.query.intent import IntentSignature
-
-        await intent_cache.upsert(
-            conn,
-            "eeeeeeeeeeeeeeee",
-            IntentSignature(tool="top_n", args={"metric": "avg_delay"}, confidence=0.9),
-            {"metric": "avg_delay"},
-            agency_id,
-            question="遅延ランキング",
-        )
-    log_id = await _insert_log(
-        pool, agency_id, router_stage="llm", signature_hash="eeeeeeeeeeeeeeee", question="遅延ランキング"
-    )
-
-    resp = await c.post(
-        "/api/admin/ask/promote",
-        json={"query_log_id": log_id},
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["promoted"] is True
-    assert body["chunk_id"] == "cache_eeeeeeeeeeeeeeee"
-
-    async with pool.acquire() as conn:
-        promoted_at = await conn.fetchval(
-            "SELECT promoted_at FROM ask_intent_cache WHERE signature_hash=$1", "eeeeeeeeeeeeeeee"
-        )
-        assert promoted_at is not None
-        chunk = await conn.fetchrow("SELECT content FROM rag_chunks WHERE chunk_id='cache_eeeeeeeeeeeeeeee'")
-        assert chunk is not None
-        assert chunk["content"] == "遅延ランキング"
-        audit = await conn.fetchrow(
-            "SELECT actor_id, target_type, target_id, after FROM admin_audit WHERE action='ask.promote_intent_cache'"
-        )
-        assert audit is not None
-        assert audit["actor_id"] == _uid
-        assert audit["target_type"] == "intent_cache"
-        assert audit["target_id"] == "eeeeeeeeeeeeeeee"
-        assert json.loads(audit["after"]) == {"agency_id": agency_id, "query_log_id": log_id}
-
-
-@pytest.mark.asyncio
-async def test_promote_publishes_the_reviewed_log_question_not_the_caches_latest(ask_ops_client):
-    """The admin reviews one log row's question; a later asker's wording on
-    the same signature must not be what reaches other users."""
-    c, sid, _uid, agency_id, pool = ask_ops_client
-    sig = "dddddddddddddddd"
-    async with pool.acquire() as conn:
-        from pipeline.query import intent_cache
-        from pipeline.query.intent import IntentSignature
-
-        await intent_cache.upsert(
-            conn,
-            sig,
-            IntentSignature(tool="top_n", args={"metric": "avg_delay"}, confidence=0.9),
-            {"metric": "avg_delay"},
-            agency_id,
-            question="別の人が後から書いた質問",
-        )
-    log_id = await _insert_log(pool, agency_id, router_stage="llm", signature_hash=sig, question="遅延ランキング")
-
-    resp = await c.post(
-        "/api/admin/ask/promote",
-        json={"query_log_id": log_id},
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert resp.json()["promoted"] is True
-
-    async with pool.acquire() as conn:
-        content = await conn.fetchval("SELECT content FROM rag_chunks WHERE chunk_id=$1", f"cache_{sig}")
-        last_question = await conn.fetchval("SELECT last_question FROM ask_intent_cache WHERE signature_hash=$1", sig)
-    assert content == "遅延ランキング"
-    assert last_question == "遅延ランキング"
-
-
-@pytest.mark.asyncio
-async def test_promote_idempotent_returns_already_promoted(ask_ops_client):
-    c, sid, _uid, agency_id, pool = ask_ops_client
-    async with pool.acquire() as conn:
-        from pipeline.query import intent_cache
-        from pipeline.query.intent import IntentSignature
-
-        await intent_cache.upsert(
-            conn,
-            "ffffffffffffffff",
-            IntentSignature(tool="top_n", args={}, confidence=0.9),
-            {},
-            agency_id,
-            question="Q2",
-        )
-    log_id = await _insert_log(pool, agency_id, router_stage="llm", signature_hash="ffffffffffffffff", question="Q2")
-
-    first = await c.post(
-        "/api/admin/ask/promote",
-        json={"query_log_id": log_id},
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert first.json()["promoted"] is True
-
-    second = await c.post(
-        "/api/admin/ask/promote",
-        json={"query_log_id": log_id},
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert second.status_code == 200
-    assert second.json() == {"promoted": False, "reason": "already_promoted", "chunk_id": None}
-
-
-@pytest.mark.asyncio
-async def test_eval_requires_admin(ask_ops_client):
-    c, *_ = ask_ops_client
-    resp = await c.get("/api/admin/ask/eval")
-    assert resp.status_code in (401, 403)
-
-
-@pytest.mark.asyncio
-async def test_eval_returns_null_when_no_artifact(ask_ops_client, monkeypatch, tmp_path):
-    from api.routers import admin_ask as admin_ask_mod
-
-    monkeypatch.setattr(admin_ask_mod, "_EVAL_CACHE_DIR", tmp_path / "no-such-dir")
-    c, sid, *_ = ask_ops_client
-    resp = await c.get("/api/admin/ask/eval", cookies={"sid": sid})
-    assert resp.status_code == 200
-    assert resp.json() is None
-
-
-@pytest.mark.asyncio
-async def test_eval_returns_latest_artifact_when_present(ask_ops_client, monkeypatch, tmp_path):
-    from api.routers import admin_ask as admin_ask_mod
-
-    (tmp_path / "ask-eval-2026-09-14.json").write_text('{"score": 0.87}', encoding="utf-8")
-    monkeypatch.setattr(admin_ask_mod, "_EVAL_CACHE_DIR", tmp_path)
-    c, sid, *_ = ask_ops_client
-    resp = await c.get("/api/admin/ask/eval", cookies={"sid": sid})
-    assert resp.status_code == 200
-    assert resp.json()["score"] == 0.87
-
-
-@pytest.mark.asyncio
 async def test_the_api_session_settings_survive_a_connection_going_back_to_the_pool(apply_schema):
     """The pool runs RESET ALL whenever it takes a connection back, which
     undoes a SET. Every later request on that connection still has to see
@@ -468,3 +236,85 @@ async def test_the_api_session_settings_survive_a_connection_going_back_to_the_p
                 assert await conn.fetchval("SHOW statement_timeout") == "30s"
     finally:
         await pool.close()
+
+
+async def _insert_notebook_log(pool, agency_id, stage, tool, success=True, latency_ms=100, age_days=0):
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO ask_query_log (agency_id, question, router_stage, tool, success, latency_ms, created_at) "
+            "VALUES ($1, '', $2, $3, $4, $5, now() - $6 * INTERVAL '1 day')",
+            agency_id,
+            stage,
+            tool,
+            success,
+            latency_ms,
+            age_days,
+        )
+
+
+@pytest.mark.asyncio
+async def test_tools_requires_admin(ask_ops_client):
+    c, *_ = ask_ops_client
+    resp = await c.get("/api/admin/ask/tools")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_tools_counts_notebook_paths_per_tool_for_the_last_30_days(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", latency_ms=100)
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", success=False, latency_ms=300)
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "top_n", latency_ms=200)
+    await _insert_notebook_log(pool, agency_id, "followup", "top_n", latency_ms=9000)
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "time_series")
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", None, success=False)
+    # Outside the window, and not a notebook path: neither is counted.
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", age_days=45)
+    await _insert_log(pool, agency_id, router_stage="rules", tool="top_n")
+
+    resp = await c.get("/api/admin/ask/tools", cookies={"sid": sid})
+    assert resp.status_code == 200
+    by_tool = {t["tool"]: t for t in resp.json()["tools"]}
+    assert by_tool["top_n"] == {
+        "tool": "top_n",
+        "signed_in": 2,
+        "signed_out": 1,
+        "followups": 1,
+        "failed": 1,
+        "avg_latency_ms": 200,
+        "avg_followup_latency_ms": 9000,
+    }
+    assert by_tool["time_series"]["signed_out"] == 1
+    assert by_tool[None]["failed"] == 1
+    assert resp.json()["tools"][0]["tool"] == "top_n"
+
+
+@pytest.mark.asyncio
+async def test_funnel_leaves_out_notebook_dispatches(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_log(pool, agency_id, router_stage="rules")
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n")
+    await _insert_notebook_log(pool, agency_id, "followup", "top_n")
+    body = (await c.get("/api/admin/ask/funnel", cookies={"sid": sid})).json()
+    assert body["total"] == 1
+    assert [r["route"] for r in body["by_route"]] == ["rules", "nn", "rag", "no_history"]
+
+
+@pytest.mark.asyncio
+async def test_queries_leave_out_notebook_rows_unless_their_route_is_asked_for(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_log(pool, agency_id, router_stage="rules")
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "top_n")
+    rows = (await c.get("/api/admin/ask/queries", cookies={"sid": sid})).json()["rows"]
+    assert [r["route"] for r in rows] == ["rules"]
+
+
+@pytest.mark.asyncio
+async def test_queries_filter_by_notebook_route(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_log(pool, agency_id, router_stage="rules")
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "top_n")
+    rows = (await c.get("/api/admin/ask/queries", params={"route": "card_signed_out"}, cookies={"sid": sid})).json()[
+        "rows"
+    ]
+    assert [(r["route"], r["tool"]) for r in rows] == [("card_signed_out", "top_n")]

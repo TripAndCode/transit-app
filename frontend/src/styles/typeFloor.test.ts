@@ -67,7 +67,6 @@ const TOKEN_BYPASS_AUDITED_FILES = [
   "pages/admin/AdminBoardPage.tsx",
   "pages/LoginPage.css",
   "components/paramPills/RoutePickerPill.css",
-  "components/SettingsDrawer.tsx",
   "pages/admin/AdminUsersPage.tsx",
   "tabs/ask/investigation.css",
   "tabs/ask/stopEvidence.css",

@@ -1,0 +1,5 @@
+/* A route's trailing reference beside its figure, and the Routes table's
+   legend for the marks that compare with it: quiet context under the
+   figures, never weighted like them. */
+.route-reference { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; color: var(--text-tertiary); font-size: var(--text-xs); }
+.route-reference--legend { display: flex; margin: 0 0 var(--space-1); font-size: var(--text-sm); }

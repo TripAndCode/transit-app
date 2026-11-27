@@ -53,11 +53,19 @@ class _EmptyClickHouse:
         return SimpleNamespace(result_rows=[], column_names=[])
 
 
+class _UnstampedAgency:
+    """An agency whose ingest stamps no timetable version, so a frame's read
+    is filed as ingested and needs nothing more from Postgres."""
+
+    async def fetchval(self, *_args, **_kwargs):
+        return None
+
+
 def _client() -> TestClient:
     app = FastAPI()
     app.include_router(map_router.router)
     app.dependency_overrides[get_agency] = lambda: 1
-    app.dependency_overrides[get_conn] = lambda: None
+    app.dependency_overrides[get_conn] = lambda: _UnstampedAgency()
     app.dependency_overrides[get_ch] = lambda: _EmptyClickHouse()
     return TestClient(app)
 

@@ -12,6 +12,7 @@ scheduled sweep across two pages of the timeline.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -30,7 +31,7 @@ TRIGGERABLE_KINDS: tuple[str, ...] = ("ingest", "analyze")
 
 RUNS_FOR_DAY_SQL = """
     SELECT r.run_id, r.kind, r.agency_id, a.agency_name, r.started_at, r.finished_at,
-           r.status, r.rows, r.lock_wait_ms, r.error, r.requested_by
+           r.status, r.rows, r.lock_wait_ms, r.error, r.requested_by, r.rebuild_headline::text AS rebuild_headline
     FROM pipeline_runs r
     LEFT JOIN agencies a ON a.agency_id = r.agency_id
     WHERE r.started_at >= $1 AND r.started_at < $2
@@ -44,10 +45,11 @@ INSERT_MANUAL_RUN_SQL = """
     WITH inserted AS (
         INSERT INTO pipeline_runs (kind, agency_id, started_at, status, requested_by)
         VALUES ($1, $2, now(), 'running', $3)
-        RETURNING run_id, kind, agency_id, started_at, finished_at, status, rows, lock_wait_ms, error, requested_by
+        RETURNING run_id, kind, agency_id, started_at, finished_at, status, rows, lock_wait_ms, error, requested_by,
+                  rebuild_headline
     )
     SELECT i.run_id, i.kind, i.agency_id, a.agency_name, i.started_at, i.finished_at,
-           i.status, i.rows, i.lock_wait_ms, i.error, i.requested_by
+           i.status, i.rows, i.lock_wait_ms, i.error, i.requested_by, i.rebuild_headline::text AS rebuild_headline
     FROM inserted i
     LEFT JOIN agencies a ON a.agency_id = i.agency_id
 """
@@ -196,6 +198,7 @@ def shape_run(row: Mapping[str, Any]) -> dict[str, Any]:
         "lock_probe_ms": row["lock_wait_ms"],
         "error": row["error"],
         "requested_by": row["requested_by"],
+        "rebuild_headline": json.loads(row["rebuild_headline"]) if row["rebuild_headline"] else None,
     }
 
 

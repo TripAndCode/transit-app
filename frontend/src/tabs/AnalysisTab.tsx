@@ -1,11 +1,9 @@
-import { use, useState } from "react";
+import { use, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   REPORT_ROWS_MAX,
   reportQueryString,
-  useForecastHeatmap,
-  useForecastOverview,
   useReport,
   useReports,
   type ReportOptions,
@@ -14,12 +12,11 @@ import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { DataEndContext, defaultPeriod, scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { ReportResponse, TrendPayload } from "../api/types";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
-import { InsightPanel } from "../components/InsightPanel";
 import { SkeletonChart, SkeletonTable } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
@@ -27,11 +24,14 @@ import { HeatSurface } from "../components/charts/HeatSurface";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
+import { hasStatisticsColumns } from "../components/reportTableSchemas";
+import { FEW_DATA_MIN_SAMPLES } from "../components/fewData";
 import { FILTER_SEPARATOR, formatDate, formatDateRange } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
+import { useCapabilityTier } from "../api/useCapabilityTier";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import { WhyAnalyses } from "../components/analysis/WhyAnalyses";
@@ -44,6 +44,10 @@ import { certificateDayScope } from "../components/analysis/certificateDayScope"
 import { pickReport } from "../routes/destinations";
 import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
 import { CsvLink } from "../components/analysis/CsvLink";
+import { StatisticsToggle } from "../components/analysis/StatisticsToggle";
+import { useShowStatistics } from "../api/statisticsPref";
+import { ExportMenu } from "../components/ExportMenu";
+import type { SnapshotSpec } from "../api/snapshots";
 
 // The route lists these screens host, which leave retired route codes and
 // zero-delay routes out unless asked (api/routers/reports.py's
@@ -75,8 +79,8 @@ function rankingOptions(reportType: string | null | undefined, kept: KeptRoutes)
   return { ...kept };
 }
 
-/** One screen's reports: the list shows only `reportTypes`, and the open
- *  report is the one `pickReport` resolves from the `report` param. */
+/** A screen's reports behind a list: the list shows only `reportTypes`, and
+ *  the open report is the one `pickReport` resolves from the `report` param. */
 export function AnalysisTab({
   reportTypes,
   defaultReport,
@@ -88,9 +92,7 @@ export function AnalysisTab({
   const [searchParams, setSearchParams] = useSearchParams();
   const reportType = pickReport(searchParams.get("report"), reportTypes, defaultReport);
   const id = useAgencyId();
-  const routeNames = useRouteNames(id);
-  const [ctx, update] = useScope();
-  const jumpToLatestData = useJumpToLatestDataRange(id);
+  const list = useReports(id);
   function selectReport(type: string) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -98,6 +100,65 @@ export function AnalysisTab({
       return next;
     });
   }
+  // `route_forecast` is served by its own endpoint, so the reports list never
+  // returns it -- it is appended here as list data rather than re-rendered as
+  // a second, hand-copied button underneath the list.
+  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"].filter((type) =>
+    reportTypes.includes(type),
+  );
+  return (
+    <ReportScreen
+      reportType={reportType}
+      aside={
+        <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
+          <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {t("reports.list_title")}
+            <InsightHint
+              title={t("reports.hint.title")}
+              body={
+                <>
+                  <strong>{t("reports.hint.ranking_strong")}</strong>{t("reports.hint.ranking_body")}
+                  <br /><br />
+                  <strong>{t("reports.hint.trend_strong")}</strong>{t("reports.hint.trend_body")}
+                  <br /><br />
+                  <strong>{t("reports.hint.heatmap_strong")}</strong>{t("reports.hint.heatmap_body")}
+                  <br /><br />
+                  <strong>{t("reports.hint.dow_strong")}</strong>{t("reports.hint.dow_body")}
+                  <br /><br />
+                  {t("reports.hint.csv")}
+                </>
+              }
+            />
+          </h3>
+          {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
+          {list.isLoading && <SkeletonTable rows={6} rowHeight={48} />}
+          {list.data && list.data.length === 0 && (
+            <EmptyState title={t("reports.empty.title")} hint={t("reports.empty.hint")} />
+          )}
+          {list.data && <ReportList types={listedTypes} active={reportType ?? null} onSelect={selectReport} />}
+        </div>
+      }
+    />
+  );
+}
+
+/** A screen with one report: the report fills the page, with no list beside
+ *  it, whatever `report` the URL carries. */
+export function SingleReportScreen({ reportType }: { reportType: string }) {
+  return <ReportScreen reportType={reportType} />;
+}
+
+/** The open report with its scope bar, and `aside` (a report list)
+ *  beside it when the screen has several. */
+function ReportScreen({ reportType, aside }: { reportType: string | null; aside?: ReactNode }) {
+  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const id = useAgencyId();
+  const tier = useCapabilityTier(id);
+  const routeNames = useRouteNames(id);
+  const [ctx, update] = useScope();
+  const [showStatistics] = useShowStatistics();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
   function setFlag(param: string, on: boolean) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -110,11 +171,11 @@ export function AnalysisTab({
     includeRetired: searchParams.get("retired") === "1",
     includeZeroDelay: searchParams.get("zero_delay") === "1",
   };
-  const list = useReports(id);
-  // The certificate, like route_forecast, owns its section and its queries.
-  // Its day and route are its own scope, so the screen's period sentence,
-  // which nothing on it reads, is left off.
+  // The certificate and route_forecast each own their section and its
+  // queries, and pick their own day or route there, so the scope bar,
+  // which nothing on them reads, is left off.
   const isCertificate = reportType === "delay_certificate";
+  const ownsScope = isCertificate || reportType === "route_forecast";
   const detail = useReport(
     id,
     reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
@@ -123,74 +184,28 @@ export function AnalysisTab({
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
   const isAdmin = useIsAdmin();
-  // route_forecast is served by the forecast endpoints, so their own map
-  // applies: one chosen route opens that route's forecast, which honours the
-  // route; otherwise the agency-wide overview. A report's map counts only
-  // once that report's response is the one on screen, not the previous
-  // report kept as placeholder data.
-  const forecastRoute = reportType === "route_forecast" && ctx.routes.length === 1 ? ctx.routes[0] : null;
-  const forecast = useForecastOverview(reportType === "route_forecast" ? id : null);
-  const routeForecast = useForecastHeatmap(forecastRoute != null ? id : null, forecastRoute ?? "");
+  // What a snapshot of the council report stores: the one query its Export
+  // menu and its print both send, which only an admin's screen has.
+  const councilSnapshot: SnapshotSpec | null =
+    isAdmin && id != null && detail.data?.report_type === "council_summary"
+      ? { screen: "council_report", agencyId: id, query: reportQueryString(ctx, rankingOptions(detail.data.report_type, kept)) }
+      : null;
+  // The bar reads a report's map only once that report has answered; while
+  // the previous report stays on screen as placeholder data, the bar keeps
+  // what it last held. A report that failed says nothing about its
+  // conditions, so the bar shows them all.
   const scopeApplied =
-    reportType === "route_forecast"
-      ? forecastRoute != null
-        ? routeForecast.data?.scope_applied
-        : forecast.data?.scope_applied
-      : detail.data?.report_type === reportType
-        ? detail.data.scope_applied
-        : undefined;
+    detail.data?.report_type === reportType ? detail.data.scope_applied : detail.error ? {} : undefined;
 
   function csvHref(type: string): string {
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, kept))}&format=csv`);
   }
 
-  // `route_forecast` is served by its own endpoint, so the reports list never
-  // returns it -- it is appended here as list data rather than re-rendered as
-  // a second, hand-copied button underneath the list.
-  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"].filter((type) =>
-    reportTypes.includes(type),
-  );
-
   return (
     <div className="analysis-tab" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {!isCertificate && <ScopeSentence applied={scopeApplied} />}
+      {!ownsScope && <ScopeBar applied={scopeApplied} />}
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
-      <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
-        <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {t("reports.list_title")}
-          <InsightHint
-            title={t("reports.hint.title")}
-            body={
-              <>
-                <strong>{t("reports.hint.ranking_strong")}</strong>{t("reports.hint.ranking_body")}
-                <br /><br />
-                <strong>{t("reports.hint.trend_strong")}</strong>{t("reports.hint.trend_body")}
-                <br /><br />
-                <strong>{t("reports.hint.heatmap_strong")}</strong>{t("reports.hint.heatmap_body")}
-                <br /><br />
-                <strong>{t("reports.hint.dow_strong")}</strong>{t("reports.hint.dow_body")}
-                <br /><br />
-                {t("reports.hint.csv")}
-              </>
-            }
-          />
-        </h3>
-        {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
-        {list.isLoading && <SkeletonTable rows={6} rowHeight={48} />}
-        {list.data && list.data.length === 0 && (
-          <EmptyState
-            title={t("reports.empty.title")}
-            hint={t("reports.empty.hint")}
-          />
-        )}
-        {list.data && (
-          <ReportList
-            types={listedTypes}
-            active={reportType ?? null}
-            onSelect={selectReport}
-          />
-        )}
-      </div>
+      {aside}
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {!reportType && (
@@ -219,6 +234,10 @@ export function AnalysisTab({
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
+              {/* The council report prints from its own button, which for
+                  an admin takes a snapshot first; the menu takes one without
+                  printing. */}
+              {councilSnapshot && <ExportMenu csv={null} showPrint={false} snapshot={councilSnapshot} />}
             </div>
             <ReportMeta data={detail.data} />
             {detail.data.retired_rows != null && detail.data.retired_rows > 0 && (
@@ -240,9 +259,16 @@ export function AnalysisTab({
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
-              id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} />
+              id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} showStatistics={showStatistics} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
-              <CouncilSummaryBlock report={detail.data} />
+              // Figures held over from another scope while this one loads
+              // are not what the screen's query names, so their print
+              // carries no snapshot.
+              <CouncilSummaryBlock
+                report={detail.data}
+                snapshot={detail.isPlaceholderData ? null : councilSnapshot}
+                tier={tier}
+              />
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
               <>
                 <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
@@ -252,7 +278,17 @@ export function AnalysisTab({
                 )}
               </>
             ) : detail.data.rows.length > 0 ? (
-              <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />
+              <>
+                {hasStatisticsColumns(detail.data.report_type) && <StatisticsToggle />}
+                {/* The day-type reports name no floor of their own; the ranking
+                    floor marks a thin route's average while its count is hidden. */}
+                <ReportTable
+                  reportType={detail.data.report_type}
+                  rows={detail.data.rows}
+                  minSamples={detail.data.reliable_min_samples ?? FEW_DATA_MIN_SAMPLES}
+                  showStatistics={showStatistics}
+                />
+              </>
             ) : (
               <EmptyState
                 title={t("reports.no_data.title")}
@@ -300,11 +336,6 @@ export function AnalysisTab({
           </div>
         )}
       </div>
-      {/* key={id} forces a remount on agency switch -- InsightPanel's `seen`
-          state is seeded once from sessionStorage per mount; without this,
-          switching agencies would keep the previous agency's exclude set
-          in React state even though its sessionStorage key is now separate. */}
-      <InsightPanel key={id} className="analysis-insights" />
       </div>
     </div>
   );
@@ -318,6 +349,7 @@ export function AnalysisTab({
  *  folded. */
 function CertificateSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
+  const [showStatistics] = useShowStatistics();
   const latestDay = defaultPeriod(use(DataEndContext)).to;
   const [pickedDate, setPickedDate] = useState<string | null>(null);
   const date = pickedDate ?? latestDay;
@@ -325,6 +357,9 @@ function CertificateSection({ aid }: { aid: number }) {
   const day = certificateDayScope(date);
   const all = useReport(aid, staffOpen ? "delay_certificate" : null, day);
   const data = all.data?.report_type === "delay_certificate" ? all.data : undefined;
+  // The server writes the count first and its footnotes, the method version
+  // among them, on the lines after it.
+  const [summary, ...footnotes] = (data?.text ?? "").split("\n");
   return (
     <div>
       <h2 style={{ margin: 0 }}>{reportLabel(t, "delay_certificate")}</h2>
@@ -346,10 +381,15 @@ function CertificateSection({ aid }: { aid: number }) {
                   list keeps showing until its own rows arrive. */}
               {t("reports.certificate.late_list_scope", { date: formatDate(data.ctx?.from ?? date, { weekday: true }) })}
               {FILTER_SEPARATOR}
-              {data.text}
+              {summary}
             </p>
+            {footnotes.map((line, i) => (
+              <p key={i} className="report-footnote">
+                {line}
+              </p>
+            ))}
             <CsvLink href={apiUrl(`/api/${aid}/reports/delay_certificate?${reportQueryString(day)}&format=csv`)} />
-            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} />}
+            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} showStatistics={showStatistics} />}
           </>
         )}
       </details>

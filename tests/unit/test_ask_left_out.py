@@ -16,6 +16,8 @@ from pipeline import route_catalog
 from pipeline.query import tools
 from pipeline.route_catalog import RETIRED, ZERO_DELAY
 
+pytestmark = pytest.mark.usefixtures("unstamped_tools")
+
 _CTX = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23))
 _LEFT_OUT = {RETIRED: frozenset({"OLD"}), ZERO_DELAY: frozenset({"ECHO"})}
 
@@ -74,7 +76,12 @@ def fetched(monkeypatch):
         ("top_n", {"metric": "avg_delay", "best_first": True, "n": 2}, "On-time ranking, top 2 routes"),
         ("top_n", {"metric": "on_time_rate", "n": 2}, "On-time rate ranking, top 2 routes"),
         ("top_n", {"metric": "worst_5min", "n": 2}, "Count of delays over 5 min ranking, top 2 routes"),
-        ("on_time_rate", {"n": 2}, "On-time rate (within 1 min) — top 2 routes"),
+        (
+            "on_time_rate",
+            {"n": 2},
+            "On-time rate (industry standard: no more than 1 min early, 5 min late) — top 2 routes",
+        ),
+        ("on_time_rate", {"n": 2, "threshold_min": 1}, "On-time rate (within 1 min) — top 2 routes"),
     ],
 )
 async def test_a_ranking_lists_n_routes_past_the_left_out_codes(fetched, tool, args, summary):

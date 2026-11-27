@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useNavigate, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import * as client from "../api/client";
@@ -16,6 +16,7 @@ import { decl, ruleBody } from "../test/cssRules";
 import { formatDateTime, formatReportTime } from "../utils/format";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse, ServiceHoursResponse } from "../api/types";
 import { MockMap } from "../test/maplibreMock";
+import { WINDOW_DELAYS, liveRowsWithDelays } from "../test/liveTripFixtures";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
@@ -98,6 +99,25 @@ describe("MapTab", () => {
     expect(document.querySelector(".ops-map__empty")).toBeNull();
   });
 
+  it("explains calmly, with no retry, a route overlay refused for a period before the retention floor", () => {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: undefined,
+      error: new client.ApiError(422, JSON.stringify({ detail: "x", code: "range_not_retained", floor: "2025-03-01" })),
+    } as never);
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap();
+    expect(screen.getByText(/Detailed readings before 2025-03-01 are no longer kept/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("does not show the empty state and counts observed trips once live rows arrive", () => {
     mockCommonHooks();
     const capturedAt = new Date().toISOString();
@@ -163,6 +183,178 @@ describe("MapTab", () => {
     expect(screen.getByTestId("live-truncated")).toHaveTextContent(
       "Too many trips to show at once: showing 1, and the counts cover only these",
     );
+  });
+});
+
+function onTimeTileValue(): string | null {
+  return screen.getByText("On-time rate").closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
+}
+
+function lateTileValue(label: RegExp): string | null {
+  return screen.getByText(label).closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
+}
+
+describe("MapTab scope bar", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function Probe() {
+    const [params] = useSearchParams();
+    return <div data-testid="params">{params.toString()}</div>;
+  }
+
+  function renderLive(search: string) {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0, data: liveTrips([]), error: null, isLoading: false, isFetching: false, refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={[`/agencies/1/map${search}`]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/map" element={<><MapTab /><Probe /></>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+  it("shows only what Live counts by in the scope bar, hiding period and day", () => {
+    renderLive("?routes=R1&from=2026-09-01&to=2026-09-30&dow=weekday&late=120");
+    const bar = within(region());
+    expect(bar.getByRole("button", { name: "Routes R1" })).toBeInTheDocument();
+    expect(bar.getByRole("button", { name: "On time within 2 min" })).toBeInTheDocument();
+    expect(bar.queryByRole("button", { name: /^Days/ })).toBeNull();
+    expect(bar.queryByRole("button", { name: /^Period/ })).toBeNull();
+    expect(bar.queryByRole("button", { name: /^Time/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /9\/1/ })).toBeNull();
+    // The routes control stages a pick behind its own Apply, which stays
+    // disabled until the pick differs from what the screen shows.
+    fireEvent.click(bar.getByRole("button", { name: "Routes R1" }));
+    const picker = screen.getByRole("dialog", { name: "Routes" });
+    expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
+  });
+
+  it("asks for a route's shape over Live's own scope, not a linked period or day", () => {
+    renderLive("?routes=R1&from=2020-01-01&to=2020-01-31&dow=weekday");
+    const scopes = vi.mocked(hooks.useRouteShape).mock.calls.map((call) => call[2]);
+    expect(scopes.length).toBeGreaterThan(0);
+    for (const scope of scopes) expect(scope).toMatchObject({ dow: "all", routes: ["R1"] });
+    expect(scopes.some((scope) => scope.from === "2020-01-01")).toBe(false);
+  });
+
+  it("offers no reset for a period it does not show", () => {
+    renderLive("?from=2026-09-01&to=2026-09-30");
+    expect(screen.queryByRole("button", { name: "Reset conditions" })).toBeNull();
+  });
+
+  it("drops the map's selection in the same write as a Reset that clears the routes", () => {
+    renderLive("?routes=R1&route_focus=R1&route_focus_agency=1&direction=0&trip=T1");
+    fireEvent.click(screen.getByRole("button", { name: "Reset conditions" }));
+    const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
+    for (const key of ["routes", "route_focus", "route_focus_agency", "direction", "trip"]) expect(params.has(key)).toBe(false);
+  });
+});
+
+describe("MapTab's on-time rate", () => {
+  function mockLiveDelays(delays: number[]) {
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips(liveRowsWithDelays(delays)),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+  }
+
+  beforeEach(() => {
+    stubReducedMotion();
+    mockCommonHooks();
+    mockLiveDelays(WINDOW_DELAYS);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts the default window, both edges on time, and says it is this moment's trips under that window", () => {
+    renderMap();
+    expect(onTimeTileValue()).toBe("57%");
+    const note = screen.getByTestId("live-on-time-note");
+    expect(note).toHaveTextContent("within 5 min late, early by up to 1 min");
+    expect(note).toHaveTextContent("trips reporting now");
+    expect(note).toHaveTextContent("not a period's departures");
+  });
+
+  it("counts the window the scope names, and names that one", () => {
+    renderMap("1", "?early=any&late=60");
+    expect(onTimeTileValue()).toBe("43%");
+    expect(screen.getByTestId("live-on-time-note")).toHaveTextContent("within 1 min late, any early departure on time");
+  });
+
+  it("counts a trip on the late edge on time only and one a second past it late only, so the tiles split the trips", () => {
+    mockLiveDelays([0, 300, 301]);
+    renderMap();
+    expect(onTimeTileValue()).toBe("67%");
+    expect(document.querySelectorAll(".focus-trip")).toHaveLength(1);
+    expect(lateTileValue(/^More than 5\smin late$/)).toBe("1");
+  });
+
+  it("moves the late tile, its label and the delayed list to the window's late edge", () => {
+    mockLiveDelays([0, 60, 61]);
+    renderMap("1", "?late=60");
+    expect(onTimeTileValue()).toBe("67%");
+    expect(document.querySelectorAll(".focus-trip")).toHaveLength(1);
+    expect(lateTileValue(/^More than 1\smin late$/)).toBe("1");
+  });
+
+  it("says no trip is past the late edge in the edge's words", () => {
+    mockLiveDelays([0, 300]);
+    renderMap();
+    expect(screen.getByText(/^No delays of more than 5\smin observed for these filters$/)).toBeInTheDocument();
+  });
+
+  it("prints a late edge off the whole minute the same way on the tile and in the note", () => {
+    mockLiveDelays([0, 90, 91]);
+    renderMap("1", "?late=90");
+    expect(lateTileValue(/^More than 1\.5\smin late$/)).toBe("1");
+    expect(screen.getByTestId("live-on-time-note")).toHaveTextContent("within 1.5 min late");
+    cleanup();
+    mockLiveDelays([0]);
+    renderMap("1", "?late=90");
+    expect(screen.getByText(/^No delays of more than 1\.5\smin observed for these filters$/)).toBeInTheDocument();
+  });
+
+  it("says how many trips ran earlier than the window allows, since neither tile counts them", () => {
+    renderMap();
+    expect(screen.getByTestId("live-early-note")).toHaveTextContent(/^2 trips more than 1\smin early count as neither late nor on time\.$/);
+  });
+
+  it("says nothing of early trips when none ran early beyond the window, or the window takes every early departure", () => {
+    mockLiveDelays([-60, 0, 301]);
+    renderMap();
+    expect(screen.queryByTestId("live-early-note")).toBeNull();
+    cleanup();
+    mockLiveDelays(WINDOW_DELAYS);
+    renderMap("1", "?early=any");
+    expect(screen.queryByTestId("live-early-note")).toBeNull();
+  });
+
+  it("says in Japanese which window it counts and that it is not the period's figure", async () => {
+    await i18n.changeLanguage("ja");
+    try {
+      renderMap();
+      const note = screen.getByTestId("live-on-time-note");
+      expect(note).toHaveTextContent("いま報告している便"); // i18n-ignore: asserts the ja copy
+      expect(note).toHaveTextContent("遅れ5分以内、早発は1分まで"); // i18n-ignore: asserts the ja copy
+      expect(note).toHaveTextContent("期間の定時率とは数える対象が違います"); // i18n-ignore: asserts the ja copy
+      expect(screen.getByText("5分を超える遅れ")).toBeInTheDocument(); // i18n-ignore: asserts the ja copy
+      expect(screen.getByTestId("live-early-note")).toHaveTextContent("1分を超えて早発した2便は、遅れにも定時にも数えません"); // i18n-ignore: asserts the ja copy
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 });
 
@@ -253,7 +445,7 @@ describe("MapTab when no trip is reporting", () => {
     const time = formatDateTime(LAST_REPORT, { timeStyle: "short", timeZone: "Asia/Tokyo" });
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent(`No new reports since ${time} JST (11 min)`);
-    expect(empty).toHaveTextContent("The operator's feed may have stopped.");
+    expect(empty).toHaveTextContent("Either the operator's feed has stopped or our collection is behind.");
     expect(empty).not.toHaveTextContent("late at night");
     expect(empty).not.toHaveTextContent("No vehicles are reporting right now");
   });
@@ -264,7 +456,7 @@ describe("MapTab when no trip is reporting", () => {
     mockLive(LAST_REPORT, [reported("t1", LAST_REPORT)]);
     renderMap();
     expect(tileValue("Observed")).toBe("—");
-    expect(tileValue(/^5\+\smin late$/)).toBe("—");
+    expect(tileValue(/^More than 5\smin late$/)).toBe("—");
     expect(screen.queryByText("On-time rate")).toBeNull();
   });
 
@@ -277,7 +469,7 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent("No vehicles are reporting right now");
     expect(empty).toHaveTextContent("late at night");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(tileValue("Observed")).toBe("0");
   });
 
@@ -290,7 +482,7 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent("No vehicles are reporting right now");
     expect(empty).not.toHaveTextContent("late at night");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(tileValue("Observed")).toBe("0");
   });
 
@@ -319,7 +511,7 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent(`Today's service has ended (last trip arrived ${jstTime(HOURS_25.hours!.last_arrival_at)})`);
     expect(empty).toHaveTextContent("The timetable has no trips until the next first departure.");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(within(empty).queryByRole("button", { name: "Show last reported positions" })).toBeNull();
     expect(tileValue("Observed")).toBe("0");
   });
@@ -333,17 +525,17 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent(`The first trip leaves at ${jstTime(HOURS_25.hours!.first_departure_at)}`);
     expect(empty).toHaveTextContent("The timetable has no trips before the first departure.");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(tileValue("Observed")).toBe("0");
   });
 
-  it("still says the feed may have stopped when it goes quiet during service hours", () => {
+  it("still says there is no recent report when it goes quiet during service hours", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(DAYTIME));
     mockLive(LAST_REPORT);
     mockHours(HOURS_25);
     renderMap();
-    expect(emptyOverlay()).toHaveTextContent("The operator's feed may have stopped.");
+    expect(emptyOverlay()).toHaveTextContent("Either the operator's feed has stopped or our collection is behind.");
     expect(tileValue("Observed")).toBe("—");
   });
 
@@ -408,7 +600,7 @@ describe("MapTab when no trip is reporting", () => {
     mockSummary("2026-10-22T12:59:00Z");
     renderMap();
     const time = formatReportTime("2026-10-22T12:59:00Z");
-    expect(screen.getByText(`Feed quiet for 2 days · last report ${time}`)).toBeInTheDocument();
+    expect(screen.getByText(`No reports for 2 days · last report ${time}`)).toBeInTheDocument();
     expect(emptyOverlay()).toHaveTextContent(`No new reports since ${time} (2 days)`);
     expect(tileValue("Observed")).toBe("—");
   });
@@ -460,7 +652,7 @@ describe("MapTab when no trip is reporting", () => {
     mockLive("2026-10-03T12:41:00Z");
     renderMap();
     const time = formatDateTime("2026-10-03T12:41:00Z", { timeStyle: "short", timeZone: "Asia/Tokyo" });
-    const status = screen.getByText(`Feed quiet for 43 min · last report ${time} JST`);
+    const status = screen.getByText(`No reports for 43 min · last report ${time} JST`);
     expect(status.closest(".ops-freshness")).toHaveClass("ops-freshness--stale");
   });
 
@@ -486,7 +678,7 @@ describe("MapTab when no trip is reporting", () => {
     vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
     mockLive("2026-09-29T00:59:00Z");
     renderMap();
-    expect(screen.getByText(`Feed quiet for 4 days · last report ${formatDateTime("2026-09-29T00:59:00Z", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tokyo" })} JST`)).toBeInTheDocument();
+    expect(screen.getByText(`No reports for 4 days · last report ${formatDateTime("2026-09-29T00:59:00Z", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tokyo" })} JST`)).toBeInTheDocument();
   });
 
   it("marks a quiet feed in amber, not alarm red", () => {
@@ -513,7 +705,7 @@ describe("MapTab when no trip is reporting", () => {
   it("claims no absence of delays while nothing is observed", () => {
     mockLive(null);
     renderMap();
-    expect(screen.queryByText("No delays of 5+ minutes observed for these filters")).toBeNull();
+    expect(screen.queryByText(/^No delays of more than/)).toBeNull();
   });
 });
 
@@ -683,7 +875,6 @@ describe("MapTab delayed-trips cap", () => {
   });
 
   it.each([
-    [401, "Sign in to fetch the latest live observation"],
     [429, "Too many refreshes; please try again shortly"],
     [500, "Reload failed"],
   ])("explains a refused refresh (%i) without inviting a retry it cannot win", async (status, message) => {
@@ -700,6 +891,22 @@ describe("MapTab delayed-trips cap", () => {
     renderMap();
     await userEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
     expect(await screen.findByText(message)).toBeInTheDocument();
+  });
+
+  it("tells a busy refresh to retry once the other update finishes", async () => {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(client, "apiPost").mockRejectedValue(new client.ApiError(409, ""));
+    renderMap();
+    await userEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
+    expect(await screen.findByText("Another data update is running; try again once it finishes")).toBeInTheDocument();
   });
 });
 
@@ -742,6 +949,30 @@ describe("MapTab manual refresh", () => {
     vi.setSystemTime(mounted + 30_000);
     fireEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
     expect(await screen.findByText("Live data loaded: 3 rows (just now)")).toBeInTheDocument();
+  });
+
+  it("shows the data a moment-old poll already fetched instead of polling again", async () => {
+    mockCommonHooks();
+    const refetchLive = vi.fn().mockResolvedValue({ isError: false, data: { latest_captured_at: null, rows: [] } });
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: refetchLive,
+    } as never);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: todaySummary(),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ isError: false }),
+    } as never);
+    vi.spyOn(client, "apiPost").mockResolvedValue({ status: "recent", inserted: 0 } as never);
+    renderMap();
+    fireEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
+    expect(await screen.findByText("Live data was fetched moments ago; showing it now")).toBeInTheDocument();
+    expect(refetchLive).toHaveBeenCalled();
   });
 });
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Mirror this collector's own data/<id>/{rt,static} straight to Cloudflare R2
-# (S3-compatible API), uploading directly from the VM that actually collects
-# the data. Same bucket layout (rt/<id>/, static/<id>/) as the workstation's
-# manual fallback (`make sync-r2`, scripts/sync_archives_to_r2.sh), so both
-# feed one R2 archive rather than parallel ones. `aws s3 sync` only transfers
+# Mirror this collector's own data/<id>/{rt,vp,static} straight to Cloudflare
+# R2 (S3-compatible API), uploading directly from the VM that actually
+# collects the data. rt/<id>/ and static/<id>/ are the same bucket layout as
+# the workstation's manual fallback (`make sync-r2`,
+# scripts/sync_archives_to_r2.sh), so both feed one R2 archive rather than
+# parallel ones. vp/<id>/ holds the VehiclePositions days of an agency that
+# has a vp/ directory (see vp-poller.sh); only this VM ever writes it. `aws s3 sync` only transfers
 # new/changed objects, so reruns are cheap and idempotent. This script never
 # deletes anything; R2-side retention is bin/prune-r2.sh's job (it keeps a
 # much longer retention window than prune.sh, since R2 is the durable long-term archive —
@@ -58,8 +60,8 @@ else
 fi
 
 # The directories mirrored here are written to while this runs: rt-poller.sh
-# renames TripUpdate_*.pb.part files in the open UTC day directory under rt/,
-# rotate-day.sh writes <day>.tar.gz.part beside the tarballs, and
+# and vp-poller.sh rename *.pb.part files in the open UTC day directory under
+# rt/ and vp/, rotate-day.sh writes <day>.tar.gz.part beside the tarballs, and
 # static-fetch.sh creates and removes .dl.* downloads in static/. The AWS CLI
 # stats every file under its source before applying --exclude, and a file
 # that vanishes in between makes it exit nonzero even though every archive
@@ -100,16 +102,20 @@ sync_archives() {
 failed=0
 processed=0
 
-for rt in "$BASE_DIR"/data/*/rt; do
-    [ -d "$rt" ] || continue
-    processed=$((processed + 1))
-    id=$(basename "$(dirname "$rt")")
-    if sync_archives "$rt" '*.tar.gz' "s3://$OBJECT_STORE_BUCKET/rt/$id" "rt-$id"; then
-        echo "[a$id] rt synced"
-    else
-        echo "[a$id] rt sync FAILED" >&2
-        failed=1
-    fi
+# rt/ and vp/ hold the same <YYYYMMDD>.tar.gz day archives (rotate-day.sh)
+# and land under the matching rt/<id>/ or vp/<id>/ prefix.
+for kind in rt vp; do
+    for kind_dir in "$BASE_DIR"/data/*/"$kind"; do
+        [ -d "$kind_dir" ] || continue
+        processed=$((processed + 1))
+        id=$(basename "$(dirname "$kind_dir")")
+        if sync_archives "$kind_dir" '*.tar.gz' "s3://$OBJECT_STORE_BUCKET/$kind/$id" "$kind-$id"; then
+            echo "[a$id] $kind synced"
+        else
+            echo "[a$id] $kind sync FAILED" >&2
+            failed=1
+        fi
+    done
 done
 
 for sdir in "$BASE_DIR"/data/*/static; do
@@ -139,8 +145,8 @@ if [ "$failed" -eq 1 ]; then
     exit 1
 fi
 
-# Only touch the marker on a fully-successful run (every agency, both rt
-# and static) -- a partial success must NOT refresh prune.sh's freshness
+# Only touch the marker on a fully-successful run (every agency, its rt, vp
+# and static alike) -- a partial success must NOT refresh prune.sh's freshness
 # check, or a permanently-failing single agency could still let prune.sh
 # delete data for that agency forever while the marker stays "fresh" from
 # everyone else's successful syncs. Check the write itself too: a failed

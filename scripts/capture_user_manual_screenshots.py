@@ -8,17 +8,13 @@ indefinitely otherwise.
 Requires, in order:
   1. A production build served at --base (default http://localhost:8000,
      i.e. `cd frontend && npm run build && cd .. && make bake`, then a
-     running `make serve`/uvicorn backend). Dev builds differ from what
-     an end user sees (`import.meta.env.DEV` turns the Analysis tab's
-     Insight Panel on by default, for one), so capturing against the dev
-     server would document dev-only defaults as the real product.
+     running `make serve`/uvicorn backend), so the manual shows the bundle
+     a deployment actually serves.
   2. Agency 1 holding real data.
-  3. `login_required` off for the run -- the manual is captured as a guest,
-     matching how a first-time visitor actually sees it. Toggling that
-     flag is a separate, human `feature_flags` admin action (the dev-
-     database guard blocks the write from an agent's own tool calls); flip
-     it via the admin flags UI/API before running this script, and back on
-     once it finishes. This script never touches that flag itself.
+
+The manual is captured signed out, matching how a first-time visitor
+actually sees it; every reader screen serves a signed-out visitor, so the
+run needs no sign-in and no flag.
 
 Usage:
     poetry run python scripts/capture_user_manual_screenshots.py [--locale ja|en|both] [--base URL]
@@ -29,7 +25,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from playwright.sync_api import Page, ViewportSize, sync_playwright
 
@@ -54,7 +50,6 @@ LABELS = {
         "route_label": "路線",
         "route_placeholder": "路線を検索",
         "playback_toggle": "1日の動きを再生",
-        "later": "後で",
     },
     "en": {
         "hint": "Hint",
@@ -68,7 +63,6 @@ LABELS = {
         "route_label": "Route",
         "route_placeholder": "Search routes",
         "playback_toggle": "Play the day",
-        "later": "Later",
     },
 }
 
@@ -80,10 +74,13 @@ def shot(page: Page, name: str, locale: str) -> None:
 
 
 def assert_dashboard(page: Page) -> None:
-    """Fails loudly if the guest session landed on a login wall instead of
-    the dashboard, rather than silently capturing and shipping that as a
-    scene -- `login_required` left on is the one setup mistake that would
-    otherwise corrupt every screenshot in the same way."""
+    """Fails loudly if the signed-out session landed on the sign-in or
+    welcome page instead of the dashboard, rather than silently capturing and
+    shipping that as a scene: a server that sends a signed-out reader away
+    would corrupt every screenshot in the same way."""
+    path = urlparse(page.url).path
+    if path in ("/login", "/welcome"):
+        raise RuntimeError(f"the signed-out capture was sent to {path} instead of the dashboard")
     page.locator("[aria-label='Account menu'], [aria-label='アカウントメニュー']").first.wait_for(
         state="visible", timeout=15_000
     )
@@ -111,7 +108,7 @@ def first_route_code(page: Page, agency: str) -> str:
 
 
 def new_capture_context(browser, locale: str):
-    """A browser context in *locale*, with the help hint already dismissed and
+    """A browser context in *locale*, with the help hint and Pulse's tour already dismissed and
     the data-freshness and feed-health banners hidden: they reflect the capture
     data's state, not the screen being documented. Their dismissal lives in page
     state, so they are hidden by their `data-shell-banner` attribute instead."""
@@ -119,6 +116,7 @@ def new_capture_context(browser, locale: str):
     ctx.add_init_script(
         f"window.localStorage.setItem('app.locale', '{locale}');"
         "window.localStorage.setItem('help_hint_dismissed', '1');"
+        "window.localStorage.setItem('transit.pulseTourSeen', '1');"
         "document.addEventListener('DOMContentLoaded', () => {"
         "  const style = document.createElement('style');"
         "  style.textContent = '[data-shell-banner] { display: none !important; }';"
@@ -154,14 +152,13 @@ def capture(base: str, locale: str) -> None:
         page.wait_for_timeout(500)
         shot(page, "02-pulse", locale)
 
-        # 03: scope sentence, period popover open. The period token is the
-        # second `.scope-token` button in the sentence (route, period, dow,
-        # time band, ...) -- located by that stable structural position,
-        # never by its rendered text, which is the dataset's own date range
-        # and moves every time this script's objective runs it again.
-        page.locator(".scope-token").nth(1).click()
+        # 03: scope bar, period popover open. The period is the bar's first
+        # control (period, days, time, routes, ...) -- located by that stable
+        # structural position, never by its rendered text, which is the
+        # dataset's own date range and moves every time this script runs.
+        page.locator(".scope-bar__control").first.click()
         page.wait_for_timeout(400)
-        shot(page, "03-scope-sentence", locale)
+        shot(page, "03-scope-bar", locale)
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
 
@@ -212,10 +209,6 @@ def capture(base: str, locale: str) -> None:
         page.goto(f"{agency}/live")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
-        tour_dismiss = page.get_by_text(L["later"], exact=True)
-        if tour_dismiss.count() > 0:
-            tour_dismiss.first.click()
-            page.wait_for_timeout(300)
         empty_state = page.locator(".ops-map__empty")
         if empty_state.count() > 0:
             empty_state.get_by_text(L["playback_toggle"], exact=False).first.click()

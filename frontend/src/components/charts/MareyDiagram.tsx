@@ -193,7 +193,7 @@ export function MareyDiagram({
           {narrow && chartable && (
             <button
               type="button"
-              className="btn-ghost marey__toggle"
+              className="btn btn--secondary btn--sm marey__toggle"
               aria-expanded={chartRevealed}
               onClick={() => setChartRevealed((revealed) => !revealed)}
             >
@@ -227,7 +227,7 @@ export function MareyDiagram({
                   drag sets a scrub; clearing hands focus back to the slider. */}
               <button
                 type="button"
-                className="btn-ghost"
+                className="btn btn--secondary btn--sm"
                 disabled={scrubSec == null}
                 onClick={() => {
                   onScrub(null);

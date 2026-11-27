@@ -1,5 +1,6 @@
 """Headway reconstruction, high-frequency route classification, and headway
-QUALITY metrics (Excess Waiting Time, coefficient of variation, long-gap rate).
+QUALITY metrics (Excess Waiting Time, coefficient of variation, long-gap rate,
+bunching).
 
 A route's "headway" is the time gap between two consecutive vehicles serving
 the same stop on the same route. This module has three independent pieces:
@@ -14,22 +15,25 @@ the same stop on the same route. This module has three independent pieces:
   `stop_id` (today: `static_join`; `aomori_regex` always leaves it NULL),
   which is necessary but not sufficient trust; `pipeline.reports.
   headway_quality` additionally gates on the per-agency confirmed-set check
-  (`pipeline.strategies.static_join.rt_field_coverage_confirmed`) before
+  (`pipeline.strategies.static_join.rt_field_coverage_gap`) before
   reading these rows -- see that module's docstring for why sharing the
   wire shape doesn't by itself confirm a given agency's feed populates
   `stop_id`.
 - Deriving the SCHEDULED headway median from the static GTFS `stop_times`
   table (`static_stop_times` in Postgres), independent of any RT data, used
-  to classify a route as "high-frequency".
+  to classify a route as "high-frequency". Each timetable's is kept
+  (`pipeline.static_headways`), so a day is classified by the timetable in
+  force on it.
 - Quality metrics computed FROM a headway distribution (actual or
-  scheduled) -- mean wait time, coefficient of variation, and long-gap
-  rate -- restricted to routes the second piece classifies high-frequency
-  (see `pipeline.reports.headway_quality`). Each has both a direct-from-
-  samples form (for a single in-memory gap list, e.g. in a unit test) and a
-  from-pooled-statistics form (for combining multiple days' worth of gaps
-  already reduced to sufficient statistics in Postgres, without re-fetching
-  every raw gap) -- see `mean_wait_sec`/`mean_wait_from_pooled` and
-  `coefficient_of_variation`/`coefficient_of_variation_from_pooled`.
+  scheduled) -- mean wait time, coefficient of variation, long-gap rate
+  and bunching rate -- restricted to the days the second piece classifies a route
+  high-frequency on (see `pipeline.reports.headway_quality`). Each has both
+  a direct-from-samples form (for a single in-memory gap list, e.g. in a
+  unit test) and a from-pooled-statistics form (for combining multiple
+  days' worth of gaps already reduced to sufficient statistics in Postgres,
+  without re-fetching every raw gap) -- see `mean_wait_sec`/
+  `mean_wait_from_pooled` and `coefficient_of_variation`/
+  `coefficient_of_variation_from_pooled`.
 
 Neither of the first two depends on the other: the scheduled classification
 can be computed the moment a static feed is loaded, while actual-headway
@@ -45,7 +49,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from itertools import pairwise
 from statistics import median as _median
-from typing import Sequence
+from typing import NamedTuple, Sequence
 
 # A route qualifies as "high-frequency" when passengers can reasonably show
 # up without consulting a timetable. The literature's usual cutoff for a
@@ -60,6 +64,12 @@ HIGH_FREQUENCY_HEADWAY_SEC = 12 * 60
 # Picks the middle of the commonly used 1.5x-2x band rather than either
 # edge.
 LONG_GAP_MULTIPLIER = 1.75
+
+# A gap shorter than this share of the scheduled headway is bunched: the
+# second vehicle arrives so close behind the first that it carries few of
+# the passengers who gathered for it. Bus Turnaround's report cards count a
+# bus arriving less than 25% of the scheduled headway after the one before.
+BUNCHING_HEADWAY_FRACTION = 0.25
 
 
 def dominant_service_ctes(agency: str) -> str:
@@ -180,6 +190,16 @@ def mean_wait_from_pooled(n: int, sum_sec: float | None, sumsq_sec2: float | Non
     return mean_wait_from_moments(sum_sec / n, sumsq_sec2 / n)
 
 
+def mean_wait_from_sums(sum_sec: float | None, sumsq_sec2: float | None) -> float | None:
+    """Mean wait time from a headway population's sum and sum of squares alone:
+    E[H^2] / (2 * E[H]) with the count cancelled, so a scheduled side kept as
+    sums pools across timetables by adding them. ``None`` when either is
+    unknown or the sum is not positive."""
+    if sum_sec is None or sumsq_sec2 is None or sum_sec <= 0:
+        return None
+    return sumsq_sec2 / (2 * sum_sec)
+
+
 def excess_wait_time_sec(actual_gaps: Sequence[float], scheduled_gaps: Sequence[float]) -> float | None:
     """Excess Waiting Time: actual mean wait minus scheduled mean wait,
     both computed via `mean_wait_sec` from their respective reconstructed
@@ -245,6 +265,19 @@ def count_long_gaps(
     return sum(1 for g in gaps if g > threshold)
 
 
+def count_bunched(gaps: Sequence[float], scheduled_headway_sec: float | None) -> int | None:
+    """How many of *gaps* are strictly shorter than
+    :data:`BUNCHING_HEADWAY_FRACTION` of *scheduled_headway_sec*.
+
+    ``None`` when there is no scheduled headway to judge them against: an
+    unjudged count is unknown, never zero bunching.
+    """
+    if not scheduled_headway_sec or scheduled_headway_sec <= 0:
+        return None
+    threshold = BUNCHING_HEADWAY_FRACTION * scheduled_headway_sec
+    return sum(1 for g in gaps if g < threshold)
+
+
 def pool_daily_gaps(ch_rows: Iterable[tuple]) -> dict[tuple[object, object], list[float]]:
     """Each (route, service date)'s positive gaps, pooled across the stops it calls at.
 
@@ -280,44 +313,101 @@ def dominant_contents(ch_rows: Iterable[tuple], content_of: Callable[[str], str]
     return {key: min(tally, key=lambda content: (-tally[content], content)) for key, tally in counts.items()}
 
 
+class ScheduledHeadways(NamedTuple):
+    """A route's scheduled headways under one timetable, as pipeline.static_headways
+    keeps them: their median, sum and sum of squares. Each is None where the
+    timetable gives the route no gap; the sums are also None for a timetable kept
+    before they were."""
+
+    median_sec: float | None
+    sum_sec: float | None
+    sumsq_sec2: float | None
+
+
+_NO_GAP = ScheduledHeadways(None, None, None)
+
+
 def thresholds(
-    dominant: dict[tuple[object, object], str], medians: dict[tuple[str, str], float | None], loaded: str
+    dominant: dict[tuple[object, object], str], kept: dict[tuple[str, str], ScheduledHeadways], loaded: str
 ) -> Callable[[object, object], float | None]:
     """Each (route, date)'s long-gap threshold: its dominant timetable's median,
     or the loaded timetable's when its own timetable has no medians kept.
-    *medians* are keyed (content, route); *loaded* is the loaded timetable's content."""
-    kept = {content for content, _route in medians}
+    *kept* is keyed (content, route); *loaded* is the loaded timetable's content."""
+    contents = {content for content, _route in kept}
 
     def median_of(route_code, svc_date) -> float | None:
         content = dominant.get((route_code, svc_date), loaded)
-        return medians.get((content if content in kept else loaded, route_code))
+        headways = kept.get((content if content in contents else loaded, route_code))
+        return None if headways is None else headways.median_sec
 
     return median_of
+
+
+def schedules(
+    dominant: dict[tuple[object, object], str], kept: dict[tuple[str, str], ScheduledHeadways]
+) -> Callable[[object, object], ScheduledHeadways | None]:
+    """Each (route, date)'s scheduled headways under its dominant timetable, the
+    one that judges its high-frequency test and scheduled wait. None when that
+    timetable keeps none: no other timetable stands in, so the date is not
+    judged. A route the timetable keeps nothing for has no gap in it."""
+    contents = {content for content, _route in kept}
+
+    def schedule_of(route_code, svc_date) -> ScheduledHeadways | None:
+        content = dominant.get((route_code, svc_date))
+        if content not in contents:
+            return None
+        return kept.get((content, route_code), _NO_GAP)
+
+    return schedule_of
 
 
 def daily_headway_rows(
     agency_id: int,
     pooled: dict[tuple[object, object], list[float]],
     median_of: Callable[[object, object], float | None],
+    schedule_of: Callable[[object, object], ScheduledHeadways | None],
 ) -> list[tuple]:
     """agg_route_headway_daily rows: per (route, date), the actual median, count, sum
-    and sum of squares, and the long gaps measured against *median_of(route,
-    date)*, the scheduled median of the timetable that date's events were
-    ingested against. A route the schedule gives no median counts no long gaps."""
-    return [
-        (
-            agency_id,
-            route_code,
-            svc_date,
-            _median(gaps),
-            len(gaps),
-            sum(gaps),
-            sum(g * g for g in gaps),
-            count_long_gaps(gaps, median_of(route_code, svc_date)),
+    and sum of squares, the long gaps measured against *median_of(route, date)*,
+    then the date's own timetable's scheduled median, high-frequency test, sum
+    and sum of squares (*schedule_of*), then the gaps bunched against that same
+    median and how many gaps were judged for bunching. A route the schedule
+    gives no median counts no long gaps and is not high-frequency; a date whose
+    timetable keeps no scheduled headways has all four None, high-frequency
+    included, as not judged, even where its long gaps fell back to the loaded
+    timetable's median. Bunching never falls back: without its own
+    timetable's median a date's two bunching counts are None."""
+    rows = []
+    for (route_code, svc_date), gaps in pooled.items():
+        if not gaps:
+            continue
+        schedule = schedule_of(route_code, svc_date)
+        bunched = count_bunched(gaps, None if schedule is None else schedule.median_sec)
+        rows.append(
+            (
+                agency_id,
+                route_code,
+                svc_date,
+                _median(gaps),
+                len(gaps),
+                sum(gaps),
+                sum(g * g for g in gaps),
+                count_long_gaps(gaps, median_of(route_code, svc_date)),
+                *(
+                    (None, None, None, None)
+                    if schedule is None
+                    else (
+                        schedule.median_sec,
+                        is_high_frequency(schedule.median_sec),
+                        schedule.sum_sec,
+                        schedule.sumsq_sec2,
+                    )
+                ),
+                bunched,
+                None if bunched is None else len(gaps),
+            )
         )
-        for (route_code, svc_date), gaps in pooled.items()
-        if gaps
-    ]
+    return rows
 
 
 def long_gap_rate(

@@ -1,0 +1,7 @@
+{
+  "search": "from=2026-05-14&to=2026-05-14",
+  "body": {
+    "screen": "council_report",
+    "query": { "from": "2026-05-14", "to": "2026-05-14" }
+  }
+}

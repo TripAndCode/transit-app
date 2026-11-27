@@ -45,14 +45,45 @@ def _addition(pg_conn, agency_id: int, service_id: str, gtfs_date: str) -> None:
     pg_conn.commit()
 
 
-def _trips(pg_conn, agency_id: int, service_id: str, count: int) -> None:
+def _trips(pg_conn, agency_id: int, service_id: str, count: int, route_id: str | None = "R1") -> None:
     with pg_conn.cursor() as cur:
         for i in range(count):
             cur.execute(
-                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, 'R1', %s)",
-                (agency_id, f"{service_id}-{i}", service_id),
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
+                (agency_id, f"{service_id}-{route_id}-{i}", route_id, service_id),
             )
     pg_conn.commit()
+
+
+def _stop_times(pg_conn, agency_id: int, service_id: str, trips: int, stops: int) -> None:
+    """``stops`` stop times for each of the ``trips`` trips :func:`_trips` added under ``service_id``."""
+    with pg_conn.cursor() as cur:
+        for i in range(trips):
+            for seq in range(1, stops + 1):
+                cur.execute(
+                    "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                    "VALUES (%s, %s, %s, %s, '08:00:00')",
+                    (agency_id, f"{service_id}-R1-{i}", seq, f"S{seq}"),
+                )
+    pg_conn.commit()
+
+
+def _saved_stop_events(pg_conn, agency_id: int) -> dict[date, int | None]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_date, planned_stop_events FROM planned_trips_daily WHERE agency_id = %s ORDER BY 1",
+            (agency_id,),
+        )
+        return dict(cur.fetchall())
+
+
+def _saved_by_route(pg_conn, agency_id: int) -> dict[date, dict[str, int] | None]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_date, planned_trips_by_route FROM planned_trips_daily WHERE agency_id = %s ORDER BY 1",
+            (agency_id,),
+        )
+        return dict(cur.fetchall())
 
 
 def _saved(pg_conn, agency_id: int) -> dict[date, int]:
@@ -102,6 +133,86 @@ def test_capture_saves_each_covered_day_before_today(pg_conn, agency_id):
     # is still the loaded timetable's to plan.
     assert _saved(pg_conn, agency_id) == expected
     assert inserted == len(expected)
+
+
+def test_capture_saves_each_days_planned_stop_events_beside_its_trips(pg_conn, agency_id):
+    _weekly(pg_conn, agency_id, "WD", "1111100", date(2026, 4, 6), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "WD", 3)
+    _stop_times(pg_conn, agency_id, "WD", 3, 4)
+    _addition(pg_conn, agency_id, "EX", "20260411")
+    _trips(pg_conn, agency_id, "EX", 2)
+    _stop_times(pg_conn, agency_id, "EX", 2, 5)
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    # Each running trip plans one stop event per stop time: 3 x 4 on a
+    # weekday, the Saturday addition's 2 x 5, nothing on the Sunday.
+    expected = {d: 12 for d in _days(date(2026, 4, 6), date(2026, 4, 14))}
+    expected |= {date(2026, 4, 11): 10, date(2026, 4, 12): 0}
+    assert _saved_stop_events(pg_conn, agency_id) == expected
+
+
+def test_a_day_saved_without_its_stop_events_keeps_them_unknown(pg_conn, agency_id):
+    _weekly(pg_conn, agency_id, "ALL", "1111111", date(2026, 4, 1), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "ALL", 3)
+    _stop_times(pg_conn, agency_id, "ALL", 3, 2)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips) VALUES (%s, '2026-04-14', 3)",
+            (agency_id,),
+        )
+    pg_conn.commit()
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    saved = _saved_stop_events(pg_conn, agency_id)
+    # The first count saved for a day stands, stop events included: the
+    # timetable that planned it may not be the one loaded now.
+    assert saved[date(2026, 4, 14)] is None
+    assert saved[date(2026, 4, 13)] == 6
+
+
+def test_capture_saves_each_days_plan_by_route_beside_its_trips(pg_conn, agency_id):
+    """A day's routes sum to its planned trips. A route is keyed by its code,
+    the tail a parenthesised route_id carries, and a trip naming no route
+    under ''. A covered day nothing runs on has no route to plan."""
+    _weekly(pg_conn, agency_id, "WD", "1111100", date(2026, 4, 6), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "WD", 3, "R1")
+    _trips(pg_conn, agency_id, "WD", 2, "国道・古川線(1021)")
+    _addition(pg_conn, agency_id, "EX", "20260411")
+    _trips(pg_conn, agency_id, "EX", 1, "R1")
+    _trips(pg_conn, agency_id, "EX", 1, None)
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    expected = {d: {"R1": 3, "1021": 2} for d in _days(date(2026, 4, 6), date(2026, 4, 14))}
+    expected |= {date(2026, 4, 11): {"R1": 1, "": 1}, date(2026, 4, 12): {}}
+    assert _saved_by_route(pg_conn, agency_id) == expected
+    saved = _saved(pg_conn, agency_id)
+    assert all(sum(expected[d].values()) == saved[d] for d in expected)
+
+
+def test_a_day_saved_without_its_plan_by_route_keeps_it_unknown(pg_conn, agency_id):
+    _weekly(pg_conn, agency_id, "ALL", "1111111", date(2026, 4, 1), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "ALL", 3)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips) VALUES (%s, '2026-04-14', 3)",
+            (agency_id,),
+        )
+    pg_conn.commit()
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    saved = _saved_by_route(pg_conn, agency_id)
+    # The first count saved for a day stands, its routes included: the
+    # timetable that planned it may not be the one loaded now.
+    assert saved[date(2026, 4, 14)] is None
+    assert saved[date(2026, 4, 13)] == {"R1": 3}
 
 
 def test_capture_never_overwrites_a_saved_day(pg_conn, agency_id):
@@ -325,3 +436,71 @@ def test_a_timetable_that_starts_today_or_later_saves_nothing_yet(pg_conn, agenc
 
     capture_planned_trips(pg_conn, agency_id, today=today)
     assert _saved(pg_conn, agency_id) == {d: 3 for d in _days(date(2026, 4, 1), today - timedelta(days=1))}
+
+
+def _removal(pg_conn, agency_id: int, service_id: str, gtfs_date: str, exception_type: int | None = 2) -> None:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES (%s, %s, %s, %s)",
+            (agency_id, service_id, gtfs_date, exception_type),
+        )
+    pg_conn.commit()
+
+
+def _loaded_rows(pg_conn, agency_id: int) -> dict:
+    """The loaded timetable as rows, in the shapes planned_trips.rows_plan takes."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT t.trip_id, t.service_id, count(*) FROM static_trips t JOIN static_stop_times st "
+            "ON st.agency_id = t.agency_id AND st.trip_id = t.trip_id WHERE t.agency_id = %s GROUP BY 1, 2",
+            (agency_id,),
+        )
+        trips = cur.fetchall()
+        cur.execute(
+            "SELECT service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date "
+            "FROM static_calendar WHERE agency_id = %s",
+            (agency_id,),
+        )
+        calendar = cur.fetchall()
+        cur.execute(
+            "SELECT service_id, date, exception_type FROM static_calendar_dates WHERE agency_id = %s", (agency_id,)
+        )
+        calendar_dates = cur.fetchall()
+    pg_conn.rollback()
+    return {"trips": trips, "calendar": calendar, "calendar_dates": calendar_dates}
+
+
+def test_a_timetable_given_as_rows_plans_each_day_as_the_capture_saves_it(pg_conn, agency_id):
+    """The plan of a timetable that is not loaded, given as its rows, is the
+    one the capture saves while it is: covered days, removals, additions and a
+    malformed or exception-less calendar_dates row alike."""
+    _weekly(pg_conn, agency_id, "WD", "1111100", date(2026, 4, 6), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "WD", 3)
+    _stop_times(pg_conn, agency_id, "WD", 3, 4)
+    _removal(pg_conn, agency_id, "WD", "20260408")
+    _addition(pg_conn, agency_id, "EX", "20260411")
+    _addition(pg_conn, agency_id, "EX", "2026041")
+    _removal(pg_conn, agency_id, "EX", "20260403", None)
+    _trips(pg_conn, agency_id, "EX", 2)
+    _stop_times(pg_conn, agency_id, "EX", 2, 5)
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_date, planned_trips, planned_stop_events FROM planned_trips_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        saved = {day: (trips, events) for day, trips, events in cur.fetchall()}
+    rows = _loaded_rows(pg_conn, agency_id)
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM static_stop_times WHERE agency_id = %s", (agency_id,))
+        cur.execute("DELETE FROM static_trips WHERE agency_id = %s", (agency_id,))
+        cur.execute("DELETE FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        cur.execute("DELETE FROM static_calendar_dates WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+
+    planned = planned_trips.rows_plan(pg_conn, agency_id, date(2026, 4, 1), date(2026, 4, 14), **rows)
+    assert {day: (plan.trips, plan.stop_events) for day, plan in planned.items()} == saved
+    assert saved[date(2026, 4, 8)] == (0, 0)
+    assert saved[date(2026, 4, 11)] == (2, 10)
+    assert date(2026, 4, 3) in saved

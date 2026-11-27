@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from api.range import RangeCtx
+from pipeline.histogram import bucketize
 from pipeline.reports.scope_summary import compute_scope_summary
 
 N_BUCKETS = 37
@@ -126,11 +127,60 @@ async def test_tolerance_honours_an_early_bound(seeded):
     conn, agency_id = seeded
     # R3 runs two to three minutes early, which only an early bound excludes.
     await _seed(conn, agency_id, "R3", date(2026, 9, 21), 50, -7500, _hist(3, 50))
-    unbounded = await compute_scope_summary(agency_id, _ctx(), conn)
+    unbounded = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=None)
     bounded = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=120)
     assert {t["late_sec"]: t["on_time_pct"] for t in unbounded["tolerance"]}[600] == 100.0
     assert {t["late_sec"]: t["on_time_pct"] for t in bounded["tolerance"]}[600] < 100.0
     assert {t["late_sec"]: t["on_time_pct"] for t in bounded["tolerance"]}[60] < 100.0
+
+
+@pytest.mark.asyncio
+async def test_readings_on_the_windows_edges_count_exactly_on_the_curve(seeded):
+    """Whole-minute feeds pile readings on exactly five minutes late and
+    exactly a minute early. The five-minute step, and an early bound of a
+    minute, count those from the exact columns."""
+    conn, agency_id = seeded
+    delays = [-120] * 10 + [-60] * 10 + [300] * 20 + [400] * 10
+    hist = [0] * N_BUCKETS
+    for d in delays:
+        hist[bucketize(d)] += 1
+    await conn.execute(
+        "INSERT INTO agg_route_daily_dist (agency_id, date, route_code, service_type, "
+        "samples, sum_delay_sec, on_time_count, late5_count, hist) VALUES ($1,$2,'R4','平日',$3,$4,$5,$6,$7)",
+        agency_id,
+        date(2026, 9, 24),
+        len(delays),
+        sum(delays),
+        sum(d <= 60 for d in delays),
+        sum(d > 300 for d in delays),
+        hist,
+    )
+    ctx = _ctx(routes=("R4",))
+
+    async def curve(**kw):
+        return {
+            t["late_sec"]: t["on_time_pct"]
+            for t in (await compute_scope_summary(agency_id, ctx, conn, **kw))["tolerance"]
+        }
+
+    unbounded = await curve(early_sec=None)
+    bounded = await curve(early_sec=60)
+    assert unbounded[300] == 80.0
+    assert bounded[300] == 60.0
+    assert bounded[60] == 20.0
+    # The default early bound is the industry window's minute.
+    assert await curve() == bounded
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("early_sec", [301, 360, 3600])
+async def test_an_early_bound_past_the_histograms_floor_draws_no_curve(seeded, early_sec):
+    """The summary reads only the aggregates, whose underflow bucket cannot be
+    split, so it offers no curve rather than a wrong one."""
+    conn, agency_id = seeded
+    body = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=early_sec)
+    assert body["tolerance"] == []
+    assert body["days"]
 
 
 @pytest.mark.asyncio
@@ -227,7 +277,28 @@ async def test_the_endpoint_resolves_the_service_filter_to_the_agencys_days(clie
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("early", "status"), [(0, 200), (3600, 200), (3601, 422), (-1, 422)])
+async def test_the_endpoint_bounds_early_departures_by_the_default_unless_any_is_asked(client, seeded):
+    """With no early tolerance the curve is the default window's, a minute
+    early at most; early=any counts every early departure, the legacy side."""
+    conn, agency_id = seeded
+    # R3 runs two to three minutes early.
+    await _seed(conn, agency_id, "R3", date(2026, 9, 21), 50, -7500, _hist(3, 50))
+
+    async def curve(query=""):
+        resp = await client.get(f"/api/{agency_id}/scope/summary?from=2026-09-20&to=2026-09-28{query}")
+        assert resp.status_code == 200, resp.text
+        return {t["late_sec"]: t["on_time_pct"] for t in resp.json()["tolerance"]}
+
+    default, bounded, unbounded = await curve(), await curve("&early=60"), await curve("&early=any")
+    assert default == bounded
+    assert unbounded[600] == 100.0
+    assert default[600] < 100.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("early", "status"), [(0, 200), (3600, 200), ("any", 200), (3601, 422), (-1, 422), ("all", 422)]
+)
 async def test_the_endpoint_bounds_the_early_tolerance(client, seeded, early, status):
     _, agency_id = seeded
     resp = await client.get(f"/api/{agency_id}/scope/summary?from=2026-09-20&to=2026-09-28&early={early}")

@@ -16,7 +16,22 @@ language only needs to add a column rather than rewriting handler code.
 from typing import Any
 
 from pipeline.query.labels import day_group_label, dow_label
-from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes
+from pipeline.reports.comparability import (
+    BOARD_ON_TIME_DEFINITION,
+    MAX_CI_HALF_WIDTH_PP,
+    MAX_CLAMP_PCT,
+    MIN_COVERAGE_PCT,
+    ci_half_width_as_printed,
+    coverage_unknown_why,
+    tenth_as_printed,
+)
+from pipeline.reports.definition import (
+    COVERAGE_MISSING_TEXT,
+    DefinitionMeta,
+    duration_text,
+    format_definition_footnotes,
+    format_stamp_lines,
+)
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -27,17 +42,19 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("ranking_header_best", "ja"): "【{label}平均遅延の少ない順 上位{count}路線】",
     ("ranking_header_best", "en"): "[{label}Lowest average delay — top {count} routes]",
     ("ranking_row", "ja"): "{rank}位: 路線{route} 平均{avg}分、p50={p50}分、p90={p90}分（{samples}件）",
-    ("ranking_row", "en"): "#{rank} route {route} mean {avg} min, p50={p50} min, p90={p90} min ({samples} samples)",
+    ("ranking_row", "en"): (
+        "#{rank} route {route} mean {avg} min, p50={p50} min, p90={p90} min ({samples} observations)"
+    ),
     ("on_time_header", "ja"): "【{label}定時率ランキング】",
     ("on_time_header", "en"): "[{label}On-time rate ranking]",
     ("on_time_header_worst", "ja"): "【{label}定時率の低い順】",
     ("on_time_header_worst", "en"): "[{label}On-time rate, lowest first]",
     ("on_time_row", "ja"): "{rank}位: 路線{route} 定時率{pct}%、平均{avg}分（{samples}件）",
-    ("on_time_row", "en"): "#{rank} route {route} on-time {pct}%, mean {avg} min ({samples} samples)",
+    ("on_time_row", "en"): "#{rank} route {route} on-time {pct}%, mean {avg} min ({samples} observations)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
     ("worst5_header", "en"): "[{label}Ranking of delays over 5 min]",
     ("worst5_row", "ja"): "{rank}位: 路線{route} 5分超 {count}回、平均{avg}分（{samples}件）",
-    ("worst5_row", "en"): "#{rank} route {route} over 5 min: {count} times, mean {avg} min ({samples} samples)",
+    ("worst5_row", "en"): "#{rank} route {route} over 5 min: {count} times, mean {avg} min ({samples} observations)",
     ("route_table_header", "ja"): "【{label}系統一覧：{basis}】",
     ("route_table_header", "en"): "[{label}Routes, {basis}]",
     ("route_table_by_avg_worst", "ja"): "平均遅延の大きい順",
@@ -57,17 +74,19 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("route_table_by_late5_count_best", "ja"): "5分超の件数が少ない順",
     ("route_table_by_late5_count_best", "en"): "fewest departures over 5 min first",
     ("route_table_row", "ja"): (
-        "{rank}位: 路線{route} 平均{avg}分、定時率{pct}%、5分超{share}%（{count}件）、観測{samples}件"
+        "{rank}位: 路線{route} 平均{avg}分、定時率{pct}%、{early_sec}を超える早発{early}%、"
+        "5分超{share}%（{count}件）、観測{samples}件"
     ),
     ("route_table_row", "en"): (
-        "#{rank} route {route} mean {avg} min, on-time {pct}%, over 5 min {share}% ({count}), {samples} samples"
+        "#{rank} route {route} mean {avg} min, on-time {pct}%, more than {early_sec} early {early}%, "
+        "over 5 min {share}% ({count}), {samples} observations"
     ),
     ("dow_header_weekend", "ja"): "【{label}土日祝遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend/holiday delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
     ("dow_header_weekday", "en"): "[{label}Weekday delay ranking]",
     ("dow_row", "ja"): "{rank}位: 路線{route} {dow_label}：平均{avg}分（{samples}件）",
-    ("dow_row", "en"): "#{rank} route {route} {dow_label}: mean {avg} min ({samples} samples)",
+    ("dow_row", "en"): "#{rank} route {route} {dow_label}: mean {avg} min ({samples} observations)",
     ("compare_header", "ja"): "【平日・土日祝 遅延差ランキング】",
     ("compare_header", "en"): "[Weekday vs weekend/holiday delay-delta ranking]",
     ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日祝{weekend}分（差：{delta}分、{direction}）",
@@ -92,8 +111,8 @@ _LOCALES: dict[tuple[str, str], str] = {
         "{rank}位: 路線{route} 滞留平均{dwell}分（{dwell_samples}件）、走行平均{run}分（{run_samples}件）"
     ),
     ("dwell_run_row", "en"): (
-        "#{rank} route {route} dwell avg {dwell} min ({dwell_samples} samples), "
-        "running avg {run} min ({run_samples} samples)"
+        "#{rank} route {route} dwell avg {dwell} min ({dwell_samples} observations), "
+        "running avg {run} min ({run_samples} observations)"
     ),
     ("dwell_run_feed_unsupported", "ja"): (
         "この事業者のフィードからは到着時刻を取り込めないため、滞留・走行時間の内訳は表示できません。"
@@ -132,8 +151,12 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
     ("council_header", "ja"): "【協議会向け報告（{agency}、{from_date} 〜 {to_date}）】",
     ("council_header", "en"): "[Council report ({agency}, {from_date} to {to_date})]",
-    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測データ{samples}件・停留所単位）",
-    ("council_headline", "en"): "On-time rate {on_time}%, mean delay {avg} min ({samples} stop-level observations)",
+    ("council_headline", "ja"): "定時率 {on_time}%{early}、平均遅延 {avg}分（観測数 {samples}件・停留所単位）",
+    ("council_headline", "en"): (
+        "On-time rate {on_time}%{early}, mean delay {avg} min ({samples} stop-level observations)"
+    ),
+    ("council_headline_early", "ja"): "、早発率 {early}%（{early_sec}を超える早発）",
+    ("council_headline_early", "en"): ", early departures {early}% (more than {early_sec} early)",
     ("council_headline_delivered", "ja"): "、運行率 {delivered}%",
     ("council_headline_delivered", "en"): ", service delivered {delivered}%",
     ("council_headline_delivered_agency_wide", "ja"): "、運行率 {delivered}%（事業者全体）",
@@ -145,19 +168,20 @@ _LOCALES: dict[tuple[str, str], str] = {
         "Planned and executed trips and Service delivered % count only the {covered}/{window} days a timetable plans."
     ),
     ("council_agency_wide_caveat", "ja"): (
-        "計画便数・運行便数・運行率・データ品質は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
+        "計画便数・運行便数・運行率・データ品質と他事業者との比較は、系統・曜日・ダイヤ・時間帯の絞り込みによらず、"
         "この期間の事業者全体の値です。"
     ),
     ("council_agency_wide_caveat", "en"): (
-        "Planned and executed trips, Service delivered % and data quality cover the whole agency "
-        "for the period; the route, day, service and time-band filters apply to the on-time figures only."
+        "Planned and executed trips, Service delivered %, data quality and the comparison with other operators "
+        "cover the whole agency for the period; the route, day, service and time-band filters apply to the "
+        "on-time figures only."
     ),
     ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
     ("council_stale_caveat", "en"): "Aggregates may lag the most recently completed day (processing delay).",
-    ("council_quality_caveat", "ja"): "データ品質: 観測値の{clamp_pct}%が異常値として除外されています。",
-    ("council_quality_caveat", "en"): "Data quality: {clamp_pct}% of observations were excluded as implausible.",
-    ("council_quality_unavailable", "ja"): "データ品質: 評価不能（この期間の生観測データがありません）。",
-    ("council_quality_unavailable", "en"): "Data quality: not available (no raw observations in this period).",
+    ("council_quality_caveat", "ja"): "データ品質: 受信データの{clamp_pct}%が異常値として除外されています。",
+    ("council_quality_caveat", "en"): "Data quality: {clamp_pct}% of readings were excluded as implausible.",
+    ("council_quality_unavailable", "ja"): "データ品質: 評価不能（この期間の受信データがありません）。",
+    ("council_quality_unavailable", "en"): "Data quality: not available (no readings in this period).",
     # A missing service-delivered rate gives its reason in the words the
     # agencies board shows beside its own (frontend network.delivered_missing),
     # one per pipeline.reports.service_delivered.DeliveredMissing value.
@@ -173,6 +197,54 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_delivered_missing_feed_reports_no_cancellations", "en"): "this feed doesn't report cancellations",
     ("council_delivered_missing_unreadable", "ja"): "計画を読み込めませんでした",
     ("council_delivered_missing_unreadable", "en"): "the plan could not be read",
+    # Whether the agencies board would rank this agency
+    # (pipeline.reports.comparability). A reason is given in the words the
+    # board shows beside an unranked agency (frontend network.unranked_reason
+    # and network.coverage_unknown_why), one per ComparableReason value.
+    ("council_comparable", "ja"): (
+        "他事業者との比較: 比較の条件を満たします（観測カバー率 {coverage}%、定時率の95%信頼区間 {low}–{high}%）"
+    ),
+    ("council_comparable", "en"): (
+        "Comparison with other operators: meets the conditions for a comparison "
+        "(observation coverage {coverage}%, on-time % 95% interval {low}–{high}%)"
+    ),
+    ("council_not_comparable", "ja"): (
+        "他事業者との比較: 条件を満たしません。{reason}。この事業者の数字を他事業者と順位付けて比べないでください。"
+    ),
+    ("council_not_comparable", "en"): (
+        "Comparison with other operators: does not meet the conditions. {reason}. "
+        "Do not rank this operator's figures against other operators'."
+    ),
+    ("council_comparison_definition", "ja"): (
+        "他事業者との比較は、ここで指定した定時の幅ではなく、どの事業者にも共通の定時の定義で判定しています。"
+    ),
+    ("council_comparison_definition", "en"): (
+        "The comparison with other operators judges every operator by one shared on-time definition, "
+        "not the tolerance chosen here."
+    ),
+    ("council_not_comparable_no_data", "ja"): "期間内の観測なし",
+    ("council_not_comparable_no_data", "en"): "No observations in the period",
+    ("council_not_comparable_coverage_unknown", "ja"): "観測カバー率を測れません：{why}",
+    ("council_not_comparable_coverage_unknown", "en"): "Observation coverage can't be measured: {why}",
+    ("council_not_comparable_coverage_low", "ja"): "観測カバー率 {pct}%（{min}%未満）",
+    ("council_not_comparable_coverage_low", "en"): "Observation coverage {pct}% (below {min}%)",
+    ("council_not_comparable_ci_wide", "ja"): "定時率の95%信頼区間 ±{half}ポイント（±{max}ポイント超）",
+    ("council_not_comparable_ci_wide", "en"): "On-time % interval ±{half} points (wider than ±{max})",
+    ("council_not_comparable_clamp_high", "ja"): "異常値 {pct}%（{max}%超）",
+    ("council_not_comparable_clamp_high", "en"): "Implausible readings {pct}% (above {max}%)",
+    ("council_not_comparable_predicted_basis", "ja"): (
+        "値はフィードの予測遅延（観測した通過時刻とのずれが事業者ごとに異なる）"
+    ),
+    ("council_not_comparable_predicted_basis", "en"): (
+        "Figures are the feed's predicted delays, which differ from observed passing times "
+        "by a different amount for each feed"
+    ),
+    # The stamp's words for the same reasons, so a verdict and a footnote read alike.
+    **{
+        (f"council_coverage_unknown_{why}", locale): text
+        for (why, locale), text in COVERAGE_MISSING_TEXT.items()
+        if why != "no_data"
+    },
     ("delay_certificate_day_marker", "ja"): "({offset:+d}日)",
     ("delay_certificate_day_marker", "en"): " ({offset:+d} day)",
     ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
@@ -325,11 +397,13 @@ def _fmt_worst_5min(rows: list, intent: dict, locale: str) -> str:
 def _fmt_route_table(rows: list, intent: dict, locale: str) -> str:
     """Render the Routes table in its sorted order, the header naming the sort.
 
-    Row: ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, ...)``.
-    ``intent`` carries ``sort`` (a ``ROUTE_TABLE_SORTS`` key) and ``order``
-    (``"worst"`` or ``"best"``).
+    Row: ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples,
+    early_pct, ...)``. ``intent`` carries ``sort`` (a ``ROUTE_TABLE_SORTS``
+    key), ``order`` (``"worst"`` or ``"best"``) and ``early_departure_sec``,
+    the threshold each row's early-departure rate counts past.
     """
     basis = _t(f"route_table_by_{intent['sort']}_{intent['order']}", locale)
+    early_sec = duration_text(intent["early_departure_sec"], locale)
     lines = [
         _t(
             "route_table_row",
@@ -338,6 +412,8 @@ def _fmt_route_table(rows: list, intent: dict, locale: str) -> str:
             route=r[0],
             avg=_r(r[1]),
             pct=_r(r[2]),
+            early_sec=early_sec,
+            early=_r(r[6]),
             share=_r(r[3]),
             count=r[4],
             samples=r[5],
@@ -486,12 +562,67 @@ def format_dwell_run_text(payload: dict, locale: str = "ja") -> str:
     return _t("dwell_run_header", locale) + "\n" + "\n".join(lines)
 
 
+def _tenth(value: float | None) -> str:
+    """A share to a tenth as the agencies board prints it
+    (:func:`pipeline.reports.comparability.tenth_as_printed`), or a dash."""
+    return "—" if value is None else f"{tenth_as_printed(value):.1f}"
+
+
+def _threshold(value: float) -> str:
+    """A gate threshold as the board quotes it: 70, not 70.0."""
+    return f"{value:g}"
+
+
+def _comparison_reason(comparability: dict, locale: str) -> str:
+    """The first check the gate fails, in the board's words, with the figure
+    and the threshold it missed."""
+    reason = comparability["reason"]
+    key = f"council_not_comparable_{reason}"
+    if reason == "coverage_unknown":
+        why = _t(f"council_coverage_unknown_{coverage_unknown_why(comparability)}", locale)
+        return _t(key, locale, why=why)
+    if reason == "coverage_low":
+        return _t(key, locale, pct=_tenth(comparability["coverage_pct"]), min=_threshold(MIN_COVERAGE_PCT))
+    if reason == "ci_wide":
+        low, high = comparability["ci_low"], comparability["ci_high"]
+        half = "—" if low is None or high is None else f"{ci_half_width_as_printed(low, high):.1f}"
+        return _t(key, locale, half=half, max=_threshold(MAX_CI_HALF_WIDTH_PP))
+    if reason == "clamp_high":
+        return _t(key, locale, pct=_tenth(comparability["clamp_pct"]), max=_threshold(MAX_CLAMP_PCT))
+    return _t(key, locale)
+
+
+def _comparison_lines(definition: DefinitionMeta, payload: dict, locale: str) -> list[str]:
+    """Whether the agencies board would rank this agency, and, under a
+    tolerance other than the board's, that the verdict still reads the
+    board's definition, so its interval is not the headline figure's."""
+    comparability = payload.get("comparability")
+    if not comparability:
+        return []
+    if comparability["comparable"]:
+        line = _t(
+            "council_comparable",
+            locale,
+            coverage=_tenth(comparability["coverage_pct"]),
+            low=_tenth(comparability["ci_low"]),
+            high=_tenth(comparability["ci_high"]),
+        )
+    else:
+        line = _t("council_not_comparable", locale, reason=_comparison_reason(comparability, locale))
+    lines = [line]
+    tolerance = (definition.early_tolerance_sec, definition.late_tolerance_sec)
+    if tolerance != (BOARD_ON_TIME_DEFINITION.early_tolerance_sec, BOARD_ON_TIME_DEFINITION.late_tolerance_sec):
+        lines.append(_t("council_comparison_definition", locale))
+    return lines
+
+
 def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, locale: str = "ja") -> list[str]:
     """Footnote lines for the monthly/annual council report template:
     the definition metadata
     (:func:`pipeline.reports.definition.format_definition_footnotes`) plus
     the scope, freshness and quality caveats a council audience needs before
-    trusting the numbers next to them. Every line is derived from *definition*/*payload*'s
+    trusting the numbers next to them, and whether the agencies board would
+    rank this agency against the others. Every line is derived from *definition*/*payload*'s
     own fields, never a fixed string, so a non-default tolerance/definition,
     a genuinely stale aggregate, or a low-quality feed each change the
     rendered footnotes to match -- the same guarantee
@@ -502,11 +633,13 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
         lines.append(_t("council_agency_wide_caveat", locale))
     if payload.get("is_stale"):
         lines.append(_t("council_stale_caveat", locale))
+    # A stamp that states the period's clamp share has already footnoted it.
     clamp_pct = payload.get("clamp_pct")
-    if clamp_pct is None:
-        lines.append(_t("council_quality_unavailable", locale))
-    elif clamp_pct > 0:
-        lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
+    if definition.feed_quality is None:
+        if clamp_pct is None:
+            lines.append(_t("council_quality_unavailable", locale))
+        elif clamp_pct > 0:
+            lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
     missing = payload.get("delivered_missing")
     if payload.get("service_delivered_pct") is None and missing is not None:
         reason = _t(f"council_delivered_missing_{missing}", locale)
@@ -516,6 +649,7 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
     covered, window = payload.get("covered_days"), payload.get("window_days")
     if payload.get("planned_trips") and covered is not None and window and covered < window:
         lines.append(_t("council_planned_coverage_caveat", locale, covered=covered, window=window))
+    lines.extend(_comparison_lines(definition, payload, locale))
     return lines
 
 
@@ -528,7 +662,8 @@ def format_council_summary_text(
     locale: str = "ja",
 ) -> str:
     """Locale-aware prose body for the monthly/annual council report
-    template: a headline (on-time rate, average delay, and the
+    template: a headline (on-time rate, early-departure rate with the
+    threshold it counts past, average delay, and the
     service-delivered rate where the feed measures it, labelled whole-agency
     when ``payload["filtered"]``) over
     ``[from_date, to_date]``, footnoted with the definition
@@ -540,10 +675,16 @@ def format_council_summary_text(
     if not payload.get("samples"):
         body = _no_data(locale)
     else:
+        early_pct = payload.get("early_departure_pct")
+        early = ""
+        if early_pct is not None and definition.early_departure_sec is not None:
+            early_sec = duration_text(definition.early_departure_sec, locale)
+            early = _t("council_headline_early", locale, early=_r(early_pct), early_sec=early_sec)
         body = _t(
             "council_headline",
             locale,
             on_time=_r(payload.get("on_time_pct")),
+            early=early,
             avg=_r(payload.get("avg_delay_min")),
             samples=f"{payload['samples']:,}",
         )
@@ -553,9 +694,13 @@ def format_council_summary_text(
         if delivered is not None:
             key = "council_headline_delivered_agency_wide" if payload.get("filtered") else "council_headline_delivered"
             body += _t(key, locale, delivered=_r(delivered))
-    footnote_mark = "※" if locale != "en" else "* "
-    footnotes = "\n".join(f"{footnote_mark}{f}" for f in format_council_summary_footnotes(definition, payload, locale))
+    footnotes = "\n".join(_footnote(f, locale) for f in format_council_summary_footnotes(definition, payload, locale))
     return f"{header}\n{body}\n{footnotes}"
+
+
+def _footnote(line: str, locale: str) -> str:
+    """*line* as a text body's footnote, under the mark the screens split on."""
+    return f"{'* ' if locale == 'en' else '※'}{line}"
 
 
 def format_delay_certificate_footnotes(threshold_sec: int, shown: int, total: int, locale: str = "ja") -> list[str]:
@@ -580,7 +725,13 @@ def format_day_marker(offset: int, locale: str = "ja") -> str:
 
 
 def format_delay_certificate_text(
-    rows: list, threshold_sec: int, total: int, locale: str = "ja", observed: bool | None = True
+    rows: list,
+    threshold_sec: int,
+    total: int,
+    locale: str = "ja",
+    observed: bool | None = True,
+    *,
+    definition: DefinitionMeta,
 ) -> str:
     """Locale-aware summary line for the delay-certificate export -- a short
     count + threshold statement, not a per-row transcript (this export can
@@ -589,7 +740,13 @@ def format_delay_certificate_text(
     the row cap can leave larger than ``len(rows)``. An empty list says "no
     trip exceeded" only when the feed reported the scope (``observed`` True);
     otherwise it says there is no data, or that which one couldn't be checked.
+    It is footnoted with the definition's stamp, as the council report is.
     """
+    summary = _delay_certificate_summary(rows, threshold_sec, total, locale, observed)
+    return "\n".join([summary, *(_footnote(line, locale) for line in format_stamp_lines(definition, locale))])
+
+
+def _delay_certificate_summary(rows: list, threshold_sec: int, total: int, locale: str, observed: bool | None) -> str:
     if not rows:
         if observed is False:
             return _t("delay_certificate_no_data", locale)

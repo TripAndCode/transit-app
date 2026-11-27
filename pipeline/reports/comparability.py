@@ -1,0 +1,282 @@
+"""Whether the cross-agency board may rank an agency against the others.
+
+A ranking is an action for the council that reads it, so the board ranks only
+the agencies whose data supports the comparison and lists the rest unranked,
+each with the first check it fails. The checks run in a fixed order, so one
+agency always gives the same reason:
+
+1. ``no_data``: no observation in the period.
+2. ``coverage_unknown``: observation coverage cannot be measured, because the
+   ingest strategy's trip_ids cannot be matched to the timetable's, or no
+   plan covers the days observed, or the plan could not be read.
+3. ``coverage_low``: the feed reported too few of the planned trips.
+4. ``ci_wide``: the on-time percentage is too uncertain to order.
+5. ``clamp_high``: too many readings were implausible.
+6. ``predicted_basis``: the figures are the feed's predicted delays, not
+   observed passages (:data:`PREDICTED_VALUE_BASES`).
+
+``predicted_basis`` comes last, so an agency that gives it passes every check
+on its data, and the reasons before it keep naming what a route's own figures
+fail (:mod:`pipeline.reports.report_card`).
+
+Each check reads the figure the board prints, rounded as printed, so a reader
+can work out the verdict from the row itself. :func:`assess` is the gate's
+one entry: it decides which counts may be used at all before it computes and
+judges the figures, so no caller can judge a figure the gate would not print.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from pipeline.reports.definition import VALUE_BASIS, resolve_definition_meta
+from pipeline.reports.rankings import DEFAULT_PRESET, ON_TIME_PRESETS
+from pipeline.stats import wilson_interval
+
+ComparableReason = Literal["no_data", "coverage_unknown", "coverage_low", "ci_wide", "clamp_high", "predicted_basis"]
+
+#: Below this share of planned trips observed, the feed's gaps could hide any
+#: delay pattern, and their bias differs feed by feed.
+MIN_COVERAGE_PCT = 70.0
+
+#: Wider than this either side, an interval spans more than the gap between
+#: many neighbouring agencies' on-time rates, so ranking them would order noise.
+MAX_CI_HALF_WIDTH_PP = 3.0
+
+#: Above this share of implausible readings, the feed is producing errors
+#: often enough that the readings it kept are suspect too.
+MAX_CLAMP_PCT = 5.0
+
+#: Only these strategies ingest trip_ids from the timetable they join, so
+#: their observed trips can be counted against its planned ones.
+#: ``aomori_regex`` parses its trip_ids out of the feed's own text, which
+#: does not match the timetable's, so its coverage cannot be measured. This
+#: is a claim about trip matching, separate from which strategies can carry
+#: cancellations, though both hold only for ``static_join`` today.
+COMPARABLE_INGEST_STRATEGIES = frozenset({"static_join"})
+
+#: Value bases the board never ranks. A feed's predicted delays differ from
+#: the passages its vehicles were observed making, by an amount that differs
+#: feed by feed and that no check on the data can see, so ranking agencies on
+#: them would order each feed's prediction bias
+#: (docs/features/prediction-validation.md). A new predicted basis is named here.
+PREDICTED_VALUE_BASES = frozenset({VALUE_BASIS})
+
+#: The on-time definition the board counts every agency by, and so the one
+#: the gate judges: the default preset's window, which analyze's exact
+#: columns answer without merging histograms.
+BOARD_ON_TIME_WINDOW = ON_TIME_PRESETS[DEFAULT_PRESET]
+BOARD_ON_TIME_DEFINITION = resolve_definition_meta("on_time", *BOARD_ON_TIME_WINDOW)
+
+
+@dataclass(frozen=True)
+class Assessment:
+    """One agency's gate figures, as the board prints them, and its verdict.
+
+    ``observed_trips`` and ``coverage_planned_trips`` are ``None`` for a
+    strategy whose trips cannot be matched to the timetable, so nothing
+    downstream can count them.
+    """
+
+    observed_trips: int | None
+    coverage_planned_trips: int | None
+    coverage_pct: float | None
+    ci_low: float | None
+    ci_high: float | None
+    comparable: bool
+    comparable_reason: ComparableReason | None
+
+
+def assess(
+    *,
+    ingest_strategy: str | None,
+    observed_trips: int | None,
+    coverage_planned_trips: int | None,
+    on_time_count: int,
+    samples: int,
+    clamp_pct: float | None,
+    value_basis: str = VALUE_BASIS,
+) -> Assessment:
+    """Whether the board may rank this agency, with every figure the verdict
+    reads.
+
+    ``observed_trips`` of ``coverage_planned_trips`` are the trips the feed
+    reported and the timetable planned over the same days
+    (:func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`);
+    ``on_time_count`` of ``samples`` the stop events on time and observed.
+    ``value_basis`` is what those counts are made from, the definition
+    stamp's :data:`pipeline.reports.definition.VALUE_BASIS` by default.
+    """
+    observed, planned = matched_trips(ingest_strategy, observed_trips, coverage_planned_trips)
+    coverage = coverage_pct(observed, planned)
+    ci_low, ci_high = trip_interval(on_time_count, samples, observed)
+    reason = _first_failure(
+        coverage_pct=coverage,
+        ci_low=ci_low,
+        ci_high=ci_high,
+        clamp_pct=clamp_pct,
+        samples=samples,
+        value_basis=value_basis,
+    )
+    return Assessment(
+        observed_trips=observed,
+        coverage_planned_trips=planned,
+        coverage_pct=coverage,
+        ci_low=ci_low,
+        ci_high=ci_high,
+        comparable=reason is None,
+        comparable_reason=reason,
+    )
+
+
+def trips_matchable(ingest_strategy: str | None) -> bool:
+    """Whether the strategy's trip_ids are the timetable's, so what its feed
+    reported can be counted against what the timetable planned."""
+    return ingest_strategy in COMPARABLE_INGEST_STRATEGIES
+
+
+def matched_trips(
+    ingest_strategy: str | None, observed_trips: int | None, planned_trips: int | None
+) -> tuple[int | None, int | None]:
+    """*observed_trips* of *planned_trips*, or neither for a strategy whose
+    trips cannot be matched to the timetable (:func:`trips_matchable`), so
+    nothing downstream can count them."""
+    if trips_matchable(ingest_strategy):
+        return observed_trips, planned_trips
+    return None, None
+
+
+def coverage_unknown_why(
+    figures: Mapping[str, Any],
+) -> Literal["unreadable", "unmatched", "no_plan", "no_plan_observed"]:
+    """Why an agency's observation coverage cannot be measured, read as the
+    board reads it, from a row's own plan figures only, so one reason comes
+    from one read. A failed read nulls the planned count too, so it is told
+    apart first. Otherwise a null coverage plan (the plan through the coverage
+    bound) is ``unmatched``, a feed whose trip_ids aren't the timetable's; a
+    zero coverage plan beside a nonzero whole-period plan is
+    ``no_plan_observed``; and zero for both is ``no_plan``."""
+    if figures.get("delivered_missing") == "unreadable":
+        return "unreadable"
+    if figures.get("coverage_planned_trips") is None:
+        return "unmatched"
+    return "no_plan_observed" if figures.get("planned_trips") else "no_plan"
+
+
+def coverage_pct(observed: int | None, planned: int | None) -> float | None:
+    """What the feed reported as a percentage of what the timetable planned,
+    to one decimal: trips on the board, and the same ratio of stop events on
+    the feed-quality scorecard.
+
+    Not capped at 100: more observed than planned means the feed reported
+    trips the plan doesn't name, and that stays visible. ``None`` without a
+    plan or an observed count.
+    """
+    if observed is None or planned is None or planned <= 0:
+        return None
+    return round(observed / planned * 100, 1)
+
+
+def clamp_pct(clamp_count: int, raw_samples: int) -> float | None:
+    """The share of readings the plausibility clamp dropped
+    (``agg_feed_health.clamp_count`` of ``raw_samples``), in percent to two
+    decimals, as the board, the feed-health banner and the scorecard print
+    it. ``None`` without a reading, which says nothing about plausibility."""
+    return round(clamp_count / raw_samples * 100, 2) if raw_samples else None
+
+
+def trip_interval(count: float, samples: int, trips: int | None) -> tuple[float, float] | tuple[None, None]:
+    """The 95% Wilson interval of *count* of *samples*, in percent, counting
+    trips as the sample size: the on-time percentage's, and any other share
+    of stop events a route's trips produce together. A share that is already
+    one of trips, such as trips delivered of trips planned, passes 100 as
+    *samples* with its percentage as *count*.
+
+    Stop events within one trip run late together, so they are not
+    independent draws: the interval takes the stop-event share as the
+    proportion but counts trips as the sample size. Counting stop events
+    would claim an interval several times too narrow. The bounds round
+    outward to one decimal, so the printed interval never reads narrower
+    than the computed one.
+
+    ``(None, None)`` without samples or a trip count. Falling back to the
+    stop-event count would print exactly the overconfident interval this
+    avoids.
+    """
+    if samples <= 0 or trips is None or trips <= 0:
+        return (None, None)
+    successes = round(count / samples * trips)
+    low, high = wilson_interval(successes, trips)
+    # The inner round drops float noise, so an exact tenth stays put.
+    return (math.floor(round(low * 1000, 9)) / 10, math.ceil(round(high * 1000, 9)) / 10)
+
+
+def tenth_as_printed(value: float) -> float:
+    """``value`` to a tenth as the board prints it (``roundTo`` in
+    frontend/src/utils/format.ts): the binary value times ten, rounded to the
+    nearest whole number with ties away from zero. Python's ``round`` would
+    differ on a tie such as 2.35."""
+    scaled = abs(value) * 10
+    whole = math.floor(scaled)
+    if scaled - whole >= 0.5:
+        whole += 1
+    return math.copysign(whole / 10, value) if whole else 0.0
+
+
+def ci_half_width_as_printed(ci_low: float, ci_high: float) -> float:
+    """Half the interval's width as the board prints it (``ciHalfWidth`` in
+    frontend/src/components/comparabilityReason.ts): rounded up to a tenth,
+    so an interval the gate found wider than its limit never prints at the
+    limit. The inner round drops float noise from the subtraction."""
+    return math.ceil(round((ci_high - ci_low) / 2 * 1000) / 100) / 10
+
+
+def coverage_is_low(coverage_pct: float) -> bool:
+    """Whether observation coverage, a one-decimal figure as printed, falls
+    short of :data:`MIN_COVERAGE_PCT`: the gate's ``coverage_low`` check, and
+    the flag the definition stamp states beside the figure."""
+    return coverage_pct < MIN_COVERAGE_PCT
+
+
+def clamp_is_high(clamp_pct: float) -> bool:
+    """Whether the clamp share, as printed to a tenth, exceeds
+    :data:`MAX_CLAMP_PCT`: the gate's ``clamp_high`` check, and the flag the
+    definition stamp states beside the figure."""
+    return tenth_as_printed(clamp_pct) > MAX_CLAMP_PCT
+
+
+def _first_failure(
+    *,
+    coverage_pct: float | None,
+    ci_low: float | None,
+    ci_high: float | None,
+    clamp_pct: float | None,
+    samples: int,
+    value_basis: str,
+) -> ComparableReason | None:
+    """The first check the figures fail, in the module's order, or ``None``.
+
+    Each threshold is inclusive: a figure printed exactly at it passes. A
+    missing interval fails as too wide, since nothing bounds it. A missing
+    clamp share passes: the share is absent only when the feed-health
+    aggregate has no row, which analyze writes in the same run as the delay
+    figures, so its absence says nothing about the feed's readings.
+    """
+    if samples <= 0:
+        return "no_data"
+    if coverage_pct is None:
+        return "coverage_unknown"
+    if coverage_is_low(coverage_pct):
+        return "coverage_low"
+    # Rounded as a reader would round the two printed bounds' difference, so
+    # binary noise in the subtraction never flips a boundary case.
+    if ci_low is None or ci_high is None or round((ci_high - ci_low) / 2, 2) > MAX_CI_HALF_WIDTH_PP:
+        return "ci_wide"
+    if clamp_pct is not None and clamp_is_high(clamp_pct):
+        return "clamp_high"
+    if value_basis in PREDICTED_VALUE_BASES:
+        return "predicted_basis"
+    return None

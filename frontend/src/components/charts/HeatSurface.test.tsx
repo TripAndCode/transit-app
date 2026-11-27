@@ -269,3 +269,18 @@ describe("HeatSurface in the linked trend view", () => {
     expect(dimmed(cellAt(1, 9))).toBe(false);
   });
 });
+
+describe("HeatSurface past midnight", () => {
+  it("adds a column after 23 for a departure past midnight on its service day's clock, and keys End to it", () => {
+    renderWithProviders(
+      <HeatSurface hourly={[...hourly, { date: "2026-10-05", hour: 24, avg_min: 3, samples: 10 }]} grid={grid} worst={null} rangeDays={14} />,
+    );
+    const surfaceGrid = document.querySelector<HTMLElement>(".heat-surface")!;
+    expect(surfaceGrid.style.getPropertyValue("--heat-hours")).toBe("25");
+    expect(document.querySelectorAll(".heat-surface__hl")).toHaveLength(25);
+    expect(cellAt(1, 24).style.getPropertyValue("--c")).not.toBe("var(--none)");
+    cellAt(1, 0).focus();
+    fireEvent.keyDown(cellAt(1, 0), { key: "End" });
+    expect(document.activeElement).toBe(cellAt(1, 24));
+  });
+});

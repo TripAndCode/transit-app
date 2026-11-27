@@ -31,6 +31,14 @@ def test_complete_pattern_preserves_missing_and_weights_observations():
     assert rows[0][3] == rows[2][3]  # loop visit remains distinct
 
 
+def test_an_unnamed_stop_stays_null_and_the_label_never_falls_back_to_its_id():
+    schedule = [dict(stop("a", 1, "S1"), stop_name=None), stop("a", 2, "S2")]
+    rows = assemble_patterns([("a", 1, 60, 1)], schedule)
+    assert rows[0][4] is None
+    assert rows[0][3] == "S1"
+    assert rows[0][1] == "— → S2 (2)"
+
+
 def test_different_order_route_or_pattern_never_merges():
     schedule = [
         stop("a", 1, "A"),
@@ -48,11 +56,21 @@ def test_unmatched_sequence_is_not_silently_joined():
     assert assemble_patterns([("a", 7, 60, 1)], [stop("a", 1, "A")]) == []
 
 
+class _Conn(SimpleNamespace):
+    """A connection of an agency whose ingest stamps no timetable version, so
+    its rows are read as ingested. Hashable, as a cached read's key needs."""
+
+    __hash__ = object.__hash__
+
+    def __init__(self, **methods):
+        super().__init__(fetchval=AsyncMock(return_value=None), **methods)
+
+
 @pytest.mark.asyncio
 async def test_query_is_scoped_and_does_not_require_coordinates():
     ctx = RangeCtx(date(2026, 9, 1), date(2026, 9, 7), dow="weekday", time_band="morning")
     ch = SimpleNamespace(query=AsyncMock(return_value=SimpleNamespace(result_rows=[("a", 1, 60, 1)])))
-    conn = SimpleNamespace(fetch=AsyncMock(return_value=[stop("a", 1, "A"), stop("a", 2, "B")]))
+    conn = _Conn(fetch=AsyncMock(return_value=[stop("a", 1, "A"), stop("a", 2, "B")]))
     rows = await query_stop_patterns(9, ctx, conn, ch, route="C10")
     assert len(rows) == 2
     assert rows[1][5:] == [None, 0]
@@ -60,10 +78,11 @@ async def test_query_is_scoped_and_does_not_require_coordinates():
     assert params["agency_id"] == 9
     assert "C10" in str(params)
     assert params["ch_from_date"] == ctx.from_date
-    assert params["ch_tb_start"] == "05:00"
+    assert (params["ch_tb_start"], params["ch_tb_end"]) == (5 * 3600, 9 * 3600)
     assert "toDayOfWeek" in ch.query.call_args.args[0]
     assert conn.fetch.call_args.args[1] == 9
     assert "lat" not in conn.fetch.call_args.args[0]
+    assert "COALESCE" not in conn.fetch.call_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -79,7 +98,7 @@ async def test_too_many_observation_groups_raises():
     ctx = RangeCtx(date(2026, 9, 1), date(2026, 9, 7))
     observations = [(f"t{i}", 1, 60, 1) for i in range(MAX_GROUPS + 1)]
     ch = SimpleNamespace(query=AsyncMock(return_value=SimpleNamespace(result_rows=observations)))
-    conn = SimpleNamespace(fetch=AsyncMock())
+    conn = _Conn(fetch=AsyncMock())
     with pytest.raises(PatternWindowTooLarge):
         await query_stop_patterns(9, ctx, conn, ch, route="C10")
     conn.fetch.assert_not_called()
@@ -90,7 +109,7 @@ async def test_too_many_scheduled_rows_raises_even_with_few_observations():
     ctx = RangeCtx(date(2026, 9, 1), date(2026, 9, 7))
     ch = SimpleNamespace(query=AsyncMock(return_value=SimpleNamespace(result_rows=[("a", 1, 60, 1)])))
     scheduled = [stop("a", seq, f"S{seq}") for seq in range(MAX_SCHEDULE_ROWS + 1)]
-    conn = SimpleNamespace(fetch=AsyncMock(return_value=scheduled))
+    conn = _Conn(fetch=AsyncMock(return_value=scheduled))
     with pytest.raises(PatternWindowTooLarge):
         await query_stop_patterns(9, ctx, conn, ch, route="C10")
 
@@ -104,7 +123,7 @@ async def test_too_many_assembled_rows_raises():
     # Distinct stop_ids per trip so each trip forms its own pattern instead of
     # merging into one -- pattern identity is the ordered (seq, stop_id) signature.
     scheduled = [stop(trip, seq, f"{trip}-{seq}") for trip in trips for seq in (1, 2, 3)]
-    conn = SimpleNamespace(fetch=AsyncMock(return_value=scheduled))
+    conn = _Conn(fetch=AsyncMock(return_value=scheduled))
     with pytest.raises(PatternWindowTooLarge):
         await query_stop_patterns(9, ctx, conn, ch, route="C10")
 
@@ -114,7 +133,7 @@ async def test_tool_handler_reports_too_large_as_empty_result_not_500():
     ctx = RangeCtx(date(2026, 9, 1), date(2026, 9, 7))
     observations = [(f"t{i}", 1, 60, 1) for i in range(MAX_GROUPS + 1)]
     ch = SimpleNamespace(query=AsyncMock(return_value=SimpleNamespace(result_rows=observations)))
-    conn = SimpleNamespace(fetchrow=AsyncMock(return_value={"exists": 1}), fetch=AsyncMock())
+    conn = _Conn(fetchrow=AsyncMock(return_value={"exists": 1}), fetch=AsyncMock())
     result = await _tool_route_stop_patterns({"route": "C10"}, ctx, conn, 9, "en", ch=ch)
     assert result.kind == "empty"
     assert result.summary == "Narrow the period. The complete stop list exceeds the limit and was not truncated."

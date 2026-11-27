@@ -132,6 +132,11 @@ export function AgencyPicker({ className }: { className?: string } = {}) {
                 }}
               >
                 {a.agency_name}
+                {a.capability_tier === "basic" && (
+                  <span style={{ display: "block", fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
+                    {t("capability.basic.label")}
+                  </span>
+                )}
               </div>
             ))}
             {filtered.length === 0 && (

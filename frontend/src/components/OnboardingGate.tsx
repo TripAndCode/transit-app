@@ -34,7 +34,7 @@ function shortDay(iso: string, { year }: { year: boolean }): string {
 // Vertical padding gives a finger the height the small text alone lacks.
 const FOOTER_LINK: CSSProperties = { display: "inline-block", padding: "6px 0", color: "var(--text-secondary)" };
 
-/** Owns the "/" landing decision for a visitor RequireAuth has let through:
+/** Owns the "/" landing decision for every visitor, signed in or not:
  *  while agencies load, show the existing placeholder;
  *  once loaded, instantly redirect (via the declarative <Navigate> element —
  *  this runs at render time, so calling useNavigate() imperatively here
@@ -104,10 +104,9 @@ export function OnboardingGate() {
   const groups = groupAgencies(shown, newest);
   // A lone group of agencies with no known prefecture has nothing to be told apart from.
   const headed = groups.some((g) => g.prefectureKey != null);
-  // Only a visitor known to be signed out, on a deployment that lets them in
-  // that way, is told login is unneeded or offered one.
+  // Only a visitor known to be signed out is told login is unneeded, and
+  // offered one when the deployment has a sign-in method.
   const signedOut = session === null;
-  const guestWelcome = signedOut && config != null && !config.login_required;
   const canLogIn = signedOut && config?.auth_enabled === true;
 
   // The layer is the page's scroll container, and the column inside it is
@@ -160,7 +159,7 @@ export function OnboardingGate() {
           {t("onboarding.title")}
         </h1>
         <p style={{ margin: 0, fontSize: "var(--text-base)", lineHeight: 1.6, color: "var(--text-secondary)" }}>
-          {guestWelcome ? (
+          {signedOut ? (
             // The second sentence wraps as a whole, never inside a word.
             <Trans t={t} i18nKey="onboarding.intro_guest" components={{ unit: <span style={{ display: "inline-block" }} /> }} />
           ) : (
@@ -258,7 +257,7 @@ export function OnboardingGate() {
                 ·
               </span>
               <Link to="/login" style={FOOTER_LINK}>
-                {t("common.login")}
+                {t("common.admin_login")}
               </Link>
             </>
           )}

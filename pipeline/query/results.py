@@ -9,7 +9,10 @@ need the result type).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from pipeline.reports.definition import DefinitionMeta
 
 
 @dataclass
@@ -22,3 +25,7 @@ class ToolResult:
     columns: list[str] = field(default_factory=list)
     series: list = field(default_factory=list)
     pairs: list = field(default_factory=list)
+    # The method stamp the report computing these figures carries, built
+    # before them over the scope they were computed for; None when no report
+    # computes them.
+    definition: DefinitionMeta | None = None

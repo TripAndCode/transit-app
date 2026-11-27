@@ -9,6 +9,7 @@ export function MessageList({
   formatRoute,
   t,
   onChip,
+  agencyId,
 }: {
   messages: ConvMessage[];
   formatRoute: (rc: string | null | undefined) => string;
@@ -17,11 +18,13 @@ export function MessageList({
    *  RichResult/nextStepChips). When omitted the chips still render, but
    *  every action except the PNG export is a no-op. */
   onChip?: (action: NextStepAction) => void;
+  /** Forwarded to each evidence card, which links to its question's screen. */
+  agencyId?: number | null;
 }) {
   return (
     <>
       {messages.map((m) => (
-        <Bubble key={m.message_id} msg={m} formatRoute={formatRoute} t={t} onChip={onChip} />
+        <Bubble key={m.message_id} msg={m} formatRoute={formatRoute} t={t} onChip={onChip} agencyId={agencyId} />
       ))}
     </>
   );
@@ -32,11 +35,13 @@ function Bubble({
   formatRoute,
   t,
   onChip,
+  agencyId,
 }: {
   msg: ConvMessage;
   formatRoute: (rc: string | null | undefined) => string;
   t: TFunction;
   onChip?: (action: NextStepAction) => void;
+  agencyId?: number | null;
 }) {
   const isUser = msg.role === "user";
   const result = msg.result as ToolResult | null;
@@ -61,7 +66,9 @@ function Bubble({
             tool={msg.tool}
             args={msg.args}
             conditions={msg.conditions}
+            definition={msg.definition}
             onChip={onChip}
+            agencyId={agencyId}
           />
         ) : (
           <span style={{ whiteSpace: "pre-wrap" }}>{msg.rendered_summary ?? msg.tool}</span>

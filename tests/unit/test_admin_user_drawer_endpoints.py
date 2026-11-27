@@ -1,6 +1,5 @@
-"""Router-shape tests for the admin user drawer's sessions/API-keys/invites
-endpoints: request validation, the exact-prefix session lookup, hash-only API
-key storage, and invite-role validation.
+"""Router-shape tests for the admin user drawer's sessions endpoints: request
+validation and the exact-prefix session lookup.
 
 Exercised through a minimal standalone app (not ``api.main``) with
 ``require_admin``/``get_conn`` overridden to a fake in-memory connection, so
@@ -11,14 +10,13 @@ for the same pattern.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.deps import get_conn
 from api.routers import admin as admin_router
-from api.security import require_admin, token_hash
+from api.security import require_admin
 from tests.fixtures.users import admin_user
 
 _ADMIN = admin_user()
@@ -31,14 +29,10 @@ class _FakeConn:
     Dispatches on a recognizable substring of the SQL text, matching the
     exact queries written in ``api/routers/admin.py``."""
 
-    def __init__(self, *, sessions=None, users=None, api_keys=None):
+    def __init__(self, *, sessions=None):
         self.sessions = sessions or []  # list of dict(sid_hash, user_id)
-        self.users = users if users is not None else {1: "admin@example.com"}
-        self.api_keys = api_keys or []  # list of dict(id, owner_user_id, revoked_at)
-        self._next_api_key_id = (max((k["id"] for k in self.api_keys), default=0)) + 1
         self.events: list[tuple] = []
         self.audit: list[tuple] = []
-        self.invites: list[tuple] = []
 
     def transaction(self):
         """The handlers wrap their write and its audit entry together; this
@@ -58,59 +52,12 @@ class _FakeConn:
                 for s in self.sessions
                 if s["user_id"] == uid
             ]
-        if "FROM api_keys" in sql:
-            # One query with a NULL-guarded owner filter and a row cap, so
-            # the owner arrives as $1 (possibly None) and the limit as $2.
-            owner, limit = args
-            rows = [r for r in self.api_keys if r.get("owner_user_id") is not None]
-            if owner is not None:
-                rows = [r for r in rows if r["owner_user_id"] == owner]
-            return rows[:limit]
         raise AssertionError(f"unexpected fetch: {sql}")
 
     async def fetchval(self, sql, *args):
-        if "FROM users WHERE email = lower($1)" in sql:
-            (email,) = args
-            return 1 if email.lower() in self.users.values() else None
         raise AssertionError(f"unexpected fetchval: {sql}")
 
     async def fetchrow(self, sql, *args):
-        if "FROM users WHERE user_id=$1" in sql:
-            (uid,) = args
-            return {"deleted_at": None} if uid in self.users else None
-        if "INSERT INTO api_keys" in sql:
-            digest, owner_user_id, tier, label, expires_at = args
-            row = {
-                "id": self._next_api_key_id,
-                "owner_user_id": owner_user_id,
-                "tier": tier,
-                "label": label,
-                "created_at": datetime.now(timezone.utc),
-                "expires_at": expires_at,
-                "revoked_at": None,
-                "key_hash": digest,
-            }
-            self._next_api_key_id += 1
-            self.api_keys.append(row)
-            return {k: v for k, v in row.items() if k != "key_hash"}
-        if "UPDATE api_keys SET revoked_at" in sql:
-            (key_id,) = args
-            for r in self.api_keys:
-                if r["id"] == key_id and r.get("owner_user_id") is not None and r["revoked_at"] is None:
-                    r["revoked_at"] = datetime.now(timezone.utc)
-                    return {"id": r["id"], "owner_user_id": r["owner_user_id"]}
-            return None
-        if "INSERT INTO user_invites" in sql:
-            email, role, llm_approved, _invited_by = args
-            self.invites.append(args)
-            return {
-                "invite_id": 1,
-                "email": email,
-                "role": role,
-                "llm_approved": llm_approved,
-                "created_at": datetime.now(timezone.utc),
-                "expires_at": datetime.now(timezone.utc),
-            }
         raise AssertionError(f"unexpected fetchrow: {sql}")
 
     async def execute(self, sql, *args):
@@ -217,221 +164,11 @@ def test_revoke_session_requires_csrf_origin():
 # ── API keys ─────────────────────────────────────────────────────────────
 
 
-def test_issue_api_key_returns_raw_key_once_and_stores_only_hash():
+def test_api_key_issuance_and_listing_routes_no_longer_exist():
+    """No admin route issues or lists API keys any more; the path answers
+    404, same as any other unregistered route."""
     conn = _FakeConn()
-    r = _client(conn).post(
-        "/api/admin/api-keys",
-        json={"owner_user_id": 1, "tier": "pro", "label": "svc"},
-        headers=_ORIGIN,
-    )
-    assert r.status_code == 201
-    body = r.json()
-    raw_key = body["key"]
-    assert raw_key.startswith("sk_")
-    stored = conn.api_keys[0]
-    assert stored["key_hash"] == token_hash(raw_key)
-    assert "key" not in stored or stored.get("key") != raw_key
-
-
-def test_issue_api_key_unknown_owner_404s():
-    conn = _FakeConn(users={})
-    r = _client(conn).post("/api/admin/api-keys", json={"owner_user_id": 99, "tier": "pro"}, headers=_ORIGIN)
-    assert r.status_code == 404
-    assert conn.api_keys == []
-
-
-def test_list_api_keys_never_includes_raw_key_or_hash():
-    conn = _FakeConn(
-        api_keys=[
-            {
-                "id": 1,
-                "owner_user_id": 1,
-                "tier": "pro",
-                "label": "x",
-                "created_at": None,
-                "expires_at": None,
-                "revoked_at": None,
-                "key_hash": "deadbeef",
-            }
-        ]
-    )
-    r = _client(conn).get("/api/admin/api-keys")
-    assert r.status_code == 200
-    body = r.json()["keys"][0]
-    assert "key" not in body
-    assert "key_hash" not in body
-
-
-def test_list_api_keys_excludes_legacy_operator_inserted_rows():
-    """A legacy row has no ``owner_user_id`` even though 0053 backfills
-    ``key_hash`` for every row, admin-issued or not -- ``owner_user_id`` is
-    what now distinguishes an admin-managed key."""
-    conn = _FakeConn(
-        api_keys=[
-            {
-                "id": 1,
-                "owner_user_id": None,
-                "tier": "pro",
-                "label": None,
-                "created_at": None,
-                "expires_at": None,
-                "revoked_at": None,
-                "key_hash": "backfilled-legacy-hash",
-            }
-        ]
-    )
-    r = _client(conn).get("/api/admin/api-keys")
-    assert r.status_code == 200
-    assert r.json() == {"keys": [], "truncated": False}
-
-
-def test_list_api_keys_filters_by_owner():
-    conn = _FakeConn(
-        api_keys=[
-            {
-                "id": 1,
-                "owner_user_id": 1,
-                "tier": "pro",
-                "label": None,
-                "created_at": None,
-                "expires_at": None,
-                "revoked_at": None,
-                "key_hash": "a",
-            },
-            {
-                "id": 2,
-                "owner_user_id": 2,
-                "tier": "pro",
-                "label": None,
-                "created_at": None,
-                "expires_at": None,
-                "revoked_at": None,
-                "key_hash": "b",
-            },
-        ]
-    )
-    r = _client(conn).get("/api/admin/api-keys", params={"owner_user_id": 2})
-    assert r.status_code == 200
-    body = r.json()
-    assert [row["id"] for row in body["keys"]] == [2]
-    assert body["truncated"] is False
-
-
-def test_list_api_keys_reports_truncated_when_more_rows_than_the_cap_exist(monkeypatch):
-    monkeypatch.setattr(admin_router, "MAX_API_KEYS_LISTED", 2)
-    conn = _FakeConn(
-        api_keys=[
-            {
-                "id": i,
-                "owner_user_id": 1,
-                "tier": "pro",
-                "label": None,
-                "created_at": None,
-                "expires_at": None,
-                "revoked_at": None,
-                "key_hash": f"h{i}",
-            }
-            for i in range(1, 4)
-        ]
-    )
-    r = _client(conn).get("/api/admin/api-keys")
-    assert r.status_code == 200
-    body = r.json()
-    assert len(body["keys"]) == 2
-    assert body["truncated"] is True
-
-
-def test_revoke_api_key_sets_revoked_at():
-    conn = _FakeConn(
-        api_keys=[
-            {
-                "id": 5,
-                "owner_user_id": 1,
-                "tier": "pro",
-                "label": None,
-                "created_at": None,
-                "expires_at": None,
-                "revoked_at": None,
-                "key_hash": "a",
-            },
-        ]
-    )
-    r = _client(conn).delete("/api/admin/api-keys/5", headers=_ORIGIN)
-    assert r.status_code == 204
-    assert conn.api_keys[0]["revoked_at"] is not None
-
-
-def test_revoke_already_revoked_api_key_404s():
-    conn = _FakeConn(
-        api_keys=[
-            {
-                "id": 5,
-                "owner_user_id": 1,
-                "tier": "pro",
-                "label": None,
-                "created_at": None,
-                "expires_at": None,
-                "revoked_at": datetime.now(timezone.utc),
-                "key_hash": "a",
-            },
-        ]
-    )
-    r = _client(conn).delete("/api/admin/api-keys/5", headers=_ORIGIN)
-    assert r.status_code == 404
-
-
-# ── Invites ──────────────────────────────────────────────────────────────
-
-
-def test_create_invite_happy_path():
-    conn = _FakeConn()
-    r = _client(conn).post(
-        "/api/admin/invites",
-        json={"email": "new@example.com", "role": "admin", "llm_approved": True},
-        headers=_ORIGIN,
-    )
-    assert r.status_code == 201
-    body = r.json()
-    assert body["email"] == "new@example.com"
-    assert body["role"] == "admin"
-    assert body["llm_approved"] is True
-
-
-def test_create_invite_rejects_invalid_role():
-    conn = _FakeConn()
-    r = _client(conn).post("/api/admin/invites", json={"email": "x@example.com", "role": "superadmin"}, headers=_ORIGIN)
-    assert r.status_code == 400
-
-
-def test_create_invite_refuses_an_email_that_already_has_an_account():
-    """An invite is applied only when sign-in creates a new account, so one
-    for an existing account could never take effect. The admin is told so,
-    and nothing is written."""
-    conn = _FakeConn(users={1: "admin@example.com", 2: "member@example.com"})
-    r = _client(conn).post(
-        "/api/admin/invites",
-        json={"email": "Member@Example.com", "role": "admin", "llm_approved": True},
-        headers=_ORIGIN,
-    )
-    assert r.status_code == 409
-    assert r.json()["detail"] == "account_exists"
-    assert conn.invites == []
-    assert conn.events == []
-    assert conn.audit == []
-
-
-def test_issuing_a_key_audits_the_action_without_the_key_itself():
-    """The audit row is the durable record of who issued what. The raw key
-    is returned to the caller once and must not be recoverable from it."""
-    conn = _FakeConn(users={1: "admin@example.com", 2: "owner@example.com"})
-    r = _client(conn).post(
-        "/api/admin/api-keys", json={"owner_user_id": 2, "tier": "pro", "label": "cli"}, headers=_ORIGIN
-    )
-    assert r.status_code == 201
-    raw_key = r.json()["key"]
-
-    assert len(conn.audit) == 1
-    _actor_id, action, target_type, target_id, before, after, _reason, _ip = conn.audit[0]
-    assert action == "api_key.issued"
-    assert target_type == "user" and target_id == "2"
-    assert raw_key not in str(after) and raw_key not in str(before)
+    client = _client(conn)
+    assert client.get("/api/admin/api-keys").status_code == 404
+    assert client.post("/api/admin/api-keys", json={}, headers=_ORIGIN).status_code == 404
+    assert client.delete("/api/admin/api-keys/1", headers=_ORIGIN).status_code == 404

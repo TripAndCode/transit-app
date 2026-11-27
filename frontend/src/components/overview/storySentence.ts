@@ -1,15 +1,24 @@
 import type { TFunction } from "i18next";
-import type { OverviewConcentration, OverviewHeadline, OverviewServiceSplitDay } from "../../api/types";
+import type {
+  OverviewConcentration,
+  OverviewHeadline,
+  OverviewHeadlineReference,
+  OverviewServiceSplitDay,
+} from "../../api/types";
 import { CONCENTRATION_TOP_N } from "./concentrationTopN";
-import { fixedTenth } from "../../utils/format";
+import { fixedTenth, roundTo } from "../../utils/format";
 
 /** A change under this many minutes is about the same: the figures print to
  *  0.1 min, so a smaller change is one a reader cannot see in them. */
 export const FLAT_MAX_DELTA_MIN = 0.1;
 /** A change under this share (percent) of the window before is about the
  *  same, whatever its minutes: an agency averaging nine minutes moves by more
- *  than 0.1 min from one week to the next without anything having changed. */
+ *  than 0.1 min from one period to the next without anything having changed. */
 export const FLAT_MAX_DELTA_PCT = 5;
+/** A change in an on-time rate under this many percentage points is about the
+ *  same, whatever the rate: a rate is already a share, so a share of it would
+ *  let an 80% route move four points before anything reads as changed. */
+export const FLAT_MAX_DELTA_PP = 1.0;
 
 type StoryBranch = "behind" | "ahead" | "flat";
 
@@ -24,6 +33,54 @@ function branchFor(deltaMin: number, deltaPct: number | null): StoryBranch {
   const flat = Math.abs(deltaMin) < FLAT_MAX_DELTA_MIN || (deltaPct != null && Math.abs(deltaPct) < FLAT_MAX_DELTA_PCT);
   if (flat) return "flat";
   return deltaMin > 0 ? "behind" : "ahead";
+}
+
+/** How the headline compares with its trailing reference. */
+export type ReferenceJudgement = "better" | "flat" | "worse";
+
+/**
+ * The headline's judgement against its trailing reference, by the verdict's
+ * own tolerance (`FLAT_MAX_DELTA_MIN`, `FLAT_MAX_DELTA_PCT`): a longer average
+ * delay is worse. Null without both figures, and when either average is below
+ * 0 min: departures then run early on average, and a lower figure is no
+ * longer a better one.
+ */
+export function referenceJudgement(
+  avgMin: number | null,
+  reference: Pick<OverviewHeadlineReference, "avg_min" | "delta_min" | "delta_pct">,
+): ReferenceJudgement | null {
+  if (avgMin == null || reference.avg_min == null || reference.delta_min == null) return null;
+  if (avgMin < 0 || reference.avg_min < 0) return null;
+  const branch = branchFor(reference.delta_min, reference.delta_pct);
+  return branch === "flat" ? "flat" : branch === "behind" ? "worse" : "better";
+}
+
+/** `value`'s change from `against` as the API states a headline's: the change
+ *  rounded to `digits` decimals, and its share of `against` to 0.1%, none
+ *  against 0. */
+function changeFrom(value: number, against: number, digits: number): { delta: number; deltaPct: number | null } {
+  const delta = roundTo(value - against, digits);
+  return { delta, deltaPct: against !== 0 ? roundTo((delta / against) * 100, 1) : null };
+}
+
+/** A route's average delay against its own trailing reference, judged as
+ *  `referenceJudgement` judges the headline's. */
+export function avgDelayReferenceJudgement(avgMin: number | null, referenceAvgMin: number | null): ReferenceJudgement | null {
+  if (avgMin == null || referenceAvgMin == null) return null;
+  const { delta, deltaPct } = changeFrom(avgMin, referenceAvgMin, 2);
+  return referenceJudgement(avgMin, { avg_min: referenceAvgMin, delta_min: delta, delta_pct: deltaPct });
+}
+
+/**
+ * An on-time rate against its own trailing reference: a change, rounded to
+ * the 0.1 point the rates print to, under `FLAT_MAX_DELTA_PP` points is about
+ * the same, and a higher rate is better. Null without both figures.
+ */
+export function onTimeReferenceJudgement(pct: number | null, referencePct: number | null): ReferenceJudgement | null {
+  if (pct == null || referencePct == null) return null;
+  const delta = roundTo(pct - referencePct, 1);
+  if (Math.abs(delta) < FLAT_MAX_DELTA_PP) return "flat";
+  return delta > 0 ? "better" : "worse";
 }
 
 type ComparedHeadline = Pick<

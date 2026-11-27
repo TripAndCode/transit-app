@@ -97,6 +97,55 @@ class WeeklyService:
 
 
 @dataclass(frozen=True)
+class ServiceCalendar:
+    """A feed's calendar as the GTFS running rule reads it: ``calendar.txt``'s
+    weekly rows and ``calendar_dates.txt``'s additions and removals by date."""
+
+    weekly: tuple[WeeklyService, ...]
+    added: Mapping[date, frozenset[str]]
+    removed: Mapping[date, frozenset[str]]
+    # The first and last day any row names: a weekly row's range or a
+    # calendar_dates.txt addition or removal. None for a calendar with no rows.
+    extent: tuple[date, date] | None
+
+    @classmethod
+    def of(cls, weekly: Iterable[WeeklyService], exceptions: Iterable[tuple[str, date, int]]) -> ServiceCalendar:
+        """``exceptions`` are ``(service_id, date, exception_type)``: type 1 adds
+        the service on that date, type 2 removes it, and any other type is ignored."""
+        weekly = tuple(weekly)
+        added: dict[date, set[str]] = defaultdict(set)
+        removed: dict[date, set[str]] = defaultdict(set)
+        named: list[date] = [day for s in weekly for day in (s.start, s.end)]
+        for service_id, d, exception_type in exceptions:
+            if exception_type == 1:
+                added[d].add(service_id)
+                named.append(d)
+            elif exception_type == 2:
+                removed[d].add(service_id)
+                named.append(d)
+        return cls(
+            weekly,
+            {d: frozenset(s) for d, s in added.items()},
+            {d: frozenset(s) for d, s in removed.items()},
+            (min(named), max(named)) if named else None,
+        )
+
+    def running(self, d: date) -> frozenset[str]:
+        """The services that run on ``d``: a weekly row whose range covers it
+        with that weekday's flag set, plus the date's additions, minus its
+        removals, which win over the weekly flags."""
+        weekly = {s.service_id for s in self.weekly if s.start <= d <= s.end and s.days[d.weekday()]}
+        return frozenset((weekly | self.added.get(d, frozenset())) - self.removed.get(d, frozenset()))
+
+    def covers(self, d: date) -> bool:
+        """Whether ``d`` lies within the calendar's extent, from the first day
+        any row names to the last. A feed that lists only the dates its
+        services run (calendar_dates.txt alone) names no row for a day nothing
+        runs, and such a day inside the extent is a day it plans no service."""
+        return self.extent is not None and self.extent[0] <= d <= self.extent[1]
+
+
+@dataclass(frozen=True)
 class DayTypes:
     """Each date of a window filed under one of ``buckets``. ``from_calendar``
     holds the dates a classed calendar service decided; every other date of
@@ -154,10 +203,9 @@ def resolve_day_types(
 ) -> DayTypes:
     """File every date of ``[from_date, to_date]`` under a bucket.
 
-    ``exceptions`` are ``calendar_dates.txt`` rows as ``(service_id, date,
-    exception_type)``: type 1 adds the service on that date, type 2 removes it,
-    and a removal wins over the weekly flags. ``trips`` is each service's trip
-    count, the weight of its vote.
+    The services running on each date follow :meth:`ServiceCalendar.of` and
+    :meth:`ServiceCalendar.running` over ``weekly`` and ``exceptions``.
+    ``trips`` is each service's trip count, the weight of its vote.
 
     The buckets are 平日 / 土日祝 when the calendar's services include a
     Saturday-and-Sunday class but no Saturday-only one, and 平日 / 土曜 / 日祝
@@ -174,16 +222,12 @@ def resolve_day_types(
     weekly = list(weekly)
     classes: dict[str, DayType | None] = {s.service_id: service_class(s.days) for s in weekly}
     in_window = [s for s in weekly if s.start <= to_date and s.end >= from_date]
-    added: dict[date, set[str]] = defaultdict(set)
-    removed: dict[date, set[str]] = defaultdict(set)
-    for service_id, d, exception_type in exceptions:
-        if exception_type == 1:
-            added[d].add(service_id)
-        elif exception_type == 2:
-            removed[d].add(service_id)
+    calendar = ServiceCalendar.of(in_window, exceptions)
 
     window_classes = {classes[s.service_id] for s in in_window or weekly}
-    window_classes |= {classes.get(sid) for d, sids in added.items() if from_date <= d <= to_date for sid in sids}
+    window_classes |= {
+        classes.get(sid) for d, sids in calendar.added.items() if from_date <= d <= to_date for sid in sids
+    }
     two_way = "weekend_holiday" in window_classes and "saturday" not in window_classes
 
     holidays = frozenset(public_holidays_between(from_date, to_date))
@@ -192,9 +236,7 @@ def resolve_day_types(
     d = from_date
     while d <= to_date:
         fallback = fallback_day_type(d, holidays)
-        running = {s.service_id for s in in_window if s.start <= d <= s.end and s.days[d.weekday()]}
-        running = (running | added.get(d, set())) - removed.get(d, set())
-        cls = _majority(running, classes, trips, fallback)
+        cls = _majority(calendar.running(d), classes, trips, fallback)
         if cls is None:
             cls = fallback
         else:
@@ -209,7 +251,7 @@ def resolve_day_types(
     return DayTypes(buckets=TWO_WAY if two_way else THREE_WAY, by_date=by_date, from_calendar=frozenset(from_calendar))
 
 
-def _gtfs_date(value: str) -> date | None:
+def calendar_dates_day(value: str) -> date | None:
     """A ``calendar_dates.txt`` ``YYYYMMDD`` value, None when malformed (stored as the feed's raw text).
 
     Only eight ASCII digits count: ``strptime`` alone would also read ``2026041``,
@@ -223,7 +265,7 @@ def _gtfs_date(value: str) -> date | None:
         return None
 
 
-@async_lru_cache(maxsize=256, ttl_seconds=300)
+@async_lru_cache(maxsize=256, ttl_seconds=300, agency_arg="agency_id")
 async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -> DayTypes:
     """:func:`resolve_day_types` over the agency's loaded static calendar.
 
@@ -255,14 +297,16 @@ async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -
         for r in weekly_rows
     ]
     exceptions = [
-        (r["service_id"], d, r["exception_type"]) for r in exception_rows if (d := _gtfs_date(r["date"])) is not None
+        (r["service_id"], d, r["exception_type"])
+        for r in exception_rows
+        if (d := calendar_dates_day(r["date"])) is not None
     ]
     # Only services with a weekly class vote, and those all have a calendar.txt row.
     trips = {r["service_id"]: r["trips"] for r in weekly_rows}
     return resolve_day_types(from_date, to_date, weekly, exceptions, trips)
 
 
-@async_lru_cache(maxsize=256, ttl_seconds=300)
+@async_lru_cache(maxsize=256, ttl_seconds=300, agency_arg="agency_id")
 async def load_dominant_day_types(conn, agency_id: int) -> dict[str, DayType | None]:
     """Each route's dominant service's class (see `pipeline.headways.dominant_service_ctes`),
     as :func:`service_class` names it: None for a service it does not class, or

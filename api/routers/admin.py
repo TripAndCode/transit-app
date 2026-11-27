@@ -24,14 +24,13 @@ Soft-delete preserves the audit trail: rows in ``login_events`` survive
 (FK is ``ON DELETE SET NULL``), but the user's PII is anonymized
 (``email -> deleted-{uid}@local``, name/avatar nulled), sessions are
 killed, and OAuth identities are removed so re-login under the same
-provider sub creates a fresh user. The user's API keys are revoked and
-their recorded owner address is replaced with the anonymized one.
+provider sub creates a fresh user. The user's Notebook investigations are
+deleted with their messages.
 
 A soft-delete is terminal and ``deleted_at`` records it. Suspension alone
-is reversible, and lifting it would bring the account's keys back, so the
-routes that change a user or give it credentials refuse a deleted row with a
-409: the single and bulk PATCH, DELETE, and API-key issue. Revoking a
-session or a key only takes access away and needs no such guard.
+is reversible, so the routes that change a user refuse a deleted row with a
+409: the single and bulk PATCH, and DELETE. Revoking a session only takes
+access away and needs no such guard.
 """
 
 import asyncio
@@ -39,19 +38,18 @@ import json
 import logging
 import os
 import re
-import secrets
 import time
 import unicodedata
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from api.admin_audit import record_admin_action
 from api.admin_board import alert_key, board_alerts, board_freshness, board_window, collector_tiles
@@ -67,10 +65,9 @@ from api.admin_runs import (
 from api.deps import get_ch, get_conn
 from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.routers.agencies import AdminAgencyOut
-from api.security import User, csrf_guard, require_admin, token_hash
+from api.security import User, csrf_guard, require_admin
 from api.sqlutil import escape_like
 from pipeline.admin_users import SessionPrefixError, resolve_session_prefix, session_id_prefix
-from pipeline.api_key_ownership import OWNED_BY_USER
 from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
@@ -84,7 +81,6 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 MAX_BULK_USER_IDS = 200
-MAX_API_KEYS_LISTED = 500
 USER_DELETED = "user is deleted"
 
 
@@ -186,9 +182,6 @@ class UserDetail(UserRow):
 
     identities: list[dict]
     recent_events: list[dict]
-    # BYOK (bring-your-own-key) presence only -- never the key or its
-    # suffix. `None` means the user hasn't configured a provider key.
-    byok_provider: str | None
 
 
 @router.get("/users/{uid}", response_model=UserDetail)
@@ -219,11 +212,6 @@ async def user_detail(
         "FROM login_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
         uid,
     )
-    # Presence-only check -- deliberately not pipeline.query.user_llm_keys's
-    # get_user_llm_key, which decrypts the stored value and requires
-    # LLM_KEY_ENCRYPTION_KEY to be configured. This admin view never needs
-    # (or should see) the key itself, so it skips that dependency entirely.
-    byok_row = await conn.fetchrow("SELECT provider FROM user_llm_keys WHERE user_id=$1", uid)
     return UserDetail(
         **dict(row),
         identities=[dict(i) for i in ids],
@@ -237,7 +225,6 @@ async def user_detail(
             }
             for e in events
         ],
-        byok_provider=byok_row["provider"] if byok_row else None,
     )
 
 
@@ -575,9 +562,10 @@ async def delete_user(
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
-    """Soft-delete: anonymize PII, suspend, mark deleted, revoke and
-    anonymize API keys, drop sessions + identities, keep ``login_events``
-    intact for audit.
+    """Soft-delete: anonymize PII, suspend, mark deleted, drop sessions +
+    identities, delete the user's Notebook investigations
+    (``ask_conversations``, cascading to their messages), keep
+    ``login_events`` intact for audit.
 
     Last-admin guard fires only if the target is currently an active
     admin (i.e. role=admin AND not suspended) — suspending an already-
@@ -597,14 +585,6 @@ async def delete_user(
         if row["role"] == "admin" and row["suspended_at"] is None and other_active_admins == 0:
             raise HTTPException(400, "would leave no admins")
         anonymized = f"deleted-{uid}@local"
-        # Revoke before masking: a legacy ownerless key is matched by the
-        # address the mask replaces.
-        revoked = await conn.fetch(
-            f"UPDATE api_keys SET revoked_at = now() WHERE {OWNED_BY_USER} AND revoked_at IS NULL RETURNING id",
-            uid,
-            row["email"],
-        )
-        await conn.execute(f"UPDATE api_keys SET owner_email = $3 WHERE {OWNED_BY_USER}", uid, row["email"], anonymized)
         deleted_at = await conn.fetchval(
             """
             UPDATE users
@@ -618,6 +598,9 @@ async def delete_user(
         )
         await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
         await conn.execute("DELETE FROM oauth_identities WHERE user_id=$1", uid)
+        deleted_conversations = await conn.fetch(
+            "DELETE FROM ask_conversations WHERE user_id=$1 RETURNING conversation_id", uid
+        )
         await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted", ip=ip, user_agent=ua)
         await record_admin_action(
             conn,
@@ -634,7 +617,7 @@ async def delete_user(
             after={
                 "email": anonymized,
                 "deleted_at": deleted_at,
-                "api_keys_revoked": sorted(r["id"] for r in revoked),
+                "ask_conversations_deleted": len(deleted_conversations),
             },
             ip=ip,
         )
@@ -713,6 +696,125 @@ async def user_activity(
     return [ActivityTotal(**dict(r)) for r in rows]
 
 
+class AdminUsageRouteRow(BaseModel):
+    """One route template's requests over the window, split by caller kind."""
+
+    route: str
+    method: str
+    signed_out: int
+    signed_in: int
+    errors: int
+
+
+class AdminUsageDayRow(BaseModel):
+    """One day's totals, zero-filled when the day had no traffic."""
+
+    day: date
+    signed_out: int
+    signed_in: int
+
+
+class AdminUsageOut(BaseModel):
+    from_: str = Field(serialization_alias="from")
+    to: str
+    routes: list[AdminUsageRouteRow]
+    days: list[AdminUsageDayRow]
+
+
+_USAGE_ANON_ROUTES_SQL = """
+    SELECT route, method, SUM(requests)::int AS requests, SUM(errors)::int AS errors
+    FROM anonymous_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY route, method
+"""
+
+_USAGE_USER_ROUTES_SQL = """
+    SELECT route, method,
+           COALESCE(SUM(requests), 0)::int AS signed_in,
+           COALESCE(SUM(errors), 0)::int AS errors
+    FROM user_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY route, method
+"""
+
+_USAGE_ANON_DAYS_SQL = """
+    SELECT day, SUM(requests)::int AS requests
+    FROM anonymous_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY day
+"""
+
+_USAGE_USER_DAYS_SQL = """
+    SELECT day, COALESCE(SUM(requests), 0)::int AS signed_in
+    FROM user_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY day
+"""
+
+
+@router.get("/usage", response_model=AdminUsageOut)
+async def admin_usage(
+    days: int = Query(30, ge=1, le=400),
+    agency_id: int | None = Query(None, ge=1, le=2**31 - 1),
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> AdminUsageOut:
+    """Requests per route template per day, split by signed-out and
+    signed-in traffic, over the trailing ``days`` JST days ending today.
+    Either table missing (a deployment behind on migrations) degrades to an
+    empty contribution rather than a 500."""
+    today = today_jst(datetime.now(timezone.utc))
+    since = today - timedelta(days=days)
+
+    try:
+        anon_routes = await conn.fetch(_USAGE_ANON_ROUTES_SQL, since, agency_id)
+        anon_days = await conn.fetch(_USAGE_ANON_DAYS_SQL, since, agency_id)
+    except asyncpg.exceptions.UndefinedTableError:
+        anon_routes, anon_days = [], []
+
+    try:
+        user_routes = await conn.fetch(_USAGE_USER_ROUTES_SQL, since, agency_id)
+        user_days = await conn.fetch(_USAGE_USER_DAYS_SQL, since, agency_id)
+    except asyncpg.exceptions.UndefinedTableError:
+        user_routes, user_days = [], []
+
+    routes: dict[tuple[str, str], dict[str, int]] = {}
+    for r in anon_routes:
+        routes[(r["route"], r["method"])] = {
+            "signed_out": r["requests"],
+            "signed_in": 0,
+            "errors": r["errors"],
+        }
+    for r in user_routes:
+        entry = routes.setdefault((r["route"], r["method"]), {"signed_out": 0, "signed_in": 0, "errors": 0})
+        entry["signed_in"] = r["signed_in"]
+        entry["errors"] += r["errors"]
+    route_rows = [
+        AdminUsageRouteRow(route=route, method=method, **counts) for (route, method), counts in routes.items()
+    ]
+    route_rows.sort(key=lambda row: (-(row.signed_out + row.signed_in), row.route, row.method))
+
+    by_day: dict[date, dict[str, int]] = {}
+    for r in anon_days:
+        by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0})["signed_out"] = r["requests"]
+    for r in user_days:
+        by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0})["signed_in"] = r["signed_in"]
+
+    day_rows = []
+    cursor = since + timedelta(days=1)
+    while cursor <= today:
+        counts = by_day.get(cursor, {"signed_out": 0, "signed_in": 0})
+        day_rows.append(AdminUsageDayRow(day=cursor, **counts))
+        cursor += timedelta(days=1)
+
+    return AdminUsageOut(
+        from_=str(since + timedelta(days=1)),
+        to=str(today),
+        routes=route_rows,
+        days=day_rows,
+    )
+
+
 @router.delete("/users/{uid}/sessions/{sid_prefix}", status_code=204)
 async def revoke_user_session(
     uid: int,
@@ -755,254 +857,6 @@ async def revoke_user_session(
     return Response(status_code=204)
 
 
-# ── API keys ──────────────────────────────────────────────────────────────
-
-
-class ApiKeyOut(BaseModel):
-    """One admin-issued API key's metadata. Never the raw key or its hash."""
-
-    id: int
-    owner_user_id: int | None
-    tier: str
-    label: str | None
-    created_at: Any
-    expires_at: Any
-    revoked_at: Any
-
-
-class ApiKeyIssued(ApiKeyOut):
-    """Same shape as :class:`ApiKeyOut` plus the raw key -- returned exactly
-    once, from the issuing POST response, and never persisted in this form."""
-
-    key: str
-
-
-_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-class ApiKeyCreate(BaseModel):
-    owner_user_id: int
-    # The only tier `_key_func` grants anything to; the column default agrees.
-    tier: Literal["pro"] = "pro"
-    label: str | None = Field(default=None, max_length=120)
-    expires_at: datetime | None = None
-
-    @field_validator("expires_at")
-    @classmethod
-    def _utc_when_naive(cls, v: datetime | None) -> datetime | None:
-        # asyncpg reads a naive value for a timestamptz column in the server's local zone.
-        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
-
-
-class ApiKeyListOut(BaseModel):
-    """The bounded API-key listing plus whether the cap actually cut rows.
-
-    Without ``truncated``, a caller at exactly ``MAX_API_KEYS_LISTED`` rows
-    is indistinguishable from one with thousands more never shown.
-    """
-
-    keys: list[ApiKeyOut]
-    truncated: bool
-
-
-@router.get("/api-keys", response_model=ApiKeyListOut)
-async def list_api_keys(
-    owner_user_id: int | None = None,
-    _admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> ApiKeyListOut:
-    """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
-    legacy operator-inserted rows that predate this table's ownership/label
-    columns. ``key_hash`` no longer distinguishes the two: it is backfilled
-    for every row, admin-issued or legacy.
-
-    Bounded: unscoped, this returns at most ``MAX_API_KEYS_LISTED`` of every
-    admin-issued key in the system, and that set only grows; ``truncated``
-    tells the caller whether the cap actually cut anything."""
-    rows = await conn.fetch(
-        """
-        SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at
-        FROM api_keys
-        WHERE owner_user_id IS NOT NULL AND ($1::int IS NULL OR owner_user_id = $1)
-        ORDER BY created_at DESC
-        LIMIT $2
-        """,
-        owner_user_id,
-        MAX_API_KEYS_LISTED + 1,
-    )
-    truncated = len(rows) > MAX_API_KEYS_LISTED
-    page = rows[:MAX_API_KEYS_LISTED]
-    return ApiKeyListOut(keys=[ApiKeyOut(**dict(r)) for r in page], truncated=truncated)
-
-
-@router.post("/api-keys", response_model=ApiKeyIssued, status_code=201)
-async def issue_api_key(
-    body: ApiKeyCreate,
-    request: Request,
-    admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> ApiKeyIssued:
-    """Generate a raw API key, store only its hash, and return the raw value
-    once. ``key_hash`` is ``api.security.token_hash`` of the raw key -- the
-    same digest the auth stack uses for sessions -- so this key validates
-    through the same ``key_hash`` lookup as any other row in the table."""
-    csrf_guard(request)
-    ua = request.headers.get("user-agent")
-    ip = request.client.host if request.client else None
-    async with conn.transaction():
-        # FOR UPDATE: a concurrent delete_user either finishes first and is
-        # seen here, or waits and then revokes this key along with the rest.
-        owner = await conn.fetchrow("SELECT deleted_at FROM users WHERE user_id=$1 FOR UPDATE", body.owner_user_id)
-        if not owner:
-            raise HTTPException(404, "owner user not found")
-        if owner["deleted_at"] is not None:
-            raise HTTPException(409, USER_DELETED)
-        raw_key = f"sk_{secrets.token_urlsafe(32)}"
-        digest = token_hash(raw_key)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO api_keys (key_hash, owner_user_id, tier, label, expires_at, owner_email)
-            VALUES ($1, $2, $3, $4, $5, (SELECT email FROM users WHERE user_id=$2))
-            RETURNING id, owner_user_id, tier, label, created_at, expires_at, revoked_at
-            """,
-            digest,
-            body.owner_user_id,
-            body.tier,
-            body.label,
-            body.expires_at,
-        )
-        await record_event(
-            conn,
-            user_id=body.owner_user_id,
-            actor_id=admin.user_id,
-            kind="api_key_issued",
-            meta={"label": body.label},
-            ip=ip,
-            user_agent=ua,
-        )
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="api_key.issued",
-            target_type="user",
-            target_id=str(body.owner_user_id),
-            after={"label": body.label, "tier": body.tier},
-            ip=ip,
-        )
-    return ApiKeyIssued(**dict(row), key=raw_key)
-
-
-@router.delete("/api-keys/{key_id}", status_code=204)
-async def revoke_api_key(
-    key_id: int,
-    request: Request,
-    admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> Response:
-    csrf_guard(request)
-    ua = request.headers.get("user-agent")
-    ip = request.client.host if request.client else None
-    async with conn.transaction():
-        row = await conn.fetchrow(
-            "UPDATE api_keys SET revoked_at = now() "
-            "WHERE id=$1 AND owner_user_id IS NOT NULL AND revoked_at IS NULL "
-            "RETURNING id, owner_user_id",
-            key_id,
-        )
-        if not row:
-            raise HTTPException(404, "api key not found")
-        await record_event(
-            conn, user_id=row["owner_user_id"], actor_id=admin.user_id, kind="api_key_revoked", ip=ip, user_agent=ua
-        )
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="api_key.revoked",
-            target_type="api_key",
-            target_id=str(key_id),
-            ip=ip,
-        )
-    return Response(status_code=204)
-
-
-# ── Invites ───────────────────────────────────────────────────────────────
-
-
-class InviteCreate(BaseModel):
-    email: str = Field(max_length=254)
-    role: str = "user"
-    llm_approved: bool = False
-
-    @field_validator("email")
-    @classmethod
-    def _well_formed(cls, v: str) -> str:
-        v = v.strip()
-        if not _EMAIL_SHAPE.fullmatch(v):
-            raise ValueError("email must look like name@domain.tld")
-        return v
-
-
-class InviteOut(BaseModel):
-    invite_id: int
-    email: str
-    role: str
-    llm_approved: bool
-    created_at: Any
-    expires_at: Any
-
-
-@router.post("/invites", response_model=InviteOut, status_code=201)
-async def create_invite(
-    body: InviteCreate,
-    request: Request,
-    admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> InviteOut:
-    """Pre-approve a role (and optionally LLM access) for an email that
-    hasn't signed in yet. Honored by the OAuth callback only when it creates
-    the account (see ``api/routers/auth.py``'s ``_upsert_user``), so an email
-    that already has an account is refused with 409 ``account_exists``: its
-    role and AI access are changed on its user row instead."""
-    csrf_guard(request)
-    ua = request.headers.get("user-agent")
-    ip = request.client.host if request.client else None
-    async with conn.transaction():
-        if body.role not in ("user", "admin"):
-            raise HTTPException(400, "invalid role")
-        if await conn.fetchval("SELECT 1 FROM users WHERE email = lower($1)", body.email):
-            raise HTTPException(409, "account_exists")
-        row = await conn.fetchrow(
-            """
-            INSERT INTO user_invites (email, role, llm_approved, invited_by)
-            VALUES ($1, $2, $3, $4)
-            RETURNING invite_id, email, role, llm_approved, created_at, expires_at
-            """,
-            body.email,
-            body.role,
-            body.llm_approved,
-            admin.user_id,
-        )
-        await record_event(
-            conn,
-            user_id=None,
-            actor_id=admin.user_id,
-            kind="invite_created",
-            meta={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
-            ip=ip,
-            user_agent=ua,
-        )
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="invite.created",
-            target_type="invite",
-            target_id=str(row["invite_id"]),
-            after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
-            ip=ip,
-        )
-    return InviteOut(**dict(row))
-
-
 # ── Ops health endpoint ──────────────────────────────────────────────────
 
 
@@ -1024,6 +878,12 @@ class AgencyFreshnessOut(BaseModel):
     clamp_pct: Any  # float | None
 
 
+class DeployOut(BaseModel):
+    deployed_at: Any  # datetime
+    git_sha: str | None
+    migrations_applied: list[str]
+
+
 class OpsHealth(BaseModel):
     migrations: MigrationStatusOut | None
     agencies: list[AgencyFreshnessOut]
@@ -1031,6 +891,10 @@ class OpsHealth(BaseModel):
     # tell "checked, zero agencies" apart from "check failed" (both would
     # otherwise be an indistinguishable empty `agencies` list).
     agencies_ok: bool
+    last_deploy: DeployOut | None
+    # The same distinction for the release record: a null `last_deploy` with
+    # this True means no release has been recorded yet.
+    deploys_ok: bool
 
 
 @router.get("/ops", response_model=OpsHealth)
@@ -1040,6 +904,7 @@ async def admin_ops(
     ch: AsyncClient = Depends(get_ch),
 ) -> OpsHealth:
     """Read-only ops health snapshot. Graceful degradation: failing sub-checks return null."""
+    from pipeline.deploys import latest_deploy
     from pipeline.health import aggregate_freshness, migration_status
 
     mig: MigrationStatusOut | None = None
@@ -1071,7 +936,27 @@ async def admin_ops(
         agencies_out = []
         agencies_ok = False
 
-    return OpsHealth(migrations=mig, agencies=agencies_out, agencies_ok=agencies_ok)
+    deploy_out: DeployOut | None = None
+    deploys_ok = True
+    try:
+        deploy = await latest_deploy(conn)
+        if deploy is not None:
+            deploy_out = DeployOut(
+                deployed_at=deploy.deployed_at.isoformat(),
+                git_sha=deploy.git_sha,
+                migrations_applied=deploy.migrations_applied,
+            )
+    except Exception:
+        _log.warning("admin_ops: latest_deploy failed — degrading to null", exc_info=True)
+        deploys_ok = False
+
+    return OpsHealth(
+        migrations=mig,
+        agencies=agencies_out,
+        agencies_ok=agencies_ok,
+        last_deploy=deploy_out,
+        deploys_ok=deploys_ok,
+    )
 
 
 @router.get("/agencies", response_model=list[AdminAgencyOut])
@@ -1121,7 +1006,7 @@ async def list_admin_audit(
     `login`/`login_failed` events from `login_events` (mapped to
     `login.ok`/`login.fail`). Admin mutations are recorded directly into
     `admin_audit`; the other `login_events` kinds (a user's own logout,
-    account creation and invite use, and a role granted by seeding or
+    account creation, and a role granted by seeding or
     `ADMIN_EMAILS`) are not part of this timeline.
 
     `target` matches either `target_type` or `target_id` (exact). `cursor`
@@ -1370,7 +1255,7 @@ _OPS_STATUS_REPO_ENV = "OPS_STATUS_REPO"
 _COLLECTOR_BUDGET_SECONDS = 5.0
 
 _BOARD_FRESHNESS_SQL = """
-    SELECT a.agency_id, a.agency_name, m.analyzed_at, h.date, h.raw_samples, h.clamp_count
+    SELECT a.agency_id, a.agency_name, a.feed_url, m.analyzed_at, h.date, h.raw_samples, h.clamp_count
     FROM agencies a
     LEFT JOIN agg_meta m ON m.agency_id = a.agency_id
     LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date >= $1 AND h.date < $2
@@ -1378,7 +1263,9 @@ _BOARD_FRESHNESS_SQL = """
     ORDER BY a.agency_id, h.date
 """
 
-_BOARD_AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+_BOARD_AGENCIES_SQL = (
+    "SELECT agency_id, agency_name, feed_url FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+)
 
 _PENDING_LLM_APPROVALS_SQL = "SELECT count(*) FROM users WHERE NOT llm_approved AND suspended_at IS NULL"
 
@@ -1402,6 +1289,8 @@ class FreshnessDayOut(BaseModel):
 class AgencyFreshnessRowOut(BaseModel):
     agency_id: int
     agency_name: str
+    #: `api.admin_board.upstream_host`; rows arrive grouped by it.
+    upstream_host: str | None
     days: list[FreshnessDayOut]
 
 
@@ -1436,6 +1325,11 @@ class PipelineRunOut(BaseModel):
     lock_probe_ms: int | None
     error: str | None
     requested_by: int | None
+    #: An analyze run's headline before and after a rebuild that a method
+    #: version or fingerprint change forced; None on every other run. Stored by
+    #: `pipeline.runs.record_rebuild_headline`, as the document
+    #: `pipeline.rebuild_headline.read_after` builds.
+    rebuild_headline: dict[str, Any] | None
 
 
 class AdminRuns(BaseModel):
@@ -1506,7 +1400,7 @@ async def _collect_documents() -> list[dict[str, Any]]:
     poll then reads cheaply.
 
     At most one collection runs at a time. The default executor is shared
-    with the embedder and the LLM calls and holds only a handful of threads,
+    with the LLM calls and holds only a handful of threads,
     and this page polls on a timer from every operator who has it open, so
     without the guard abandoned collections would accumulate there and stall
     unrelated requests. Concurrent polls await the collection already in

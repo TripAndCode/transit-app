@@ -19,15 +19,34 @@ describe("observedSurface", () => {
     const s = observedSurface([{ date: "2026-10-05", hour: 8, avg_min: 2, samples: 10, sum_delay_sec: 1800 }]);
     expect(s[0][8]).toBe(3);
   });
-  it("ignores empty cells and hours outside the day", () => {
+  it("ignores empty cells and hours before the day", () => {
     const s = observedSurface([
       { date: "2026-10-05", hour: 8, avg_min: null, samples: 0 },
       { date: "2026-10-05", hour: 9, avg_min: 2, samples: 0 },
-      { date: "2026-10-05", hour: 24, avg_min: 2, samples: 10 },
+      { date: "2026-10-05", hour: -1, avg_min: 2, samples: 10 },
     ]);
     expect(s[0][8]).toBeNull();
     expect(s[0][9]).toBeNull();
+    expect(s[0]).toHaveLength(HOURS);
     expect(surfaceHasData(s)).toBe(false);
+  });
+  it("runs on past 23 to an hour after midnight on the service day's clock", () => {
+    const s = observedSurface([
+      { date: "2026-10-05", hour: 8, avg_min: 2, samples: 10 },
+      { date: "2026-10-05", hour: 25, avg_min: 4, samples: 10 },
+    ]);
+    expect(s.every((row) => row.length === 26)).toBe(true);
+    expect(s[0][25]).toBe(4);
+    expect(s[0][24]).toBeNull();
+  });
+});
+
+describe("bandSurface past midnight", () => {
+  it("draws an hour after midnight with its clock hour's band", () => {
+    const observed = observedSurface([{ date: "2026-10-05", hour: 24, avg_min: 4, samples: 10 }]);
+    const s = bandSurface([{ dow: 1, band: "late_night", expected_avg_min: 3 }], observed);
+    expect(s[0]).toHaveLength(25);
+    expect(s[0][24]).toBe(3);
   });
 });
 

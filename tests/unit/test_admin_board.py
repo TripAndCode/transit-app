@@ -19,6 +19,7 @@ from api.admin_board import (
     board_window,
     collector_history,
     collector_tiles,
+    upstream_host,
 )
 from pipeline.health import AgencyFreshness
 
@@ -27,10 +28,19 @@ TODAY = date(2026, 9, 20)
 ANALYZED_AT = datetime(2026, 9, 19, 2, 0, tzinfo=timezone.utc)
 
 
-def _row(day: date | None, *, raw: int = 1000, clamp: int = 0, aid: int = 1, name: str = "Hokuriku"):
+def _row(
+    day: date | None,
+    *,
+    raw: int = 1000,
+    clamp: int = 0,
+    aid: int = 1,
+    name: str = "Hokuriku",
+    feed_url: str | None = "https://feeds.example.jp/realtime/1/trip_updates.bin",
+):
     return {
         "agency_id": aid,
         "agency_name": name,
+        "feed_url": feed_url,
         "analyzed_at": ANALYZED_AT,
         "date": day,
         "raw_samples": raw,
@@ -99,6 +109,42 @@ def test_agencies_are_ordered_by_id_and_kept_distinct():
     ]
     out = board_freshness(rows, TODAY)
     assert [r["agency_id"] for r in out] == [2, 7]
+
+
+@pytest.mark.parametrize(
+    ("feed_url", "host"),
+    [
+        ("https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin", "ajt-mobusta-gtfs.mcapps.jp"),
+        ("HTTPS://Feeds.Example.JP:8443/rt", "feeds.example.jp"),
+        ("not a url", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_upstream_host_is_the_feed_urls_lowercased_hostname(feed_url, host):
+    assert upstream_host(feed_url) == host
+
+
+def test_freshness_rows_carry_their_upstream_host_and_group_by_it():
+    rows = [
+        _row(date(2026, 9, 18), aid=1, name="Aomori", feed_url="https://aomori.example.jp/rt"),
+        _row(date(2026, 9, 18), aid=8, name="Hiroden", feed_url="https://ajt.mcapps.jp/realtime/8/t.bin"),
+        _row(date(2026, 9, 18), aid=3, name="Unknown", feed_url=None),
+        _row(date(2026, 9, 18), aid=9, name="Geiyo", feed_url="https://ajt.mcapps.jp/realtime/9/t.bin"),
+    ]
+    out = board_freshness(rows, TODAY)
+    assert [(r["upstream_host"], r["agency_id"]) for r in out] == [
+        ("ajt.mcapps.jp", 8),
+        ("ajt.mcapps.jp", 9),
+        ("aomori.example.jp", 1),
+        (None, 3),
+    ]
+
+
+def test_freshness_tolerates_rows_without_a_feed_url_column():
+    row = _row(None)
+    del row["feed_url"]
+    assert board_freshness([row], TODAY)[0]["upstream_host"] is None
 
 
 # ── board_alerts ─────────────────────────────────────────────────────────

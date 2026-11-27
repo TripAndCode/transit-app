@@ -15,9 +15,14 @@ import { formatApiError } from "../../api/client";
 import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 import { ClampSparkline } from "./ClampSparkline";
+import { FeedQualityTrend } from "./FeedQualityTrend";
 import { useRowDrafts } from "./useRowDrafts";
 
-const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct"] as const;
+/** pipeline/reports/performance_standard.py's METRIC_TYPES. */
+const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct", "on_time_pct", "service_delivered_pct"] as const;
+/** The targets that are shares, in percent, which the API and the table's
+ *  CHECKs hold to 0–100. */
+const SHARE_METRICS: ReadonlySet<string> = new Set(["on_time_pct", "service_delivered_pct"]);
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
@@ -174,6 +179,14 @@ function isNonNegativeNumber(raw: string): boolean {
   return raw.trim() !== "" && Number.isFinite(n) && n >= 0;
 }
 
+/** A finite target, and for a share a percentage, as the API and the
+ *  table's CHECKs require. */
+function isThreshold(metricType: string, raw: string): boolean {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(n)) return false;
+  return !SHARE_METRICS.has(metricType) || (n >= 0 && n <= 100);
+}
+
 function StandardsEditor({
   agencyId,
   rows,
@@ -195,8 +208,7 @@ function StandardsEditor({
   const valid = drafts.every(
     (d) =>
       d.route_code.trim() !== "" &&
-      Number.isFinite(Number(d.threshold_value)) &&
-      d.threshold_value.trim() !== "" &&
+      isThreshold(d.metric_type, d.threshold_value) &&
       isNonNegativeNumber(d.bonus_malus_rate)
   );
 
@@ -496,6 +508,12 @@ export function AgencyDiagnosticsDrawer({
               );
             })}
           </KeyValueGrid>
+
+          <SectionTitle>{t("admin.agency_diag.quality_section")}</SectionTitle>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
+            {t("admin.agency_diag.quality_scope_note")}
+          </div>
+          <FeedQualityTrend months={data.feed_quality} />
 
           <SectionTitle>{t("admin.agency_diag.static_section")}</SectionTitle>
           {data.static_versions.length === 0 ? (

@@ -23,6 +23,7 @@ import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
@@ -84,20 +85,41 @@ def _jst_date(value: Any) -> date | None:
     return value.astimezone(_JST).date()
 
 
+def upstream_host(feed_url: str | None) -> str | None:
+    """The host an agency's realtime feed is fetched from, lowercased, or
+    ``None`` when the URL names none. Agencies sharing a host share its
+    outages, so the board groups them by it."""
+    if not feed_url:
+        return None
+    try:
+        return urlsplit(feed_url).hostname
+    except ValueError:
+        return None
+
+
 def board_freshness(rows: Iterable[Mapping[str, Any]], today: date) -> list[dict[str, Any]]:
     """Shape per-agency-per-day aggregate coverage into heatmap rows.
 
     ``rows`` is the flat join of agencies x ``agg_meta`` x ``agg_feed_health``:
     one row per agency per day that has feed-health data, plus a single
     ``date=None`` row for an agency with no data in range at all. Every
-    agency gets exactly ``BOARD_WINDOW_DAYS`` cells regardless.
+    agency gets exactly ``BOARD_WINDOW_DAYS`` cells regardless. Rows come
+    grouped by ``upstream_host`` (hosts alphabetically, an unknown host
+    last), agency id ascending within a host, so one host's outage reads as
+    one block of missing days rather than gaps scattered down the list.
     """
     agencies: dict[int, dict[str, Any]] = {}
     for row in rows:
         aid = row["agency_id"]
         entry = agencies.setdefault(
             aid,
-            {"agency_id": aid, "agency_name": row["agency_name"], "analyzed_at": row.get("analyzed_at"), "days": {}},
+            {
+                "agency_id": aid,
+                "agency_name": row["agency_name"],
+                "upstream_host": upstream_host(row.get("feed_url")),
+                "analyzed_at": row.get("analyzed_at"),
+                "days": {},
+            },
         )
         day = row.get("date")
         if day is not None:
@@ -105,7 +127,12 @@ def board_freshness(rows: Iterable[Mapping[str, Any]], today: date) -> list[dict
 
     window = board_window(today)
     out: list[dict[str, Any]] = []
-    for aid in sorted(agencies):
+
+    def group_order(aid: int) -> tuple[bool, str, int]:
+        host = agencies[aid]["upstream_host"]
+        return (host is None, host or "", aid)
+
+    for aid in sorted(agencies, key=group_order):
         entry = agencies[aid]
         analyzed_on = _jst_date(entry["analyzed_at"])
         days: list[dict[str, Any]] = []
@@ -118,7 +145,14 @@ def board_freshness(rows: Iterable[Mapping[str, Any]], today: date) -> list[dict
             clamp = int((row or {}).get("clamp_count") or 0)
             state = "fresh" if analyzed_on is not None and analyzed_on > day else "stale"
             days.append({"date": day.isoformat(), "state": state, "clamp_pct": round(clamp * 100 / raw, 2)})
-        out.append({"agency_id": aid, "agency_name": entry["agency_name"], "days": days})
+        out.append(
+            {
+                "agency_id": aid,
+                "agency_name": entry["agency_name"],
+                "upstream_host": entry["upstream_host"],
+                "days": days,
+            }
+        )
     return out
 
 

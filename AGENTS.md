@@ -25,9 +25,19 @@ tier routing, the high-risk overlay and the fix cap.
 
 ## Hard rules
 
-- **Dev databases are read-only.** Dev Postgres and dev ClickHouse (`docker compose
-  exec clickhouse`) hold real data. SELECT/EXPLAIN is allowed; never run writes, DDL,
-  resets, down migrations, or destructive Make targets against them.
+- **Dev databases are read-only but for two sanctioned paths.** Dev Postgres and dev
+  ClickHouse (`docker compose exec clickhouse`) hold real data. SELECT/EXPLAIN is
+  allowed. The only writes an agent makes there:
+  - `scripts/dev_upgrade.py`, after a merge: migrations up, the ClickHouse schema,
+    analyze-all, then check-aggs. Its `--check` comes first; its docstring lists the
+    preconditions it enforces.
+  - A one-time operator script that a merged PR's body names for dev. Run it from the
+    primary checkout at `origin/main`, so it runs merged code, and read its dry run
+    before `--apply`.
+
+  A pending up migration that loses data waits for the owner to name it with
+  `--allow-destructive-up`. Nothing else is allowed: other writes, DDL, resets, down
+  migrations, prunes, ingests, or a destructive Make target.
   - Dev Postgres is whichever port the live container publishes. `compose.yml`
     declares `:5433`, but the instance holding the data can be published elsewhere,
     so read `DATABASE_URL` rather than assuming.
@@ -70,8 +80,8 @@ tier routing, the high-risk overlay and the fix cap.
 - Raw GTFS-RT `updates` is in ClickHouse. Postgres holds aggregates, OLTP, PostGIS,
   and pgvector. Default reports use precomputed aggregates; narrow filters may scan
   ClickHouse.
-- Ask routing is rules → embedding nearest-neighbour → RAG LLM. Only the third stage
-  calls an LLM.
+- Ask free text is rules → LLM; only the second stage calls a model. The notebook's
+  cards (`/ask/card`, conversations) dispatch deterministically.
 - Admin control room: `api/routers/admin*.py` (board, agencies, users, audit, flags,
   ask ops) behind `RequireAdmin`/`require_admin`. See
   `docs/features/admin-control-room.md` for routes, endpoints, and tables per section.
@@ -150,8 +160,9 @@ tier routing, the high-risk overlay and the fix cap.
   (`make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
   CLICKHOUSE_PORT=8124 CLICKHOUSE_DATABASE=transit_test`). The variables go after
   the target: the Makefile's `-include .env` outranks the environment, so an env
-  prefix before `make` is replaced by whatever `.env` names. Rebuilding the dev
-  aggregates is the operator's step, which the PR body flags.
+  prefix before `make` is replaced by whatever `.env` names. The dev aggregates
+  are rebuilt once the change is merged, through `scripts/dev_upgrade.py` (the
+  dev-database rule above).
   `make check-aggs` only reads, and detects stale aggregates. It only compares each
   agency's newest day, so a date whose row count didn't change but whose rows did
   (replaced one-for-one) needs `FULL=1` to actually rebuild.
@@ -165,7 +176,6 @@ tier routing, the high-risk overlay and the fix cap.
   `CLICKHOUSE_*` test variables are set. A passing run with skips is not full
   integration evidence.
 - Put pure logic tests under `tests/unit/`; that directory bypasses DB fixtures.
-  Mock the ML embedder unless a test is explicitly slow.
 - A defect in ingest, analyze, an aggregate or a report metric gets its regression
   through the synthetic fixture (`tests/fixtures/synthetic_gtfs.py`, run end to end by
   `tests/pipeline/test_synthetic_agg_e2e.py`) with a hand-computed expected value,
@@ -184,7 +194,8 @@ tier routing, the high-risk overlay and the fix cap.
   derived state over synchronization effects.
 - All visible strings use `t()` with matching keys in both
   `frontend/src/i18n/locales/{ja,en}.json`. Intentional source-language exceptions
-  require `i18n-ignore`.
+  require `i18n-ignore`. Add, change or remove a key with `npm run i18n:set` (from
+  `frontend/`) instead of reading or editing those two files by hand.
 - Keep UI calm: no alarm-red defaults, dense panels, or stressful motion.
 - New pages are lazy-loaded. Keep MapLibre out of the entry chunk.
 - Server-side strings live in `_LOCALES` in `pipeline/query/tools.py`; update both
@@ -239,13 +250,13 @@ tier routing, the high-risk overlay and the fix cap.
   conflicts, and re-run the review pass on the result before readying or merging.
 - Every PR body starts with `**Origin:** Interactive session`, as in
   `.github/PULL_REQUEST_TEMPLATE.md`.
-- CI must be green on the PR's head before it merges. Branch commits carry no
-  `[skip ci]`: every push to a PR runs CI, which is what the gate reads. Only the
-  squash-merge commit keeps the trailer, so `main` does not re-run what the branch
-  already proved.
-  - `transit-app-gotchas` owns the mechanism and its traps. Chiefly, a tip that does
-    carry the trailer produces no run at all, so the gate has nothing to read rather
-    than something to fail.
+- CI must be green on the PR's head before it merges. No commit carries
+  `[skip ci]`, the squash-merge included: every push to a PR runs CI, which is what
+  the gate reads, and every merge runs CI on `main`, which checks the merged result
+  the PR head never saw and measures backend coverage.
+  - `transit-app-gotchas` owns the trailer's mechanism. A commit that carries it
+    produces no run at all, so a gate has nothing to read rather than something to
+    fail.
 - For stacked PRs, retarget dependants to `main` before deleting their base branch;
   GitHub otherwise closes them.
 - After a PR merge, clean up persistent local/VPS clones with `make git-cleanup`

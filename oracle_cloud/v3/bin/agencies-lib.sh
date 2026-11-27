@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Shared reader for etc/agencies.tsv. Sourced by other bin/ scripts, never
-# executed directly.
+# Shared reader for etc/agencies.tsv and etc/vehicle_positions.tsv. Sourced
+# by other bin/ scripts, never executed directly.
 #
-# Row layout (6 tab-separated columns, `#` comments and blank lines skipped):
+# agencies.tsv row layout (6 tab-separated columns, `#` comments and blank
+# lines skipped):
 #   id <TAB> name <TAB> interval_sec <TAB> feed_url <TAB> static_url <TAB> ping_url
+# vehicle_positions.tsv row layout (4 columns, same skipping rules):
+#   id <TAB> name <TAB> interval_sec <TAB> url
 #
 # `IFS=$'\t' read -r ...` cannot be used here. Tab is an IFS *whitespace*
 # character, so a run of tabs collapses into a single delimiter and every
@@ -33,7 +36,16 @@ split_agency_row() {
         <<< "${1//$'\t'/$AGENCY_FIELD_SEP}"
 }
 
-# agency_row_is_data <row> — false for blank lines and `#` comments.
+# split_vp_row <row>
+# Sets vp_id / vp_name / vp_interval / vp_url from a vehicle_positions.tsv
+# row, with the same empty-column guarantee as split_agency_row.
+split_vp_row() {
+    IFS="$AGENCY_FIELD_SEP" read -r vp_id vp_name vp_interval vp_url \
+        <<< "${1//$'\t'/$AGENCY_FIELD_SEP}"
+}
+
+# agency_row_is_data <row> — false for blank lines and `#` comments. Applies
+# to both rosters.
 agency_row_is_data() {
     case "$1" in
         ''|'#'*) return 1 ;;

@@ -1,13 +1,28 @@
 """Tests for the v2 reports endpoints (live queries, no snapshots table)."""
 
 import os
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
-from tests.api.test_network import _seed_service_delivered_daily, _seed_static_schedule, _set_ingest_strategy
+from pipeline.agg_registry import METHOD_VERSION
+from pipeline.reports.definition import METHODOLOGY_URLS
+from pipeline.reports.network import invalidate_network_summary
+from pipeline.reports.rankings import on_time_window
+from tests.api.test_network import (
+    _seed,
+    _seed_gated_agency,
+    _seed_observed_trips,
+    _seed_route_dist,
+    _seed_saved_plan,
+    _seed_service_delivered_daily,
+    _seed_static_schedule,
+    _seed_two_day_agency,
+    _set_ingest_strategy,
+    observed_basis,  # noqa: F401 -- fixture
+)
 from tests.conftest import _test_pool, confirm_rt_field_coverage
 from tests.fixtures.observed_route import seed_observed_route
 
@@ -16,7 +31,7 @@ async def _trust_dwell_run(pool, *agency_ids):
     """See tests/api/test_network.py's `_trust_service_delivered` docstring --
     same reasoning, for the dwell_run report. Both reports resolve the same
     `rt_field_coverage_probes` verdict through
-    `pipeline.strategies.static_join.rt_field_coverage_confirmed`."""
+    `pipeline.strategies.static_join.rt_field_coverage_gap`."""
     await confirm_rt_field_coverage(pool, *agency_ids)
 
 
@@ -24,14 +39,16 @@ async def _trust_dwell_run(pool, *agency_ids):
 async def reports_app(apply_schema):
     from api.main import app
 
+    # council_summary reads its verdict from the agencies board's cache, which
+    # is keyed on the date range only, so a board another test cached for the
+    # same dates would answer with that test's agencies.
+    invalidate_network_summary()
     pool = await _test_pool()
     app.state.pool = pool
-    # get_report() declares ch=Depends(get_ch) alongside conn
-    # (compare_ranking's time_band-filtered live-fallback) — every report type
-    # resolves the dependency regardless of whether it's used, so something
-    # must be present at app.state.ch_client. None of this file's tests pass
-    # a time_band filter (all exercise the agg-table fast path), so None is
-    # a safe default here.
+    # Every report type resolves get_report()'s ch=Depends(get_ch). None is safe:
+    # every ClickHouse read these tests reach degrades a failed probe to None
+    # (api.clickhouse.newest_filed_date_before_by_agency). No test here passes
+    # time_band, the one path that needs a real client.
     app.state.ch_client = None
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
@@ -45,7 +62,7 @@ async def reports_app(apply_schema):
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, "
             "agg_route_stats, agg_route_hour, "
-            "agg_daily_trend, agg_route_daily_dist, rag_chunks, api_keys CASCADE"
+            "agg_daily_trend, agg_route_daily_dist, rag_chunks CASCADE"
         )
     await pool.close()
 
@@ -197,24 +214,27 @@ async def test_on_time_and_worst_5min_exact_from_agg(reports_client, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_on_time_no_params_is_byte_identical_to_legacy(reports_client, ch_client):
-    """Passing no tolerance params -- and passing preset=legacy_60s, an
-    explicit opt-in spelling of the same thing -- must both still read the
-    exact on_time_count column and match the pre-existing percentage,
-    unaffected by the new histogram-based tolerance path."""
+async def test_no_params_is_the_industry_window_and_the_legacy_preset_keeps_its_figure(reports_client, ch_client):
+    """Passing no tolerance params is the default preset, standard_m1_p5,
+    spelled the same as asking for it. preset=legacy_60s and the scope's
+    spelling of it, early=any&late=60, both still read the legacy figure."""
     client, agency_id, pool = reports_client
     day = "2026-05-15"
     await _seed_route(pool, agency_id, "RLEGACY", "平日", day, [-200] * 8 + [30] * 12 + [90] * 5)
     _run_analyze(agency_id, ch_client)
 
-    baseline = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()["rows"]
-    preset = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}&preset=legacy_60s")).json()[
-        "rows"
-    ]
-    r_base = next(x for x in baseline if x[0] == "RLEGACY")
-    r_preset = next(x for x in preset if x[0] == "RLEGACY")
-    assert r_base == r_preset
-    assert float(r_base[2]) == 80.0  # (8 + 12) / 25 on-time at the legacy <=60s cutoff
+    async def row(query):
+        body = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}{query}")).json()
+        return next(x for x in body["rows"] if x[0] == "RLEGACY"), body["definition"]["preset"]
+
+    default, standard = await row(""), await row("&preset=standard_m1_p5")
+    legacy, spelled = await row("&preset=legacy_60s"), await row("&early=any&late=60")
+    assert default == standard
+    assert float(default[0][2]) == 68.0  # (12 + 5) / 25: the -200s group is more than a minute early
+    assert default[1] == "standard_m1_p5"
+    assert legacy == spelled
+    assert float(legacy[0][2]) == 80.0  # (8 + 12) / 25 on-time at the legacy <=60s cutoff
+    assert legacy[1] == "legacy_60s"
 
 
 @pytest.mark.asyncio
@@ -260,9 +280,9 @@ async def test_worst_5min_custom_late_tolerance_reads_histogram(reports_client, 
 
 
 @pytest.mark.asyncio
-async def test_on_time_default_response_carries_legacy_definition_metadata(reports_client, ch_client):
-    """The JSON response's `definition` block must reflect the legacy_60s
-    default when no tolerance params are passed -- the always-visible
+async def test_on_time_default_response_carries_the_industry_definition_metadata(reports_client, ch_client):
+    """The JSON response's `definition` block must reflect the default
+    preset when no tolerance params are passed -- the always-visible
     metadata block a comparison view renders."""
     client, agency_id, pool = reports_client
     day = "2026-05-18"
@@ -272,9 +292,9 @@ async def test_on_time_default_response_carries_legacy_definition_metadata(repor
     resp = await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")
     assert resp.status_code == 200
     definition = resp.json()["definition"]
-    assert definition["preset"] == "legacy_60s"
-    assert definition["early_tolerance_sec"] is None
-    assert definition["late_tolerance_sec"] == 60
+    assert definition["preset"] == "standard_m1_p5"
+    assert definition["early_tolerance_sec"] == 60
+    assert definition["late_tolerance_sec"] == 300
     assert definition["exclusion_threshold_sec"] == 7200
     assert definition["measurement_point"] == "all_stops_all_observations"
     assert definition["dedup_rule"] == "latest_observation_per_stop_event"
@@ -364,7 +384,7 @@ async def test_csv_export_definition_metadata_preamble_reflects_custom_tolerance
 
 
 @pytest.mark.asyncio
-async def test_csv_export_definition_metadata_preamble_defaults_to_legacy(reports_client, ch_client):
+async def test_csv_export_definition_metadata_preamble_defaults_to_the_industry_preset(reports_client, ch_client):
     client, agency_id, pool = reports_client
     day = "2026-05-23"
     await _seed_route(pool, agency_id, "RCSVDEF", "平日", day, [30] * 25)
@@ -377,7 +397,517 @@ async def test_csv_export_definition_metadata_preamble_defaults_to_legacy(report
 
     rows = list(csv.reader(io.StringIO(resp.text)))
     preamble = rows[0][0]
-    assert "legacy_60s" in preamble
+    assert "プリセット=standard_m1_p5（業界標準）; 早着許容=60秒; 遅延許容=300秒; " in preamble
+    assert "legacy_60s" not in preamble
+
+
+async def _record_builds(pool, *builds):
+    """agg_table_state rows as analyze records them: (agency_id, table_name, built_at)."""
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint, built_at) VALUES ($1, $2, 'x', $3)",
+            builds,
+        )
+
+
+async def _record_timetables(pool, agency_id, versions):
+    """agg_schedule_revision_daily rows as analyze records them: {day: version name}."""
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) VALUES ($1, $2, $3)",
+            [(agency_id, date.fromisoformat(day), name) for day, name in versions.items()],
+        )
+
+
+async def _record_contents(pool, agency_id, contents, archived_at=None):
+    """The version map's Postgres mirror as the archive writes it: {version name: content hash}, each mapped
+    at *archived_at*, by default before _BUILT_AT."""
+    await pool.executemany(
+        "INSERT INTO static_version_contents (agency_id, static_version_id, content_hash, archived_at) "
+        "VALUES ($1, $2, $3, $4)",
+        [(agency_id, name, content, archived_at or _MAPPED_AT) for name, content in contents.items()],
+    )
+
+
+async def _record_sources(pool, agency_id, counts):
+    """agg_feed_health rows as analyze records them: {day: (archive_rows, live_rows)}."""
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count, total_rows, archive_rows, "
+            "live_rows) VALUES ($1, $2, 0, 0, $3, $4, $5)",
+            [
+                (agency_id, date.fromisoformat(day), (archive or 0) + (live or 0), archive, live)
+                for day, (archive, live) in counts.items()
+            ],
+        )
+
+
+# 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
+_BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+# When the version map's mirror rows a test records were mapped, before _BUILT_AT.
+_MAPPED_AT = datetime(2026, 10, 1, tzinfo=timezone.utc)
+_SOURCE_NOTE = (
+    "アーカイブの日は収集サーバーがその日に取得した全データ、"
+    "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ"
+)
+_BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）"
+_METHODOLOGY_NOTE = f"※算出方法の説明: {METHODOLOGY_URLS['ja']}"
+_LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
+# The feed quality of a day analyze has not reached: the figures read the
+# aggregates, which hold no observation of it yet.
+_UNANALYZED_QUALITY = "観測カバー率 —（期間内の集計済みの観測なし）、異常値 —（期間内の集計済みの観測なし）"
+# The stamp of a one-day delay record with no timetable, source or analyzed
+# observation recorded for its day.
+_CERT_STAMP = "\n".join(
+    [
+        _BASIS_NOTE,
+        _METHODOLOGY_NOTE,
+        _LIVE_STAMP,
+        "※時刻表: 記録なし 1日間（全1日間）",
+        "※観測データ: 記録なし 1日間（全1日間）",
+        f"※フィード品質（事業者全体）: {_UNANALYZED_QUALITY}",
+    ]
+)
+
+
+def _preamble(resp) -> str:
+    return resp.text.lstrip("\ufeff").splitlines()[0]
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_the_method_version_and_when_its_aggregates_were_built(reports_client):
+    """The newest build analyze recorded for the agency, across the tables a
+    report reads; another agency's later build is not this report's, nor is
+    the feed-quality scorecard's, which no report reads."""
+    client, agency_id, pool = reports_client
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-18"
+
+    unbuilt = (await client.get(url)).json()["definition"]
+    assert (unbuilt["method_version"], unbuilt["source"], unbuilt["built_at"]) == (METHOD_VERSION, "aggregates", None)
+    assert f"; 算出方法={METHOD_VERSION}; 集計日=不明;" in _preamble(await client.get(f"{url}&format=csv"))
+
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_builds(
+        pool,
+        (agency_id, "agg_route_stats", datetime(2026, 11, 4, tzinfo=timezone.utc)),
+        (agency_id, "agg_route_daily", _BUILT_AT),
+        (other, "agg_route_daily", datetime(2026, 11, 7, tzinfo=timezone.utc)),
+        (agency_id, "feed_quality_monthly", datetime(2026, 11, 8, tzinfo=timezone.utc)),
+    )
+    built = (await client.get(url)).json()["definition"]
+    assert (built["method_version"], built["source"]) == (METHOD_VERSION, "aggregates")
+    assert datetime.fromisoformat(built["built_at"]) == _BUILT_AT
+    assert f"; 算出方法={METHOD_VERSION}; 集計日=2026-11-06;" in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_the_timetables_in_force_over_its_days(reports_client):
+    """Each timetable most of a day's observations carried, with how many of
+    the range's days it covers, then the days none was recorded on; another
+    agency's timetables are not this report's."""
+    client, agency_id, pool = reports_client
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_timetables(
+        pool,
+        agency_id,
+        {
+            "2026-05-17": "gtfs_static_20260301",
+            "2026-05-18": "gtfs_static_20260401",
+            "2026-05-19": "gtfs_static_20260401",
+            "2026-05-20": "gtfs_static_20260401",
+            "2026-05-21": "gtfs_static_20260520",
+        },
+    )
+    await _record_timetables(pool, other, {"2026-05-18": "gtfs_static_20260402"})
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-24"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert definition["value_basis"] == "feed_prediction"
+    assert definition["timetable_versions"] == [
+        {
+            "agency_id": agency_id,
+            "name": "gtfs_static_20260401",
+            "fetched_on": "2026-04-01",
+            "days": 3,
+            "content_hash": None,
+        },
+        {
+            "agency_id": agency_id,
+            "name": "gtfs_static_20260520",
+            "fetched_on": "2026-05-20",
+            "days": 1,
+            "content_hash": None,
+        },
+        {"agency_id": agency_id, "name": None, "fetched_on": None, "days": 3, "content_hash": None},
+    ]
+    assert (
+        "; 集計日=不明; 時刻表=gtfs_static_20260401（2026-04-01取得）3日間、"
+        "gtfs_static_20260520（2026-05-20取得）1日間、記録なし 3日間（全7日間）; 観測データ="
+    ) in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_each_timetable_the_archive_maps_by_its_content(reports_client):
+    """A name the version map's Postgres mirror holds for this agency carries
+    the first digits of its content's hash, when the agency's aggregates were
+    built under it; a name it holds only for another agency, or not at all,
+    carries none, and so does one mapped since the aggregates were built."""
+    client, agency_id, pool = reports_client
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_timetables(
+        pool,
+        agency_id,
+        {
+            "2026-05-18": "gtfs_static_20260401",
+            "2026-05-19": "gtfs_static_20260520",
+            "2026-05-20": "gtfs_static_20260515",
+        },
+    )
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    await _record_contents(pool, agency_id, {"gtfs_static_20260401": "a1b2c3d4" + "0" * 24})
+    await _record_contents(pool, other, {"gtfs_static_20260520": "f" * 32})
+    await _record_contents(
+        pool, agency_id, {"gtfs_static_20260515": "e" * 32}, archived_at=_BUILT_AT + timedelta(hours=1)
+    )
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-20"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert [(v["name"], v["content_hash"]) for v in definition["timetable_versions"]] == [
+        ("gtfs_static_20260401", "a1b2c3d4"),
+        ("gtfs_static_20260520", None),
+        ("gtfs_static_20260515", None),
+    ]
+    assert (
+        "; 時刻表=gtfs_static_20260401（2026-04-01取得、内容ハッシュ a1b2c3d4）1日間、"
+        "gtfs_static_20260520（2026-05-20取得）1日間、gtfs_static_20260515（2026-05-15取得）1日間（全3日間）; "
+    ) in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_where_each_of_its_days_observations_came_from(reports_client):
+    """Each day of the range is filed under the source most of its observations
+    came from, and the days analyze has not counted read unrecorded: days past
+    the newest analyzed day and days counted before sources were. Another
+    agency's days are not this report's."""
+    client, agency_id, pool = reports_client
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_sources(
+        pool,
+        agency_id,
+        {
+            "2026-05-17": (0, 50),
+            "2026-05-18": (1000, 0),
+            "2026-05-19": (800, 40),
+            "2026-05-20": (0, 120),
+            "2026-05-21": (None, None),
+        },
+    )
+    await _record_sources(pool, other, {"2026-05-22": (0, 100)})
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-24"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert definition["source_mix"] == [{"agency_id": agency_id, "archive_days": 2, "live_days": 1, "none_days": 4}]
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        f"; 観測データ=アーカイブ 2日間、ライブ 1日間、記録なし 4日間（全7日間）。{_SOURCE_NOTE}"
+        f"; フィード品質（事業者全体）={_UNANALYZED_QUALITY}"
+    )
+
+
+_DROP_SOURCE_COLUMNS = "ALTER TABLE agg_feed_health DROP COLUMN archive_rows, DROP COLUMN live_rows"
+_ADD_SOURCE_COLUMNS = "ALTER TABLE agg_feed_health ADD COLUMN archive_rows BIGINT, ADD COLUMN live_rows BIGINT"
+
+
+@pytest.mark.asyncio
+async def test_a_database_without_the_source_counts_still_serves_the_report(reports_client):
+    """The observations line is enrichment. On a database not yet migrated to
+    the source counts, the report is served with the rest of its stamp, and the
+    rows it reads after the stamp on the same connection still come back."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_timetables(pool, agency_id, {day: "gtfs_static_20260401"})
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    await pool.execute(_DROP_SOURCE_COLUMNS)
+    try:
+        resp = await client.get(url)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert float(next(r for r in body["rows"] if r[0] == "RGATE")[2]) == 40.0
+        definition = body["definition"]
+        assert definition["source_mix"] is None
+        assert datetime.fromisoformat(definition["built_at"]) == _BUILT_AT
+        assert definition["timetable_versions"] == [
+            {
+                "agency_id": agency_id,
+                "name": "gtfs_static_20260401",
+                "fetched_on": "2026-04-01",
+                "days": 1,
+                "content_hash": None,
+            }
+        ]
+        assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+            "; 時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）"
+            "; フィード品質（事業者全体）=観測カバー率 —（この配信の便は時刻表の便と照合できません）"
+            "、異常値 —（期間内の集計済みの観測なし）"
+        )
+    finally:
+        await pool.execute(_ADD_SOURCE_COLUMNS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ddl", [_DROP_SOURCE_COLUMNS, "DROP TABLE agg_feed_health"], ids=["columns", "table"])
+async def test_a_failed_source_read_leaves_the_callers_transaction_usable(reports_client, ddl):
+    """Inside a caller's open transaction, the failed read rolls back to its
+    own savepoint, so the build read after it and the caller's next statement
+    still run."""
+    import asyncpg
+
+    from pipeline.reports.definition import resolve_definition_meta, stamp_build
+    from pipeline.reports.schedule_revision import read_schedule_days
+
+    _client, agency_id, pool = reports_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    try:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute(ddl)
+            schedule = await read_schedule_days(conn, agency_id, date(2026, 5, 18), date(2026, 5, 18))
+            meta = await stamp_build(conn, resolve_definition_meta("ranking", None, None), agency_id, schedule)
+            assert (meta.source_mix, meta.built_at) == (None, _BUILT_AT)
+            assert await conn.fetchval("SELECT count(*) FROM agencies WHERE agency_id = $1", agency_id) == 1
+        finally:
+            await tx.rollback()
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_a_database_without_the_version_map_mirror_names_its_timetables_with_no_hash(reports_client):
+    """The content hash is enrichment too. Inside a caller's open transaction,
+    a database not yet migrated to the mirror names its timetables without one,
+    and the caller's next statement still runs."""
+    import asyncpg
+
+    from pipeline.reports.definition import resolve_definition_meta, stamp_build
+    from pipeline.reports.schedule_revision import read_schedule_days
+
+    _client, agency_id, pool = reports_client
+    await _record_timetables(pool, agency_id, {"2026-05-18": "gtfs_static_20260401"})
+    await _record_contents(pool, agency_id, {"gtfs_static_20260401": "a1b2c3d4" + "0" * 24})
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    try:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute("DROP TABLE static_version_contents")
+            schedule = await read_schedule_days(conn, agency_id, date(2026, 5, 18), date(2026, 5, 18))
+            meta = await stamp_build(conn, resolve_definition_meta("ranking", None, None), agency_id, schedule)
+            assert [(v.name, v.content_hash) for v in meta.timetable_versions] == [("gtfs_static_20260401", None)]
+            assert meta.source_mix is not None
+            assert await conn.fetchval("SELECT count(*) FROM agencies WHERE agency_id = $1", agency_id) == 1
+        finally:
+            await tx.rollback()
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_rows_cached_before_a_rebuild_are_not_served_under_its_stamp(reports_client):
+    """The compute caches outlive a rebuild, so a response stamped with a new
+    build must have recomputed its rows since that build."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    before = (await client.get(url)).json()
+    assert float(before["rows"][0][2]) == 40.0
+
+    rebuilt = _BUILT_AT + timedelta(hours=1)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE agg_route_daily_dist SET on_time_count = 90, late5_count = samples - 90 WHERE agency_id = $1",
+            agency_id,
+        )
+        await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
+
+    after = (await client.get(url)).json()
+    assert datetime.fromisoformat(after["definition"]["built_at"]) == rebuilt
+    assert float(after["rows"][0][2]) == 90.0
+
+
+@pytest.mark.asyncio
+async def test_a_rebuild_older_than_another_agencys_still_forgets_the_cached_rows(reports_client):
+    """analyze stamps a build when it writes the row, not when it commits, so
+    a rebuild can land dated before another agency's newer build. It must
+    still forget the rows cached before it."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(
+        pool,
+        (agency_id, "agg_route_daily_dist", _BUILT_AT),
+        (other, "agg_route_daily_dist", _BUILT_AT + timedelta(hours=2)),
+    )
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    assert float((await client.get(url)).json()["rows"][0][2]) == 40.0
+
+    rebuilt = _BUILT_AT + timedelta(hours=1)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE agg_route_daily_dist SET on_time_count = 90, late5_count = samples - 90 WHERE agency_id = $1",
+            agency_id,
+        )
+        await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
+
+    after = (await client.get(url)).json()
+    assert datetime.fromisoformat(after["definition"]["built_at"]) == rebuilt
+    assert float(after["rows"][0][2]) == 90.0
+
+
+@pytest.mark.asyncio
+async def test_one_agencys_rebuild_forgets_its_cached_rows_and_keeps_another_agencys(reports_client):
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    for aid in (agency_id, other):
+        await _seed_route_dist(pool, aid, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(
+        pool, (agency_id, "agg_route_daily_dist", _BUILT_AT), (other, "agg_route_daily_dist", _BUILT_AT)
+    )
+    urls = {aid: f"/api/{aid}/reports/on_time?from={day}&to={day}" for aid in (agency_id, other)}
+    for url in urls.values():
+        assert float((await client.get(url)).json()["rows"][0][2]) == 40.0
+
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90, late5_count = samples - 90")
+        await conn.execute(
+            "UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, _BUILT_AT + timedelta(hours=1)
+        )
+
+    assert float((await client.get(urls[agency_id])).json()["rows"][0][2]) == 90.0
+    assert float((await client.get(urls[other])).json()["rows"][0][2]) == 40.0
+
+
+@pytest.mark.asyncio
+async def test_an_analyze_that_rebuilds_nothing_keeps_the_cached_rows(reports_client, ch_client, monkeypatch):
+    """A periodic analyze that finds nothing new must not forget every cache."""
+    import psycopg2
+
+    from pipeline.analyze import analyze
+    from pipeline.reports import definition
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route(pool, agency_id, "RNOOP", "平日", day, [30] * 25)
+    _run_analyze(agency_id, ch_client)
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    first = (await client.get(url)).json()
+
+    cleared: list[None] = []
+    monkeypatch.setattr(definition, "clear_all", lambda: cleared.append(None))
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
+        analyze(agency_id, conn, ch_client)
+    finally:
+        conn.close()
+
+    second = (await client.get(url)).json()
+    assert cleared == []
+    assert second["definition"]["built_at"] == first["definition"]["built_at"]
+    assert second["rows"] == first["rows"]
+
+
+@pytest.mark.asyncio
+async def test_the_council_report_text_names_the_method_the_build_day_the_timetables_and_the_sources(reports_client):
+    client, agency_id, pool = reports_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    await _record_timetables(pool, agency_id, {"2026-05-18": "gtfs_static_20260401"})
+    await _record_sources(pool, agency_id, {"2026-05-18": (1000, 0)})
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from=2026-05-18&to=2026-05-18")).json()
+    lines = body["text"].split("\n")
+    basis = lines.index(_BASIS_NOTE)
+    assert lines[basis + 1 : basis + 5] == [
+        _METHODOLOGY_NOTE,
+        f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06",
+        "※時刻表: gtfs_static_20260401（2026-04-01取得）1日間（全1日間）",
+        f"※観測データ: アーカイブ 1日間（全1日間）。{_SOURCE_NOTE}",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report_type", ["ranking", "council_summary"])
+async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_async_client, report_type):
+    """The aggregates keep no hour of day, so a time band's figures come from a
+    live scan, which no aggregate build governs."""
+    from api.main import app
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    await _record_timetables(pool, agency_id, {"2026-05-18": "gtfs_static_20260401"})
+    url = f"/api/{agency_id}/reports/{report_type}?from=2026-05-18&to=2026-05-18&time_band=evening"
+
+    body = (await client.get(url)).json()
+    assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
+    # The scan joins the same timetables, so it names them all the same.
+    assert body["definition"]["timetable_versions"] == [
+        {
+            "agency_id": agency_id,
+            "name": "gtfs_static_20260401",
+            "fetched_on": "2026-04-01",
+            "days": 1,
+            "content_hash": None,
+        }
+    ]
+    assert body["definition"]["source_mix"] == [
+        {"agency_id": agency_id, "archive_days": 0, "live_days": 0, "none_days": 1}
+    ]
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）; "
+        "時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）; 観測データ=記録なし 1日間（全1日間）"
+        f"; フィード品質（事業者全体）={_UNANALYZED_QUALITY}"
+    )
+    if report_type == "council_summary":
+        assert _LIVE_STAMP in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+async def test_the_delay_record_names_no_build_day(reports_client, ch_client, ch_async_client):
+    """The record is a live scan of the observations, which no aggregate
+    build governs, so its stamp says so."""
+    from api.main import app
+    from tests.conftest import mirror_updates_to_ch
+
+    client, agency_id, pool = reports_client
+    app.state.ch_client = ch_async_client
+    day = "2026-06-20"
+    await _seed_route(pool, agency_id, "RCERT", "平日", day, [400])
+    mirror_updates_to_ch(ch_client, agency_id)
+    await _record_builds(pool, (agency_id, "agg_route_daily", _BUILT_AT))
+
+    body = (await client.get(f"/api/{agency_id}/reports/delay_certificate?from={day}&to={day}")).json()
+    assert body["definition"]["method_version"] == METHOD_VERSION
+    assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
+    assert body["text"].endswith(f"\n{_CERT_STAMP}")
 
 
 @pytest.mark.asyncio
@@ -392,6 +922,165 @@ async def test_reports_preset_combined_with_explicit_tolerance_is_rejected(repor
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports/on_time?preset=legacy_60s&late_tolerance_sec=90")
     assert resp.status_code == 400
+
+
+# Whole-minute readings on an on-time window's edges: exactly a minute early,
+# exactly five minutes late, and one step past each.
+_WINDOW_EDGES = [-120] * 5 + [-60] * 5 + [0] * 5 + [300] * 5 + [301] * 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize(
+    ("query", "preset", "on_time"),
+    [
+        ("", "standard_m1_p5", 60.0),
+        ("&preset=standard_m1_p5", "standard_m1_p5", 60.0),
+        ("&early=any&late=300", "custom", 80.0),
+    ],
+)
+async def test_on_time_counts_readings_on_the_windows_edges_exactly_on_both_paths(
+    reports_client, ch_client, ch_async_client, path, query, preset, on_time
+):
+    """standard_m1_p5 is the window operators publish: no more than a minute
+    early and five minutes late. A departure exactly a minute early or
+    exactly five minutes late is on time, and the aggregates count it as
+    the live scan does."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RSTD", "平日", day, "08:00", _WINDOW_EDGES)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}{band}{query}")).json()
+    row = next(r for r in body["rows"] if r[0] == "RSTD")
+    assert float(row[2]) == on_time
+    assert body["definition"]["preset"] == preset
+    assert body["definition"]["late_tolerance_sec"] == 300
+
+
+@pytest.mark.asyncio
+async def test_an_exact_window_reads_the_exact_columns_without_merging_histograms(
+    reports_client, ch_client, ch_async_client, monkeypatch
+):
+    """Merging every route's histogram is the expensive read. A window the
+    exact columns answer, the default and the industry window among them,
+    never runs it; only an early tolerance off the bucket edges, or a late
+    one other than one or five minutes, does. The Routes table and the
+    on-time list then merge once more for their routes' reference window,
+    which the two share for one scope and window."""
+    from pipeline.reports import council, rankings, route_table
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RQ", "平日", day, "08:00", _WINDOW_EDGES)
+    await _load_for_path("agg", agency_id, ch_client, ch_async_client)
+    merged: list[str] = []
+    for module in (council, rankings, route_table):
+        original = module._read_dist_with_hist
+
+        async def spy(*args, _original=original, _name=module.__name__, **kwargs):
+            merged.append(_name)
+            return await _original(*args, **kwargs)
+
+        monkeypatch.setattr(module, "_read_dist_with_hist", spy)
+
+    async def read(report, query):
+        sparse = "&include_sparse=1" if report == "route_table" else ""
+        resp = await client.get(f"/api/{agency_id}/reports/{report}?from={day}&to={day}{sparse}{query}")
+        assert resp.status_code == 200, (report, query, resp.text)
+
+    for report, query in [
+        ("route_table", ""),
+        ("route_table", "&preset=standard_m1_p5"),
+        ("route_table", "&preset=legacy_60s"),
+        ("route_table", "&early=any&late=300"),
+        ("route_table", "&early=0&late=60"),
+        ("council_summary", ""),
+        ("council_summary", "&preset=standard_m1_p5"),
+        ("council_summary", "&preset=legacy_60s"),
+        ("council_summary", "&early=any&late=300"),
+        ("on_time", ""),
+        ("on_time", "&preset=standard_m1_p5"),
+        ("on_time", "&preset=legacy_60s"),
+        ("on_time", "&late=300"),
+    ]:
+        await read(report, query)
+    assert merged == []
+
+    await read("route_table", "&early=90")
+    await read("route_table", "&late=120")
+    await read("council_summary", "&early=90")
+    await read("on_time", "&early=90&late=300")
+    assert merged == [
+        # route_table early=90: its rows, then its reference window.
+        "pipeline.reports.route_table",
+        "pipeline.reports.route_table",
+        # route_table late=120: the same.
+        "pipeline.reports.route_table",
+        "pipeline.reports.route_table",
+        "pipeline.reports.council",
+        # on_time early=90: its rows; its reference is route_table's above.
+        "pipeline.reports.rankings",
+    ]
+
+
+# Departures past both of the histogram's open end buckets: earlier than
+# -300 s and later than 1800 s.
+_BEYOND = [-700] * 5 + [-400] * 5 + [-330] * 5 + [0] * 5 + [2000] * 5 + [2500] * 5
+
+
+@pytest.mark.asyncio
+async def test_a_tolerance_past_the_histograms_end_buckets_is_scanned_live(reports_client, ch_client, ch_async_client):
+    """No share of an open end bucket can be put on either side of a
+    tolerance there, so those requests scan the observations live, say so,
+    and agree with the time-band scan."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RB", "平日", day, "08:00", _BEYOND)
+    await _load_for_path("agg", agency_id, ch_client, ch_async_client)
+
+    # (report, query, {row index: expected})
+    cases = [
+        ("route_table", "&early=360", {2: 33.3, 6: 33.3}),
+        ("route_table", "&early=600", {2: 50.0, 6: 16.7}),
+        ("route_table", "&early=any&late=2400", {2: 83.3, 6: 50.0}),
+        ("on_time", "&early_tolerance_sec=360", {2: 33.3}),
+        ("on_time", "&early=any&late=2400", {2: 83.3}),
+        ("council_summary", "&early=360", {0: 33.3, 6: 33.3}),
+        ("council_summary", "&early=any&late=2400", {0: 83.3}),
+        ("worst_5min", "&late_tolerance_sec=2400", {2: 5}),
+    ]
+    for report, query, expected in cases:
+        sparse = "&include_sparse=1" if report == "route_table" else ""
+        url = f"/api/{agency_id}/reports/{report}?from={day}&to={day}{sparse}{query}"
+        whole_day = (await client.get(url)).json()
+        banded = (await client.get(url + "&time_band=morning")).json()
+        for body in (whole_day, banded):
+            row = next(r for r in body["rows"] if report == "council_summary" or r[0] == "RB")
+            assert {i: float(row[i]) for i in expected} == expected, (report, query)
+        assert whole_day["definition"]["source"] == "live", (report, query)
+        assert whole_day["definition"]["built_at"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report", ["ranking", "worst_5min", "trend"])
+async def test_a_preset_with_a_window_is_rejected_where_no_on_time_window_applies(reports_client, report):
+    """worst_5min's late tolerance is its own over-5-minute cutoff, and the
+    ranking has no tolerance at all; the default preset, which overrides
+    nothing, stays accepted everywhere, and the other one is refused."""
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/{report}?preset=legacy_60s")
+    assert resp.status_code == 400
+    assert "preset" in resp.json()["detail"]
+    assert (await client.get(f"/api/{agency_id}/reports/{report}?preset=standard_m1_p5")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_industry_preset_is_named_on_the_csv_preamble(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?preset=standard_m1_p5&format=csv")
+    assert resp.status_code == 200
+    assert "プリセット=standard_m1_p5" in _preamble(resp)
 
 
 @pytest.mark.asyncio
@@ -750,6 +1439,15 @@ async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client,
     assert resp.status_code == 200
     rows_out = resp.json()["rows"]
     assert rows_out[0]["revision_boundaries"] == ["2026-05-03"]
+    # The same read names the timetables in the definition.
+    assert resp.json()["definition"]["timetable_versions"] == [
+        {"agency_id": agency_id, "name": "v1", "fetched_on": None, "days": 2, "content_hash": None},
+        {"agency_id": agency_id, "name": "v2", "fetched_on": None, "days": 1, "content_hash": None},
+    ]
+    # Every row came from an archive file, which analyze counted per day.
+    assert resp.json()["definition"]["source_mix"] == [
+        {"agency_id": agency_id, "archive_days": 3, "live_days": 0, "none_days": 0}
+    ]
 
 
 @pytest.mark.asyncio
@@ -1099,7 +1797,8 @@ async def test_a_split_route_ranks_on_all_its_observations(reports_client, ch_cl
 
     on_time = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('on_time', day, band)}")).json()
     r = next(x for x in on_time["rows"] if x[0] == "R_SPLIT")
-    assert float(r[2]) == round(100 * sum(d <= 60 for d in all_delays) / len(all_delays), 1)
+    early, late = on_time_window()
+    assert float(r[2]) == round(100 * sum(-early <= d <= late for d in all_delays) / len(all_delays), 1)
     assert r[4] == len(all_delays)
 
     worst = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('worst_5min', day, band)}")).json()
@@ -1720,58 +2419,6 @@ async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_
     assert offender["avg_min"] == 1.0  # NOT the buggy 0.5 from counting the NULL date's samples
 
 
-# GET /reports/suggest -- the Insight Panel's single rule-based pick. Both
-# tests use ch_client directly (the sync fixture _run_analyze/mirror_updates_
-# to_ch already expect) rather than app.state.ch_client: compute_suggestion's
-# RangeCtx calls never set a time_band, so they always take the agg-table
-# fast path and never touch `ch` at all -- app.state.ch_client stays at
-# reports_app's default None, and get_ch's lazy-503 stand-in is never
-# exercised.
-
-
-@pytest.mark.asyncio
-async def test_suggest_returns_on_time_fallback_when_no_anomaly(reports_client, ch_client):
-    client, agency_id, pool = reports_client
-    from datetime import timedelta
-
-    from api.range import jst_today
-
-    today = jst_today()
-    for offset in range(6, -1, -1):
-        day = (today - timedelta(days=offset)).isoformat()
-        await _seed_route(pool, agency_id, "GOOD", "weekday", day, [30] * 25)
-        await _seed_route(pool, agency_id, "BAD", "weekday", day, [600] * 25)
-    _run_analyze(agency_id, ch_client)
-
-    resp = await client.get(f"/api/{agency_id}/reports/suggest")
-    assert resp.status_code == 200
-    body = resp.json()["suggestion"]
-    assert body["report_type"] == "on_time"
-    assert body["route_code"] == "BAD"
-    assert body.get("reason_text")
-
-
-@pytest.mark.asyncio
-async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_client):
-    client, agency_id, pool = reports_client
-    from datetime import timedelta
-
-    from api.range import jst_today
-
-    today = jst_today()
-    for offset in range(6, -1, -1):
-        day = (today - timedelta(days=offset)).isoformat()
-        await _seed_route(pool, agency_id, "ONLY", "weekday", day, [600] * 25)
-    _run_analyze(agency_id, ch_client)
-
-    # A malformed entry (no ":") alongside the well-formed one must be
-    # silently ignored at the HTTP boundary, not 500 -- the endpoint only
-    # keeps entries it can split into (report_type, route_code).
-    resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
-    assert resp.status_code == 200
-    assert resp.json() == {"suggestion": None}
-
-
 def _run_analyze_from_ch(agency_id, ch_client):
     """Like `_run_analyze`, but for dwell_run tests that seed ClickHouse
     `updates` directly (via `insert_updates`) instead of mirroring from
@@ -2175,16 +2822,16 @@ async def test_dwell_run_lists_a_route_once_across_raw_service_ids(reports_clien
 @pytest.mark.asyncio
 async def test_council_summary_pools_on_time_across_routes_not_a_naive_average(reports_client, ch_client):
     """The pooled on-time rate must be sample-weighted across every route,
-    not an unweighted mean of each route's own rate: R1 (25 samples, 60%
-    on-time) and R2 (10 samples, 100% on-time) pool to 71.4% ((15+10)/35),
-    not the naive average of the two rates (80%)."""
+    not an unweighted mean of each route's own rate: under the legacy preset
+    R1 (25 samples, 60% on-time) and R2 (10 samples, 100% on-time) pool to
+    71.4% ((15+10)/35), not the naive average of the two rates (80%)."""
     client, agency_id, pool = reports_client
     day = "2026-06-10"
     await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 15 + [90] * 10)  # 15/25 on-time (<=60s)
     await _seed_route(pool, agency_id, "R2", "平日", day, [30] * 10)  # 10/10 on-time
     _run_analyze(agency_id, ch_client)
 
-    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&preset=legacy_60s")
     assert resp.status_code == 200
     row = resp.json()["rows"][0]
     # (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips, service_delivered_pct)
@@ -2215,6 +2862,91 @@ async def test_council_summary_custom_tolerance_pools_histogram_not_naive_averag
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_council_summary_pools_the_early_departure_rate_across_routes(
+    reports_client, ch_client, ch_async_client, path
+):
+    """The rate counts every departure more than a minute early, pooled over
+    the routes like the on-time rate: R1 has 10 of 25 (five more at exactly
+    -60 s are not early), R2 none of 15, so 10/40 = 25.0%. A limited early
+    tolerance moves the threshold to that limit, where -120 s is not early."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "R1", "平日", day, "08:00", [-120] * 5 + [-61] * 5 + [-60] * 5 + [0] * 10)
+    await _seed_route_at(pool, agency_id, "R2", "平日", day, "08:00", [30] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}")).json()
+    row = body["rows"][0]
+    # (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips, service_delivered_pct,
+    #  early_departure_pct)
+    assert row[2] == 40
+    assert row[6] == 25.0
+    # The ten more than a minute early are not on time in the default window.
+    assert row[0] == 75.0
+    assert body["definition"]["early_departure_sec"] == 60
+    limited = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}&early=120")).json()
+    assert limited["rows"][0][6] == 0.0
+    assert limited["definition"]["early_departure_sec"] == 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize(
+    ("query", "on_time"), [("", 75.0), ("&preset=standard_m1_p5", 75.0), ("&early=any&late=300", 87.5)]
+)
+async def test_council_summary_counts_readings_on_the_windows_edges_exactly_on_both_paths(
+    reports_client, ch_client, ch_async_client, path, query, on_time
+):
+    """R1 sits on the window's edges: 15 of its 25 departures are on time
+    under the industry window and 20 under five minutes with early
+    departures on time. R2's 15 are on time either way."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "R1", "平日", day, "08:00", _WINDOW_EDGES)
+    await _seed_route_at(pool, agency_id, "R2", "平日", day, "08:00", [30] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}{query}")).json()
+    row = body["rows"][0]
+    assert row[2] == 40
+    assert row[0] == on_time
+    assert row[6] == 12.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lang", "headline", "footnote"),
+    [
+        (
+            "ja",
+            "定時率 60.0%、早発率 40.0%（1分を超える早発）、平均遅延",
+            "※早発率：定刻より1分を超えて早く発車した割合",
+        ),
+        (
+            "en",
+            "On-time rate 60.0%, early departures 40.0% (more than 1 min early), mean delay",
+            "* Early-departure rate: the share of departures more than 1 min early",
+        ),
+    ],
+)
+async def test_council_summary_text_states_the_early_departure_rate_and_its_threshold(
+    reports_client, ch_client, lang, headline, footnote
+):
+    client, agency_id, pool = reports_client
+    day = "2026-06-12"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [-120] * 10 + [0] * 15)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/council_summary?from={day}&to={day}", headers={"Accept-Language": lang}
+    )
+    text = resp.json()["text"]
+    assert headline in text.split("\n")[1]
+    assert footnote in text.split("\n")
+
+
+@pytest.mark.asyncio
 async def test_council_summary_footnotes_change_with_custom_tolerance(reports_client, ch_client):
     """The report template's rendered footnotes must state the exact
     tolerance actually used, in plain words rather than a preset name --
@@ -2231,9 +2963,14 @@ async def test_council_summary_footnotes_change_with_custom_tolerance(reports_cl
     assert default_resp.status_code == custom_resp.status_code == 200
     default_text = default_resp.json()["text"]
     custom_text = custom_resp.json()["text"]
-    assert "定時の定義：定刻から1分以内の遅れ（早発も定時として数えます）" in default_text
+    legacy_text = (
+        await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&preset=legacy_60s")
+    ).json()["text"]
+    assert "定時の定義（業界標準）：定刻から5分以内の遅れと、1分以内の早発" in default_text
+    assert "定時の定義（従来の基準）：定刻から1分以内の遅れ（早発も定時として数えます）" in legacy_text
     assert "定時の定義：定刻から1分30秒以内の遅れと、45秒以内の早発" in custom_text
-    assert "legacy_60s" not in default_text + custom_text
+    assert "legacy_60s" not in default_text + custom_text + legacy_text
+    assert "standard_m1_p5" not in default_text
     assert "custom" not in custom_text
 
 
@@ -2277,7 +3014,7 @@ async def test_council_summary_says_the_plan_could_not_be_read_when_the_planned_
     assert resp.status_code == 200
     body = resp.json()
     assert body["rows"][0][2] == 25  # samples
-    assert body["rows"][0][3:] == [0, None, None]
+    assert body["rows"][0][3:6] == [0, None, None]
     assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == ("unreadable", 0, 1)
     assert "運行率：—（計画を読み込めませんでした）" in body["text"]
 
@@ -2331,7 +3068,7 @@ async def test_council_summary_has_no_rate_for_a_feed_that_reports_no_cancellati
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["rows"][0][3:] == [4, None, None]  # planned, executed, delivered
+        assert body["rows"][0][3:6] == [4, None, None]  # planned, executed, delivered
         assert body["delivered_missing"] == "feed_reports_no_cancellations"
         assert line in body["text"].split("\n")
 
@@ -2366,16 +3103,18 @@ async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_r
     assert "事業者全体の値です" in body["text"]
 
     unfiltered = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")).json()
-    assert "事業者全体" not in unfiltered["text"]
+    assert "運行率 75.0%（事業者全体）" not in unfiltered["text"]
+    assert "事業者全体の値です" not in unfiltered["text"]
     assert unfiltered["delivered_scope_applied"] == delivered_scope
 
     csv_resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&routes=R1&format=csv")
     rows = list(csv.reader(io.StringIO(csv_resp.text)))
-    header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
+    header_idx = rows.index(_COUNCIL_CSV_HEADER)
     assert any("事業者全体の値です" in r[0] for r in rows[1:header_idx])
 
     other = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()
     assert other["delivered_scope_applied"] is None
+    assert other["comparability"] is None
     assert (other["delivered_missing"], other["covered_days"], other["window_days"]) == (None, None, None)
 
 
@@ -2396,12 +3135,599 @@ async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_c
     # column header row, matched by locating it rather than a fixed index --
     # the number of footnote rows (freshness/quality/service-delivered
     # caveats) can legitimately vary by scenario.
-    header_idx = rows.index(["定時率(%)", "平均遅延(分)", "観測数", "計画本数", "運行本数", "運行実績率(%)"])
+    header_idx = rows.index(_COUNCIL_CSV_HEADER)
     assert header_idx >= 1
     footnote_cells = [r[0] for r in rows[1:header_idx]]
     assert "運行率：—（期間に時刻表の計画なし）" in footnote_cells
     data_row = rows[header_idx + 1]
     assert data_row[2] == "25"  # samples
+    assert data_row[6] == "0.0"  # early departures
+    assert "早発率=60秒を超える早発の割合" in rows[0][0]
+    assert "早発率：定刻より1分を超えて早く発車した割合" in footnote_cells
+
+
+_COUNCIL_CSV_HEADER = [
+    "定時率(%)",
+    "平均遅延(分)",
+    "観測数",
+    "計画本数",
+    "運行本数",
+    "運行実績率(%)",
+    "早発率(%)",
+    "他事業者と比較できる",
+    "比較できない理由",
+    "観測カバー率(%)",
+    "定時率95%信頼区間下限(%)",
+    "定時率95%信頼区間上限(%)",
+]
+
+# The council report's gate figures, on the day tests/api/test_network.py's
+# _seed_gated_agency seeds.
+_GATE_DAY = "2026-04-01"
+_THRESHOLDS = {"min_coverage_pct": 70.0, "max_ci_half_width_pp": 3.0, "max_clamp_pct": 5.0}
+_DENSE = {"planned": 1000, "observed": 900, "samples": 20000, "on_time": 18000}
+# 45 trips cannot pin a 50% on-time rate to within 3 points.
+_SPARSE = {"planned": 50, "observed": 45, "samples": 900, "on_time": 450}
+
+
+async def _add_agency(pool, name):
+    row = await pool.fetchrow(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ($1, $2) RETURNING agency_id",
+        name,
+        f"http://{name.lower()}.example.com",
+    )
+    return row["agency_id"]
+
+
+def _council_url(agency_id, day_from=_GATE_DAY, day_to=_GATE_DAY, extra=""):
+    return f"/api/{agency_id}/reports/council_summary?from={day_from}&to={day_to}{extra}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
+async def test_council_summary_says_a_comparable_agency_meets_the_boards_conditions(reports_client):
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+
+    for locale, line in (
+        ("ja", "※他事業者との比較: 比較の条件を満たします（観測カバー率 90.0%、定時率の95%信頼区間 87.8–91.8%）"),
+        (
+            "en",
+            "* Comparison with other operators: meets the conditions for a comparison "
+            "(observation coverage 90.0%, on-time % 95% interval 87.8–91.8%)",
+        ),
+    ):
+        resp = await client.get(_council_url(agency_id), headers={"Accept-Language": locale})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["comparability"] == {
+            "comparable": True,
+            "reason": None,
+            "coverage_pct": 90.0,
+            "observed_trips": 900,
+            "coverage_planned_trips": 1000,
+            "ci_low": 87.8,
+            "ci_high": 91.8,
+            "clamp_pct": 0.0,
+            "planned_trips": 1000,
+            "delivered_missing": "feed_unverified",
+            "thresholds": _THRESHOLDS,
+        }
+        assert line in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+async def test_council_summary_says_an_agency_is_not_ranked_on_its_feeds_predicted_delays(reports_client):
+    """Dense, well-covered data on the feed's predicted delays passes every
+    check on the data and still is not to be ranked."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+
+    for locale, line in (
+        (
+            "ja",
+            "※他事業者との比較: 条件を満たしません。値はフィードの予測遅延"
+            "（観測した通過時刻とのずれが事業者ごとに異なる）。"
+            "この事業者の数字を他事業者と順位付けて比べないでください。",
+        ),
+        (
+            "en",
+            "* Comparison with other operators: does not meet the conditions. Figures are the feed's predicted "
+            "delays, which differ from observed passing times by a different amount for each feed. "
+            "Do not rank this operator's figures against other operators'.",
+        ),
+    ):
+        body = (await client.get(_council_url(agency_id), headers={"Accept-Language": locale})).json()
+        gate = body["comparability"]
+        assert (gate["comparable"], gate["reason"]) == (False, "predicted_basis")
+        assert (gate["coverage_pct"], gate["ci_low"], gate["ci_high"]) == (90.0, 87.8, 91.8)
+        assert line in body["text"].split("\n")
+
+    rows = list(csv.reader(io.StringIO((await client.get(_council_url(agency_id, extra="&format=csv"))).text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[7:12] == ["いいえ", "predicted_basis", "90.0", "87.8", "91.8"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("seed", "reason", "words"),
+    [
+        (_SPARSE, "ci_wide", "定時率の95%信頼区間 ±"),
+        # Dense, but the feed reported 400 of 1,000 planned trips.
+        ({**_DENSE, "observed": 400}, "coverage_low", "観測カバー率 40.0%（70%未満）"),
+    ],
+)
+async def test_council_summary_says_a_sparse_agency_is_not_to_be_ranked(reports_client, seed, reason, words):
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Sparse", strategy="static_join", delay_min=5, **seed)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert (body["comparability"]["comparable"], body["comparability"]["reason"]) == (False, reason)
+    line = next(line for line in body["text"].split("\n") if line.startswith("※他事業者との比較"))
+    assert line.startswith("※他事業者との比較: 条件を満たしません。" + words)
+    assert line.endswith("。この事業者の数字を他事業者と順位付けて比べないでください。")
+
+
+@pytest.mark.asyncio
+async def test_council_summary_cannot_measure_coverage_for_a_feed_whose_trips_are_not_the_timetables(reports_client):
+    """aomori_regex parses its trip_ids from the feed's own text, so however
+    dense its data, its coverage cannot be measured and the report says why."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Regex", strategy="aomori_regex", delay_min=1, **_DENSE)
+
+    for locale, line in (
+        (
+            "ja",
+            "※他事業者との比較: 条件を満たしません。観測カバー率を測れません："
+            "この配信の便は時刻表の便と照合できません。この事業者の数字を他事業者と順位付けて比べないでください。",
+        ),
+        (
+            "en",
+            "* Comparison with other operators: does not meet the conditions. Observation coverage can't be "
+            "measured: this feed's trips can't be matched to the timetable. Do not rank this operator's figures "
+            "against other operators'.",
+        ),
+    ):
+        body = (await client.get(_council_url(agency_id), headers={"Accept-Language": locale})).json()
+        gate = body["comparability"]
+        assert (gate["comparable"], gate["reason"]) == (False, "coverage_unknown")
+        assert (gate["coverage_pct"], gate["observed_trips"], gate["coverage_planned_trips"]) == (None, None, None)
+        assert (gate["ci_low"], gate["ci_high"]) == (None, None)
+        assert line in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
+async def test_council_summary_counts_its_own_missing_last_day_once_another_agency_has_reached_it(reports_client):
+    """Coverage stops where the agencies board stops it: the newest day ANY
+    agency has observations for. A day no one has reached yet is a lag every
+    agency shares; once another agency has reached it, this agency's own
+    missing day counts against it, as it does on the board."""
+    client, agency_id, pool = reports_client
+    url = _council_url(agency_id, "2026-04-01", "2026-04-02")
+    await _seed_two_day_agency(pool, agency_id, name="Behind", observed_days=["2026-04-01"])
+
+    alone = (await client.get(url)).json()["comparability"]
+    assert (alone["observed_trips"], alone["coverage_planned_trips"], alone["coverage_pct"]) == (900, 1000, 90.0)
+    assert alone["comparable"] is True
+
+    # Seeded straight into the tables, past the agencies API that would
+    # invalidate the cached board.
+    other = await _add_agency(pool, "Current")
+    await _seed_two_day_agency(pool, other, name="Current", observed_days=["2026-04-01", "2026-04-02"])
+    invalidate_network_summary()
+    behind = (await client.get(url)).json()["comparability"]
+    assert (behind["observed_trips"], behind["coverage_planned_trips"], behind["coverage_pct"]) == (900, 2000, 45.0)
+    assert (behind["comparable"], behind["reason"]) == (False, "coverage_low")
+
+    # A deleted agency is off the board, so its days bound no one's coverage.
+    await pool.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", other)
+    invalidate_network_summary()
+    assert (await client.get(url)).json()["comparability"]["coverage_pct"] == 90.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
+async def test_council_summary_reads_the_boards_cached_verdict_so_the_two_never_disagree(reports_client):
+    """The council report takes its agency's verdict from the agencies
+    board's cached result for the same dates, so a change the board has not
+    picked up yet changes neither, and both change together once it has."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    board_url = "/api/network/summary"
+    params = {"from": _GATE_DAY, "to": _GATE_DAY}
+
+    def row_of(board):
+        return next(r for r in board["agencies"] if r["agency_id"] == agency_id)
+
+    cached = row_of((await client.get(board_url, params=params)).json())
+    # An analyze run rewrites the day's observed trips after the board was read.
+    await pool.execute("UPDATE agg_route_daily SET trips_observed = 400 WHERE agency_id = $1", agency_id)
+    gate = (await client.get(_council_url(agency_id))).json()["comparability"]
+    assert (gate["comparable"], gate["coverage_pct"]) == (cached["comparable"], cached["coverage_pct"]) == (True, 90.0)
+
+    invalidate_network_summary()
+    gate = (await client.get(_council_url(agency_id))).json()["comparability"]
+    fresh = row_of((await client.get(board_url, params=params)).json())
+    assert (gate["reason"], gate["coverage_pct"]) == (fresh["comparable_reason"], fresh["coverage_pct"])
+    assert (gate["reason"], gate["coverage_pct"]) == ("coverage_low", 40.0)
+
+
+@pytest.mark.asyncio
+async def test_council_summary_gives_no_verdict_for_an_agency_the_cached_board_does_not_list(reports_client):
+    """An agency added past the agencies API, which would invalidate the
+    board, is missing from a board cached before it. Its report then says
+    nothing about a comparison rather than guessing one."""
+    import csv
+    import io
+
+    client, _agency_id, pool = reports_client
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    late = await _add_agency(pool, "Late")
+    await _seed_gated_agency(pool, late, name="Late", strategy="static_join", delay_min=1, **_DENSE)
+
+    body = (await client.get(_council_url(late))).json()
+    assert body["comparability"] is None
+    assert body["rows"][0][2] == _DENSE["samples"]
+    assert not any(line.startswith("※他事業者との比較") for line in body["text"].split("\n"))
+    rows = list(csv.reader(io.StringIO((await client.get(_council_url(late, extra="&format=csv"))).text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[7:] == ["", "", "", "", ""]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_stands_without_a_verdict_when_the_board_cannot_be_built(reports_client, monkeypatch):
+    """The board reads every agency's figures, so a failure building it, for
+    any agency, leaves the council report without a verdict rather than
+    failing a report whose own figures never needed it. Freshness and the
+    quality share then come from the report's own reads."""
+    import csv
+    import io
+
+    from pipeline.reports import council
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, clamp=300, **_DENSE)
+
+    async def broken_board(*args, **kwargs):
+        raise RuntimeError("simulated failure reading another agency's ridership weights")
+
+    monkeypatch.setattr(council, "compute_network_summary", broken_board)
+
+    resp = await client.get(_council_url(agency_id))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["comparability"] is None
+    assert body["rows"][0][2] == _DENSE["samples"]
+    lines = body["text"].split("\n")
+    assert not any(line.startswith("※他事業者との比較") for line in lines)
+    assert "※フィード品質（事業者全体）: 観測カバー率 90.0%（計画1,000便中900便）、異常値 1.5%" in lines
+
+    csv_resp = await client.get(_council_url(agency_id, extra="&format=csv"))
+    assert csv_resp.status_code == 200
+    rows = list(csv.reader(io.StringIO(csv_resp.text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[7:] == ["", "", "", "", ""]
+
+
+@pytest.mark.asyncio
+async def test_council_summary_prints_one_implausible_share_for_its_quality_note_and_its_verdict(reports_client):
+    """The quality note and a clamp_high verdict both print the share the
+    board's row holds, so a change the cached board has not picked up yet
+    never leaves the report with two different shares."""
+    import re
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Noisy", strategy="static_join", delay_min=1, clamp=2000, **_DENSE)
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    # An analyze run rewrites the day's feed health after the board was read.
+    await pool.execute("UPDATE agg_feed_health SET clamp_count = 3000 WHERE agency_id = $1", agency_id)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"]["reason"] == "clamp_high"
+    shares = set(re.findall(r"受信データの([0-9.]+)%|異常値 ([0-9.]+)%", body["text"]))
+    printed = {float(share) for pair in shares for share in pair if share}
+    assert printed == {10.0}
+
+
+@pytest.mark.asyncio
+async def test_council_summary_judges_an_agency_exactly_as_the_agencies_board_does(reports_client):
+    from pipeline.reports.network import compute_network_summary
+
+    client, agency_id, pool = reports_client
+    sparse, thin, regex = [await _add_agency(pool, n) for n in ("Sparse", "Thin", "Regex")]
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    await _seed_gated_agency(pool, sparse, name="Sparse", strategy="static_join", delay_min=5, **_SPARSE)
+    await _seed_gated_agency(
+        pool, thin, name="Thin", strategy="static_join", delay_min=2, clamp=300, **{**_DENSE, "observed": 400}
+    )
+    await _seed_gated_agency(pool, regex, name="Regex", strategy="aomori_regex", delay_min=1, **_DENSE)
+
+    compute_network_summary.cache_clear()
+    board = (await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})).json()
+    rows = {r["agency_id"]: r for r in board["agencies"]}
+    assert board["comparability"] == _THRESHOLDS
+    figures = ("coverage_pct", "observed_trips", "coverage_planned_trips", "ci_low", "ci_high", "clamp_pct")
+    figures += ("planned_trips", "delivered_missing")
+    for aid in (agency_id, sparse, thin, regex):
+        gate = (await client.get(_council_url(aid))).json()["comparability"]
+        row = rows[aid]
+        assert gate == {
+            "comparable": row["comparable"],
+            "reason": row["comparable_reason"],
+            **{k: row[k] for k in figures},
+            "thresholds": board["comparability"],
+        }
+    assert {rows[aid]["comparable_reason"] for aid in rows} == {
+        "predicted_basis",
+        "ci_wide",
+        "coverage_low",
+        "coverage_unknown",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
+async def test_council_summary_judges_the_whole_agency_whatever_narrows_its_on_time_figures(reports_client):
+    """The gate reads the board's figures: every route, every day of the
+    period and the board's on-time definition. A route filter or another
+    tolerance narrows the on-time figures, never the verdict, and the notes
+    say so."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    # A second route, late every time, that a filter to R1 leaves out.
+    await _seed_route_dist(pool, agency_id, "R2", [(_GATE_DAY, 1000, 1000 * 600, 0)])
+
+    unfiltered = (await client.get(_council_url(agency_id))).json()
+    by_route = (await client.get(_council_url(agency_id, extra="&routes=R1"))).json()
+    custom = "&early_tolerance_sec=45&late_tolerance_sec=90"
+    tolerance = (await client.get(_council_url(agency_id, extra=custom))).json()
+
+    assert by_route["rows"][0][0] != unfiltered["rows"][0][0]
+    assert by_route["comparability"] == tolerance["comparability"] == unfiltered["comparability"]
+    assert unfiltered["comparability"]["comparable"] is True
+    assert "他事業者との比較は、系統" not in unfiltered["text"]
+    assert "データ品質と他事業者との比較は" in by_route["text"]
+    same_definition = "他事業者との比較は、ここで指定した定時の幅ではなく、どの事業者にも共通の定時の定義で判定"
+    assert same_definition in tolerance["text"]
+    assert same_definition not in unfiltered["text"]
+
+
+# The definition stamp's feed-quality figures: the period's completeness and
+# clamp share, as the agencies board reads them.
+
+_QUALITY_PASS = {
+    "coverage_missing": None,
+    "coverage_low": False,
+    "clamp_missing": None,
+    "clamp_high": False,
+    "min_coverage_pct": 70.0,
+    "max_clamp_pct": 5.0,
+}
+
+
+def _board_quality(row):
+    """The stamp's figures for an agency, as its board row prints them."""
+    return {
+        "agency_id": row["agency_id"],
+        "coverage_pct": row["coverage_pct"],
+        "observed_trips": row["observed_trips"],
+        "coverage_planned_trips": row["coverage_planned_trips"],
+        "clamp_pct": row["clamp_pct"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_reports_stamp_states_the_coverage_and_clamp_share_the_board_reads(reports_client):
+    """Coverage stops where the board stops it, at the newest day any agency
+    has observations for, so another agency's later day counts this agency's
+    missing one against it in the stamp as on the board. The board's own stamp
+    states every agency's figures from its rows."""
+    client, agency_id, pool = reports_client
+    await _seed_two_day_agency(pool, agency_id, name="Behind", observed_days=["2026-04-01"])
+    other = await _add_agency(pool, "Current")
+    await _seed_two_day_agency(pool, other, name="Current", observed_days=["2026-04-01", "2026-04-02"])
+    params = {"from": "2026-04-01", "to": "2026-04-02"}
+    board = (await client.get("/api/network/summary", params=params)).json()
+    rows = {r["agency_id"]: r for r in board["agencies"]}
+    assert (rows[agency_id]["coverage_pct"], rows[agency_id]["comparable_reason"]) == (45.0, "coverage_low")
+
+    url = f"/api/{agency_id}/reports/ranking?from=2026-04-01&to=2026-04-02"
+    quality = (await client.get(url)).json()["definition"]["feed_quality"]
+    assert quality == [{**_board_quality(rows[agency_id]), **_QUALITY_PASS, "coverage_low": True}]
+    assert [q for q in board["definition"]["feed_quality"] if q["agency_id"] == agency_id] == quality
+    assert [q["agency_id"] for q in board["definition"]["feed_quality"]] == sorted(rows)
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        "; フィード品質（事業者全体）=観測カバー率 45.0%（70%未満）、異常値 0.0%"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reports_stamp_flags_a_high_clamp_share_in_the_gates_words(reports_client):
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Noisy", strategy="static_join", delay_min=1, clamp=2000, **_DENSE)
+    url = f"/api/{agency_id}/reports/on_time?from={_GATE_DAY}&to={_GATE_DAY}"
+
+    quality = (await client.get(url)).json()["definition"]["feed_quality"]
+    assert quality == [
+        {
+            "agency_id": agency_id,
+            "coverage_pct": 90.0,
+            "observed_trips": 900,
+            "coverage_planned_trips": 1000,
+            "clamp_pct": 10.0,
+            **_QUALITY_PASS,
+            "clamp_high": True,
+        }
+    ]
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        "; フィード品質（事業者全体）=観測カバー率 90.0%（計画1000便中900便）、異常値 10.0%（5%超）"
+    )
+
+
+async def _seed_unplanned(pool, aid):
+    """Dense observations on the gate's day, which no timetable plans."""
+    await _set_ingest_strategy(pool, aid, "static_join")
+    await _seed_observed_trips(pool, aid, [(_GATE_DAY, 900)])
+    await _seed(pool, aid, dist=[(_GATE_DAY, 20000, 20000 * 60, 18000)], feed=(_GATE_DAY, 20000, 0))
+
+
+async def _seed_unmatched(pool, aid):
+    await _seed_gated_agency(pool, aid, name="Regex", strategy="aomori_regex", delay_min=1, **_DENSE)
+
+
+async def _seed_unobserved(pool, aid):
+    """A plan for the gate's day, and nothing the feed reported."""
+    await _set_ingest_strategy(pool, aid, "static_join")
+    await _seed_saved_plan(pool, aid, [(_GATE_DAY, 1000)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("seed", "coverage_missing", "clamp_pct", "words"),
+    [
+        (_seed_unplanned, "no_plan", 0.0, "観測カバー率 —（期間に時刻表の計画なし）、異常値 0.0%"),
+        (_seed_unmatched, "unmatched", 0.0, "観測カバー率 —（この配信の便は時刻表の便と照合できません）、異常値 0.0%"),
+        (
+            _seed_unobserved,
+            "no_data",
+            None,
+            "観測カバー率 —（期間内の集計済みの観測なし）、異常値 —（期間内の集計済みの観測なし）",
+        ),
+    ],
+    ids=["no-plan", "unmatched", "unobserved"],
+)
+async def test_a_reports_stamp_gives_the_reason_a_figure_cannot_be_computed(
+    reports_client, seed, coverage_missing, clamp_pct, words
+):
+    """Never 0 or a guess: a figure that cannot be computed is empty beside
+    the board's reason, and an agency with a plan but no observation reads no
+    data, as the gate's first check does, not 0%."""
+    client, agency_id, pool = reports_client
+    await seed(pool, agency_id)
+    url = f"/api/{agency_id}/reports/ranking?from={_GATE_DAY}&to={_GATE_DAY}"
+
+    [quality] = (await client.get(url)).json()["definition"]["feed_quality"]
+    assert (quality["coverage_pct"], quality["coverage_missing"], quality["coverage_low"]) == (
+        None,
+        coverage_missing,
+        False,
+    )
+    assert (quality["observed_trips"], quality["coverage_planned_trips"]) == (None, None)
+    assert (quality["clamp_pct"], quality["clamp_missing"]) == (clamp_pct, None if clamp_pct is not None else "no_data")
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; フィード品質（事業者全体）={words}")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_plan_read_says_the_plan_could_not_be_read(reports_client, monkeypatch):
+    """As on the board, a failure reading the plan leaves the stamp's coverage
+    unreadable and the rest of the report standing."""
+    from pipeline.reports import network
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("simulated failure reading the plan")
+
+    monkeypatch.setattr(network, "compute_service_delivered_by_agency", broken)
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={_GATE_DAY}&to={_GATE_DAY}")
+    assert resp.status_code == 200
+    [quality] = resp.json()["definition"]["feed_quality"]
+    assert (quality["coverage_pct"], quality["coverage_missing"], quality["clamp_pct"]) == (None, "unreadable", 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_council_report_states_the_figures_its_verdict_reads_once(reports_client):
+    """The council's stamp states the board's cached figures, the ones its
+    verdict judges, so a change the cached board has not picked up yet never
+    leaves the document with two coverages, and its own quality note gives
+    way to the stamp's line."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, clamp=300, **_DENSE)
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    await pool.execute("UPDATE agg_route_daily SET trips_observed = 400 WHERE agency_id = $1", agency_id)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"]["coverage_pct"] == 90.0
+    assert body["definition"]["feed_quality"] == [
+        {
+            "agency_id": agency_id,
+            "coverage_pct": 90.0,
+            "observed_trips": 900,
+            "coverage_planned_trips": 1000,
+            "clamp_pct": 1.5,
+            **_QUALITY_PASS,
+        }
+    ]
+    lines = body["text"].split("\n")
+    assert "※フィード品質（事業者全体）: 観測カバー率 90.0%（計画1,000便中900便）、異常値 1.5%" in lines
+    assert not any(line.startswith("※データ品質") for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_a_council_report_with_a_verdict_reads_no_figures_of_its_own(reports_client, monkeypatch):
+    """The verdict's board row already holds the figures, so the council
+    report never pays for a read it would discard; another report reads them,
+    and a council report without a verdict reads its own."""
+    from api.routers import reports as reports_router
+    from pipeline.reports import council, network
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    reads = []
+    read = network.compute_agency_feed_quality
+
+    async def recorded(conn, aid, from_date, to_date):
+        reads.append(aid)
+        return await read(conn, aid, from_date, to_date)
+
+    monkeypatch.setattr(network, "compute_agency_feed_quality", recorded)
+    monkeypatch.setattr(reports_router, "compute_agency_feed_quality", recorded)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"] is not None
+    assert body["definition"]["feed_quality"][0]["coverage_pct"] == 90.0
+    assert reads == []
+
+    await client.get(f"/api/{agency_id}/reports/on_time?from={_GATE_DAY}&to={_GATE_DAY}")
+    assert reads == [agency_id]
+
+    async def broken_board(*args, **kwargs):
+        raise RuntimeError("simulated failure building the board")
+
+    monkeypatch.setattr(council, "compute_network_summary", broken_board)
+    body = (await client.get(_council_url(agency_id, extra="&routes=R1"))).json()
+    assert body["comparability"] is None
+    assert body["definition"]["feed_quality"][0]["coverage_pct"] == 90.0
+    assert reads == [agency_id, agency_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
+async def test_council_summary_csv_carries_the_comparability_columns(reports_client):
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    other = await _add_agency(pool, "Sparse")
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    await _seed_gated_agency(pool, other, name="Sparse", strategy="static_join", delay_min=5, **_SPARSE)
+
+    for aid, status in ((agency_id, ["はい", "", "90.0", "87.8", "91.8"]), (other, ["いいえ", "ci_wide", "90.0"])):
+        resp = await client.get(_council_url(aid, extra="&format=csv"))
+        assert resp.status_code == 200
+        rows = list(csv.reader(io.StringIO(resp.text)))
+        header_idx = rows.index(_COUNCIL_CSV_HEADER)
+        data_row = rows[header_idx + 1]
+        assert len(data_row) == len(_COUNCIL_CSV_HEADER)
+        assert data_row[7 : 7 + len(status)] == status
+        assert any(r[0].startswith("他事業者との比較: ") for r in rows[1:header_idx])
+    gate = (await client.get(_council_url(other))).json()["comparability"]
+    assert data_row[10:] == [str(gate["ci_low"]), str(gate["ci_high"])]
 
 
 _CERT_CSV_HEADER = [
@@ -2600,12 +3926,14 @@ async def test_delay_certificate_reports_the_total_beyond_the_row_cap(reports_cl
     capped = (await client.get(f"{url}&limit=2")).json()
     assert len(capped["rows"]) == 2
     assert capped["rows_total"] == 3
-    assert capped["text"] == "遅延300秒超の便: 3件（日付順の先頭2件を表示。残りは期間を絞って確認できます）"
+    assert capped["text"] == (
+        f"遅延300秒超の便: 3件（日付順の先頭2件を表示。残りは期間を絞って確認できます）\n{_CERT_STAMP}"
+    )
 
     whole = (await client.get(url)).json()
     assert len(whole["rows"]) == 3
     assert whole["rows_total"] == 3
-    assert whole["text"] == "遅延300秒超の便: 3件"
+    assert whole["text"] == f"遅延300秒超の便: 3件\n{_CERT_STAMP}"
 
     resp = await client.get(f"{url}&limit=2&format=csv")
     rows = list(csv.reader(io.StringIO(resp.text)))
@@ -3029,8 +4357,8 @@ async def test_delay_certificate_tells_a_day_without_data_from_one_without_late_
     assert empty["rows"] == []
     assert empty["observed"] is False
     # The staff summary says the same, never "no trip exceeded the threshold".
-    assert empty["text"] == "この期間・条件のリアルタイムデータはありません。"
-    assert on_time["text"] == "遅延300秒超の便はありませんでした。"
+    assert empty["text"] == f"この期間・条件のリアルタイムデータはありません。\n{_CERT_STAMP}"
+    assert on_time["text"] == f"遅延300秒超の便はありませんでした。\n{_CERT_STAMP}"
 
     ranking = (await client.get(f"/api/{agency_id}/reports/trend?from={day}&to={day}")).json()
     assert ranking["observed"] is None
@@ -3106,3 +4434,78 @@ async def test_each_kept_reason_adds_only_its_own_routes(reports_client):
         assert body["rows_total"] == total, toggles
         assert body["retired_rows"] == 2, toggles
         assert body["zero_delay_rows"] == 1, toggles
+
+
+# The definition stamp's prediction validations: the newest recorded for each
+# agency of the scope, whatever the report's own dates.
+
+
+async def _record_validation(pool, agency_id, from_date, to_date, kept_on_time, observed_on_time):
+    await pool.execute(
+        "INSERT INTO prediction_validations (agency_id, from_date, to_date, report_schema, early_tolerance_sec, "
+        "late_tolerance_sec, stop_events, compared, kept_on_time, observed_on_time) "
+        "VALUES ($1, $2, $3, 2, 60, 300, 1000, 800, $4, $5)",
+        agency_id,
+        date.fromisoformat(from_date),
+        date.fromisoformat(to_date),
+        kept_on_time,
+        observed_on_time,
+    )
+
+
+def _validation(agency_id, from_date, to_date, offset):
+    return {
+        "agency_id": agency_id,
+        "from_date": from_date,
+        "to_date": to_date,
+        "early_tolerance_sec": 60,
+        "late_tolerance_sec": 300,
+        "on_time_offset_pt": offset,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_reports_stamp_states_its_agencys_newest_validation(reports_client):
+    """The newest ends latest, and of those is the longest; the report's own
+    dates need not fall in it. Another agency's validation is not this
+    report's."""
+    client, agency_id, pool = reports_client
+    other = await _add_agency(pool, "Other")
+    await _record_validation(pool, agency_id, "2026-11-01", "2026-11-07", 700, 600)
+    await _record_validation(pool, agency_id, "2026-11-15", "2026-11-21", 700, 600)
+    await _record_validation(pool, agency_id, "2026-11-13", "2026-11-21", 640, 600)
+    await _record_validation(pool, other, "2026-11-22", "2026-11-28", 700, 600)
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-18"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert definition["prediction_validations"] == [_validation(agency_id, "2026-11-13", "2026-11-21", 5.0)]
+    assert (
+        "; 予測値の検証=運行日2026-11-13〜2026-11-21で、予測値で求めた定時率は観測した通過時刻で求めたものより"
+        "5.0ポイント高い（定時：定刻から5分以内の遅れと1分以内の早発）; 算出方法の説明="
+    ) in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_the_boards_stamp_states_each_listed_agencys_validation(reports_client):
+    """A deleted agency is off the board, and so is its validation; its own
+    scope still reads it."""
+    from pipeline.reports.definition import _read_validations
+
+    client, agency_id, pool = reports_client
+    other = await _add_agency(pool, "Other")
+    await _record_validation(pool, agency_id, "2026-11-13", "2026-11-21", 640, 600)
+    await _record_validation(pool, other, "2026-11-13", "2026-11-21", 600, 640)
+    params = {"from": "2026-05-18", "to": "2026-05-18"}
+    invalidate_network_summary()
+    board = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert board["prediction_validations"] == [
+        _validation(agency_id, "2026-11-13", "2026-11-21", 5.0),
+        _validation(other, "2026-11-13", "2026-11-21", -5.0),
+    ]
+
+    await pool.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", other)
+    invalidate_network_summary()
+    board = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert [check["agency_id"] for check in board["prediction_validations"]] == [agency_id]
+    async with pool.acquire() as conn:
+        assert [check.agency_id for check in await _read_validations(conn, other)] == [other]

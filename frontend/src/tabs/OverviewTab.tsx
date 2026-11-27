@@ -2,48 +2,35 @@ import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
-import { useAgencies, useOverviewSummary, usePeakHourBreakdown } from "../api/hooks";
+import { useAgencies, useOverviewSummary } from "../api/hooks";
 import type { OverviewSummary } from "../api/types";
 import { clearLastAgency } from "../api/lastAgency";
 import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
-import { useScope } from "../api/scope";
-import { useUrlPatch, useUrlState } from "../api/useUrlState";
+import { scopeToQueryString, useScope, type Scope } from "../api/scope";
+import { scopeWindow } from "../api/onTimeDefault";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
+import { FirstRunTour } from "../components/FirstRunTour";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { AsyncSection } from "../components/AsyncSection";
 import { OverviewHeroRow, type HeroFact } from "../components/OverviewHeroRow";
 import { OverviewModal } from "../components/OverviewModal";
-import { PeakHourModal } from "../components/PeakHourModal";
-import { PeakHourRibbon } from "../components/PeakHourRibbon";
+import { PeakHourSummary } from "../components/PeakHourSummary";
 import { RevealSection } from "../components/overview/RevealSection";
-import { RoutesToCheckList } from "../components/RoutesToCheckList";
+import { RoutesPreview } from "../components/overview/RoutesPreview";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
+import { reportHref } from "../routes/destinations";
 import { formatDateRange } from "../utils/format";
 import { prefersReducedMotion } from "../utils/motion";
 
 import "../styles/overview.css";
 
-type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
-
-/** The hour (0-23) and optional ISO weekday (1-7) the breakdown query accepts.
- *  A URL value outside those ranges (hand-edited, or from a stale link) is no
- *  selection at all: the request would be rejected and the modal would have
- *  nothing to show. */
-function parsePeakHourSel(hourParam: string, dowParam: string): { hour: number; dow: number | null } | null {
-  if (!/^\d+$/.test(hourParam)) return null;
-  const hour = Number(hourParam);
-  if (hour > 23) return null;
-  if (dowParam === "") return { hour, dow: null };
-  if (!/^\d+$/.test(dowParam)) return null;
-  const dow = Number(dowParam);
-  return dow >= 1 && dow <= 7 ? { hour, dow } : null;
-}
+type OpenCard = "concentration" | null;
 
 /** The headline's window as text, shared by the hero and the routes-to-check
  *  header so both name it the same way. */
@@ -54,6 +41,12 @@ function headlineRange(summary: OverviewSummary): string {
 /** The period the period-wide figures count, as text. */
 function periodRange(summary: OverviewSummary): string {
   return formatDateRange(summary.period_from, summary.period_to, { year: false });
+}
+
+/** The scope a figure was counted over: the screen's filters on the days the
+ *  API names for it, so a link carrying it opens the same figures. */
+function countedScope(ctx: Scope, from: string, to: string): Scope {
+  return { ...ctx, from, to };
 }
 
 export function OverviewTab() {
@@ -68,27 +61,13 @@ export function OverviewTab() {
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
-  // Two string keys rather than one JSON-shaped one, consistent with the
-  // route-analysis stop selection: `peak_dow` is only ever written alongside
-  // `peak_hour`, so its presence/absence stays a plain empty-string default.
-  const [peakHourParam] = useUrlState<string>("peak_hour", "");
-  const [peakDowParam] = useUrlState<string>("peak_dow", "");
-  const patchUrl = useUrlPatch();
-  const peakHourSel = parsePeakHourSel(peakHourParam, peakDowParam);
-  function setPeakHourSel(next: { hour: number; dow: number | null } | null) {
-    patchUrl({
-      peak_hour: next ? String(next.hour) : null,
-      peak_dow: next?.dow != null ? String(next.dow) : null,
-    });
-  }
-  const peakBreakdown = usePeakHourBreakdown(
-    agencyId,
-    peakHourSel?.hour ?? null,
-    peakHourSel?.dow ?? null,
-  );
+  // The tour's place for this visit, kept here because the figures it is
+  // mounted with are replaced while a changed scope loads.
+  const [tourStep, setTourStep] = useState(0);
+  const [tourLater, setTourLater] = useState(false);
   const routesToCheckRef = useRef<HTMLDivElement>(null);
 
-  // The routes-to-check list is inline rather than behind a modal, so its
+  // The routes-to-check preview is inline rather than behind a modal, so its
   // fact row brings it into view and moves focus there, where a keyboard
   // reader continues into its route links.
   function openFact(fact: HeroFact) {
@@ -148,19 +127,14 @@ export function OverviewTab() {
     />
   );
 
-  const modalTitleKey: Record<Exclude<OpenCard, null>, string> = {
-    concentration: "overview.modal.concentration",
-    peak_hour: "overview.modal.peak_hour",
-    service_split: "overview.modal.service_split",
-  };
 
   return (
     <ScopeHeaderProvider>
-      {/* The heading and the sentence share the page's column, so they line
+      {/* The heading and the scope bar share the page's column, so they line
           up with each other and with the cards below. */}
-      <div className="ov-page-head">
+      <div className="ov-page-head" data-tour="pulse-scope">
         <ScopePageHeader title={t("nav.pulse")} />
-        <ScopeSentence applied={query.data?.scope_applied} />
+        <ScopeBar applied={query.data?.scope_applied} />
       </div>
       <div className="ov-page">
         <AsyncSection
@@ -177,8 +151,21 @@ export function OverviewTab() {
             </>
           }
         >
-          {(data) => (
+          {(data) => {
+          const periodQuery = scopeToQueryString(countedScope(ctx, data.period_from, data.period_to));
+          return (
           <>
+            {/* Inside the figures' branch, so every step's anchor is on the
+                page whenever the tour is: an anchor that never appears would
+                leave its focus trap holding Tab on a page showing no tour. */}
+            {!tourLater && (
+              <FirstRunTour
+                onTime={scopeWindow(ctx)}
+                step={tourStep}
+                onStep={setTourStep}
+                onLater={() => setTourLater(true)}
+              />
+            )}
             <OverviewHeroRow
               headline={data.headline}
               severeCount={data.top_delayed.band_counts.severe.count}
@@ -193,16 +180,13 @@ export function OverviewTab() {
               peakHour={data.peak_hour}
               concentration={data.concentration}
               daily={data.service_split_daily ?? []}
+              trendHref={reportHref(agencyId, "trend", periodQuery)}
               onOpenFact={openFact}
             />
             <div ref={routesToCheckRef} className="ov-routes-anchor" tabIndex={-1}>
-              <RoutesToCheckList
-                routes={data.top_delayed.routes}
-                bandCounts={data.top_delayed.band_counts}
-                routeCount={data.top_delayed.route_count}
-                minSamples={data.top_delayed.min_samples}
-                windowFrom={data.headline.window_from}
-                windowTo={data.headline.window_to}
+              <RoutesPreview
+                agencyId={agencyId}
+                scope={countedScope(ctx, data.headline.window_from, data.headline.window_to)}
                 range={headlineRange(data)}
               />
             </div>
@@ -228,11 +212,7 @@ export function OverviewTab() {
                 ? {
                     key: "peak_hour",
                     node: (
-                      <PeakHourRibbon
-                        peak_hour={data.peak_hour}
-                        onClick={() => setOpen("peak_hour")}
-                        onHourClick={(hour) => setPeakHourSel({ hour, dow: null })}
-                      />
+                      <PeakHourSummary peak_hour={data.peak_hour} timeHref={reportHref(agencyId, "trend", periodQuery)} />
                     ),
                   }
                 : null,
@@ -242,7 +222,7 @@ export function OverviewTab() {
                     node: (
                       <ServiceSplit
                         service_split={data.service_split}
-                        onClick={() => setOpen("service_split")}
+                        compareHref={reportHref(agencyId, "compare_ranking", periodQuery)}
                       />
                     ),
                   }
@@ -255,14 +235,15 @@ export function OverviewTab() {
                 </RevealSection>
               ))}
           </>
-          )}
+          );
+          }}
         </AsyncSection>
       </div>
 
       <OverviewModal
         isOpen={open !== null}
         onClose={() => setOpen(null)}
-        title={open !== null ? t(modalTitleKey[open]) : ""}
+        title={open === "concentration" ? t("overview.modal.concentration") : ""}
       >
         {data && open === "concentration" && (
           <ConcentrationBar
@@ -273,31 +254,7 @@ export function OverviewTab() {
             variant="modal"
           />
         )}
-        {data && open === "peak_hour" && (
-          <PeakHourRibbon
-            peak_hour={data.peak_hour}
-            peak_hour_weekday={data.peak_hour_weekday ?? null}
-            peak_hour_weekend={data.peak_hour_weekend ?? null}
-            variant="modal"
-          />
-        )}
-        {data && open === "service_split" && (
-          <ServiceSplit
-            service_split={data.service_split}
-            daily={data.service_split_daily ?? []}
-            variant="modal"
-          />
-        )}
       </OverviewModal>
-      {peakHourSel != null && (
-        <PeakHourModal
-          data={peakBreakdown.data ?? null}
-          loading={peakBreakdown.isLoading}
-          error={peakBreakdown.error}
-          onRetry={() => void peakBreakdown.refetch()}
-          onClose={() => setPeakHourSel(null)}
-        />
-      )}
     </ScopeHeaderProvider>
   );
 }

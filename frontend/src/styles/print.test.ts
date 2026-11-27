@@ -12,6 +12,12 @@ describe("shared print stylesheet", () => {
     expect(focusedAnalysisCss.match(/@media print/g)).toBeNull();
   });
 
+  it("hides an admin's raw ids in the scope bar when printing", () => {
+    const start = globalCss.indexOf("@media print");
+    const block = globalCss.slice(start, globalCss.indexOf("\n}\n", start));
+    expect(block).toMatch(/\.scope-id\s*\{\s*display:\s*none/);
+  });
+
   it("hides the export menu itself when printing", () => {
     const start = globalCss.indexOf("@media print");
     let depth = 0;
@@ -47,5 +53,12 @@ describe("shared print stylesheet", () => {
     const screenCss = globalCss.slice(0, start) + globalCss.slice(end);
     expect(screenCss).toMatch(/\.print-frame\s*\{[^}]*display:\s*none/);
     expect(printBlock).toMatch(/\.print-frame[^{]*\{[^}]*display:\s*block/);
+  });
+
+  // A stamp footnote writes its links out (the methodology document's URL),
+  // and a URL is one unbroken word: without this it runs past a narrow
+  // screen's edge and off the printed page.
+  it("lets a report footnote wrap a long link anywhere, on screen and on paper", () => {
+    expect(globalCss).toMatch(/(^|\n)\.report-footnote\s*\{[^}]*overflow-wrap:\s*anywhere/);
   });
 });

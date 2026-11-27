@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from api.range import RangeCtx
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.query import tools
 from pipeline.query.results import ToolResult
 from pipeline.query.tools import _is_route_registered, dispatch
@@ -286,8 +287,9 @@ async def test_dispatch_time_series_applies_route_filter(conn_two_routes_obs):
 
 @pytest.fixture
 async def conn_punctual_and_late(apply_schema, ch_client):
-    """Route 1021 always on time, route 3021 always five minutes late, each
-    with 25 observations, clearing the on-time ranking's sample gate."""
+    """Route 1021 always on time, route 3021 always more than five minutes
+    late, so late under either preset, each with 25 observations, clearing
+    the on-time ranking's sample gate."""
     pool = await _test_pool()
     async with pool.acquire() as conn:
         agency_id = await conn.fetchval(
@@ -300,7 +302,7 @@ async def conn_punctual_and_late(apply_schema, ch_client):
             "VALUES ($1, $2, $3, $4, $5, $6, '08:00'::time, '平日', $7)",
             [
                 (agency_id, f"pb_{route}_{d}_{s}", f"T{route}_{d}_{s}", route, s, datetime(2026, 5, d + 1, 8), delay)
-                for route, delay in (("1021", 0), ("3021", 300))
+                for route, delay in (("1021", 0), ("3021", 400))
                 for d in range(5)
                 for s in range(1, 6)
             ],
@@ -327,6 +329,65 @@ async def test_dispatch_on_time_lists_the_end_best_first_asks_for(
         result = await dispatch("on_time", {"best_first": best_first}, _ctx(), conn, agency_id, locale="en")
     assert [r[0] for r in result.rows] == routes
     assert summary_word in result.summary
+
+
+@pytest.fixture
+async def conn_early_route(apply_schema, ch_client):
+    """Route E1: 25 observations, ten of them two minutes early and the rest
+    on time."""
+    pool = await _test_pool()
+    async with pool.acquire() as conn:
+        agency_id = await conn.fetchval(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('E', 'http://e') RETURNING agency_id"
+        )
+        delays = [-120] * 10 + [0] * 15
+        await conn.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, 'E1', $4, $5, '08:00'::time, '平日', $6)",
+            [
+                (agency_id, f"pb_{i}", f"TE_{i // 5}", i % 5 + 1, datetime(2026, 5, i // 5 + 2, 8), delay)
+                for i, delay in enumerate(delays)
+            ],
+        )
+    _analyze_sync(agency_id, ch_client)
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_on_time_rate_defaults_to_the_industry_window_and_a_threshold_keeps_early_departures(
+    conn_early_route, monkeypatch
+):
+    """With no threshold the tool counts on time as every other figure does,
+    no more than a minute early and five minutes late, from the exact columns;
+    "within N minutes" counts every early departure, as the tool says."""
+    from pipeline.reports import rankings
+
+    merged: list[str] = []
+    original = rankings._read_dist_with_hist
+
+    async def spy(*args, **kwargs):
+        merged.append("rankings")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(rankings, "_read_dist_with_hist", spy)
+    pool, agency_id = conn_early_route
+    async with pool.acquire() as conn:
+        default = await dispatch("on_time_rate", {}, _ctx(), conn, agency_id, locale="ja")
+        ranked = await dispatch("top_n", {"metric": "on_time_rate"}, _ctx(), conn, agency_id, locale="ja")
+        within = await dispatch("on_time_rate", {"threshold_min": 1}, _ctx(), conn, agency_id, locale="ja")
+        # No ClickHouse client: five minutes is a window the exact columns
+        # answer, so it must not need the live scan either.
+        within_five = await dispatch("on_time_rate", {"threshold_min": 5}, _ctx(), conn, agency_id, locale="ja")
+    assert float(default.rows[0][1]) == float(ranked.rows[0][1]) == 60.0
+    assert default.summary == "定時率 (業界標準: 早発1分・遅延5分以内) 上位1路線"
+    assert float(within.rows[0][1]) == float(within_five.rows[0][1]) == 100.0
+    assert within.summary == "定時率 (遅延 1 分以内) 上位1路線"
+    assert merged == []
 
 
 class _ExplodingChClient:
@@ -611,59 +672,52 @@ async def test_dispatch_schedule_realism_returns_table(aconn, aagency_id, ch_cli
 
 
 @pytest.mark.asyncio
-async def test_dispatch_schedule_realism_prefers_padding_view_for_static_join_agency(
-    aconn, aagency_id, ch_client, ch_async_client
-):
+async def test_dispatch_schedule_realism_reads_the_segment_aggregate_for_a_confirmed_agency(aconn, aagency_id):
     """dispatch('schedule_realism', ...) for a `static_join` agency with a
-    static schedule must return the richer padding view (scheduled vs
-    actual running time, terminus early-arrival rate), not the dep_delay-
-    only `avg_added_min` table `test_dispatch_schedule_realism_returns_table`
-    covers for every other ingest strategy.
-
-    Single-observation version of
-    tests/query/test_tool_queries.py's
-    `test_schedule_realism_padding_reproduces_padding_and_terminus_early_rate`
-    fixture (one trip, one day) -- this test only needs to confirm dispatch
-    wires the richer view through end-to-end, not re-verify the padding math
-    itself.
-    """
-    from pipeline.clickhouse import insert_updates
+    coverage verdict reads agg_route_segment_runtime, not ClickHouse (no `ch`
+    is attached), and labels the figures a feed-based estimate. The figures
+    themselves are pipeline.reports.segment_runtime's, tested beside it."""
     from tests.conftest import confirm_rt_field_coverage
 
     await confirm_rt_field_coverage(aconn, aagency_id)
-
     await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    day = date(2026, 4, 1)
     await aconn.execute(
-        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S1', 'Test Stop')", aagency_id
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        "trips_observed, samples, last_seen_at, sum_delay_sec) VALUES ($1, $2, 'R1', '平日', 0, 0, 1, 1, now(), 0)",
+        aagency_id,
+        day,
     )
-    for seq, arr, dep in [(1, None, "10:00:00"), (2, "10:05:00", "10:06:00"), (3, "10:15:00", "10:15:00")]:
-        await aconn.execute(
-            "INSERT INTO static_stop_times "
-            "(agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
-            "VALUES ($1, 'T_PAD', $2, 'S1', $3, $4)",
-            aagency_id,
-            seq,
-            arr,
-            dep,
-        )
-
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # 2026-04-01 11:00 JST
-    rows = [
-        ("dpad_1", day, "T_PAD", "平日", "10:00:00", "R1", 1, 0, "S1", None, None, None, None, 36000, None),
-        ("dpad_2", day, "T_PAD", "平日", "10:06:00", "R1", 2, 0, "S1", 0, None, None, None, 36360, None),
-        ("dpad_3", day, "T_PAD", "平日", "10:15:00", "R1", 3, -300, "S1", -300, None, None, None, 36900, None),
-    ]
-    insert_updates(ch_client, aagency_id, rows)
-
-    ctx = RangeCtx(from_date=day.date() - timedelta(days=1), to_date=day.date() + timedelta(days=1))
-    result = await dispatch(
-        "schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=ch_async_client
+    await aconn.execute(
+        "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S2', '紙屋町'), ($1, 'S3', '広島駅')",
+        aagency_id,
     )
+    # The day before ran another timetable, which the figures and their stamp leave out.
+    before = date(2026, 3, 31)
+    await aconn.execute(
+        "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) "
+        "VALUES ($1, $2, 'v0'), ($1, $3, 'v1')",
+        aagency_id,
+        before,
+        day,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_route_segment_runtime (agency_id, date, route_code, from_stop_id, to_stop_id, time_band, "
+        "to_stop_sequence, run_sec, scheduled_samples, scheduled_sum_sec, hold_eligible, holds, "
+        "terminal_arrivals, terminal_early) "
+        "VALUES ($1, $2, 'R1', 'S2', 'S3', 'forenoon', 3, '{240}', 1, 540, 1, 0, 1, 1)",
+        aagency_id,
+        day,
+    )
+
+    ctx = RangeCtx(from_date=before, to_date=day)
+    result = await dispatch("schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=None)
+
     assert result.kind == "table"
     assert result.columns == [
-        "stop_sequence",
-        "next_stop_sequence",
-        "hour",
+        "from_stop",
+        "to_stop",
+        "time_band",
         "scheduled_run_min",
         "actual_run_p50_min",
         "actual_run_p85_min",
@@ -671,11 +725,46 @@ async def test_dispatch_schedule_realism_prefers_padding_view_for_static_join_ag
         "padding_min",
         "time_adjustment_rate",
     ]
-    row = next(r for r in result.rows if r[0] == 2 and r[1] == 3)
-    assert row[3] == pytest.approx(9.0)  # scheduled_run_min
-    assert row[4] == pytest.approx(4.0)  # actual_run_p50_min (single sample)
-    assert row[7] == pytest.approx(5.0)  # padding_min
-    assert "終点早着率" in result.summary
+    assert result.rows == [["紙屋町", "広島駅", "09:00–12:00", 9.0, 4.0, 4.0, 1, 5.0, 0.0]]
+    assert result.summary == (
+        "路線R1 時刻表の妥当性（余裕時間の可視化）／ダイヤ v1（1日分）／終点早着率 100%（1件中）"
+        "／フィードの予測値に基づく推定値"
+    )
+    assert result.definition is not None
+    assert (result.definition.method_version, result.definition.value_basis) == (METHOD_VERSION, "feed_prediction")
+    assert [(v.name, v.days) for v in result.definition.timetable_versions or []] == [("v1", 1)]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_schedule_realism_falls_back_when_no_segment_has_a_run(aconn, aagency_id):
+    """A confirmed agency whose only segment in range has no observed run has
+    nothing to show from the aggregate, so the tool takes its fallback (with no
+    ClickHouse attached, that finds no data) instead of a table of blanks."""
+    from tests.conftest import confirm_rt_field_coverage
+
+    await confirm_rt_field_coverage(aconn, aagency_id)
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    day = date(2026, 4, 1)
+    await aconn.execute(
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        "trips_observed, samples, last_seen_at, sum_delay_sec) VALUES ($1, $2, 'R1', '平日', 0, 0, 1, 1, now(), 0)",
+        aagency_id,
+        day,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_route_segment_runtime (agency_id, date, route_code, from_stop_id, to_stop_id, time_band, "
+        "to_stop_sequence, run_sec, scheduled_samples, scheduled_sum_sec, hold_eligible, holds, "
+        "terminal_arrivals, terminal_early) "
+        "VALUES ($1, $2, 'R1', 'S2', 'S3', 'forenoon', 3, '{}', 0, 0, 0, 0, 1, 0)",
+        aagency_id,
+        day,
+    )
+
+    ctx = RangeCtx(from_date=day, to_date=day)
+    result = await dispatch("schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="en", ch=None)
+
+    assert result.kind == "empty"
+    assert result.summary == "No per-segment data for route R1 in the selected window."
 
 
 @pytest.mark.asyncio
@@ -834,6 +923,21 @@ async def test_rankings_leave_out_retired_and_zero_delay_routes(aconn, aagency_i
     result = await dispatch(tool, args, _LEFT_OUT_CTX, aconn, aagency_id, locale="en")
     assert [r[0] for r in result.rows] == [first]
     assert "top 1 route" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_the_late_departure_ranking_leaves_out_a_route_observed_too_few_times(aconn, aagency_id):
+    """The 5-minute ranking keeps the other rankings' floor, so the card lists
+    only routes the Routes table lists at it: a route with 20 departures, all
+    late, would otherwise lead on a handful of trips."""
+    from pipeline.reports.rankings import MIN_GROUP_SAMPLES
+    from tests.fixtures.route_dist import seed_route_dist_day
+
+    day = date(2026, 10, 20)
+    await seed_route_dist_day(aconn, aagency_id, "THIN", day, [600] * (MIN_GROUP_SAMPLES - 1))
+    await seed_route_dist_day(aconn, aagency_id, "SOLID", day, [600] * 10 + [0] * (MIN_GROUP_SAMPLES - 10))
+    result = await dispatch("top_n", {"metric": "worst_5min"}, RangeCtx(day, day), aconn, aagency_id, locale="en")
+    assert [r[0] for r in result.rows] == ["SOLID"]
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,8 @@ The pure bucketing/folding logic and the rendered SQL are covered without a
 database in `tests/unit/test_delay_timeline.py`.
 """
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -18,6 +19,7 @@ from pipeline.reports.timeline import bucket_label, bucket_of
 from tests.conftest import _test_pool
 
 _DAY = date(2026, 3, 4)
+_JST = ZoneInfo("Asia/Tokyo")
 _UPDATE_COLUMNS = [
     "agency_id",
     "file_name",
@@ -94,7 +96,8 @@ async def _seed_visit(
     table="updates",
     route_code="R1",
 ):
-    """One trip visit: the static mapping plus `delays` observations of it."""
+    """One trip visit: the static mapping plus `delays` observations of it,
+    captured at 07:50 JST on *day*, before every departure the cases seed."""
     await pool_exec(
         "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
         "VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
@@ -110,7 +113,7 @@ async def _seed_visit(
             (
                 agency_id,
                 f"f/{trip_id}-{stop_sequence}-{i}.pb",
-                datetime(day.year, day.month, day.day, 3, 0, i, tzinfo=timezone.utc),
+                datetime(day.year, day.month, day.day, 7, 50, i, tzinfo=_JST),
                 trip_id,
                 "平日",
                 f"{scheduled_sec // 3600:02d}:{scheduled_sec % 3600 // 60:02d}:00",
@@ -282,7 +285,7 @@ async def test_timeline_without_a_date_resolves_the_latest_observed_day(timeline
         delays=[60],
     )
     resp = await client.get(f"/api/{agency_id}/delays/timeline")
-    # captured_at is 03:00 UTC on _DAY, i.e. noon JST on the same civil day.
+    # captured_at is 07:50 JST on _DAY, inside its service day.
     assert resp.json()["date"] == _DAY.isoformat()
 
 

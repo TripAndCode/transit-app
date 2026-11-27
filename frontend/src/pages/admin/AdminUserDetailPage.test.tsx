@@ -19,7 +19,6 @@ const mockDetail = vi.hoisted(() => ({
   created_at: "2026-01-01T00:00:00Z",
   identities: [],
   recent_events: [],
-  byok_provider: null,
 }));
 
 // A signed-in admin viewing someone else's record (user_id 999 !== 1), so
@@ -33,13 +32,11 @@ const mockSession = vi.hoisted(() => ({
   identities: [],
 }));
 
-// The drawer also mounts SessionsSection/ApiKeysSection, each firing their
-// own GET -- route those to an empty list so this file's assertions can stay
-// scoped to the detail fetch.
+// The drawer also mounts SessionsSection, firing its own GET -- route it to
+// an empty list so this file's assertions can stay scoped to the detail fetch.
 const apiGetMock = vi.hoisted(() =>
   vi.fn((url: string) => {
     if (url.includes("/sessions")) return Promise.resolve([]);
-    if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
     if (url.includes("/activity")) return Promise.resolve([]);
     return Promise.resolve(mockDetail);
   })
@@ -198,7 +195,6 @@ describe("AdminUserDetailPage", () => {
   it("shows a deleted user as deleted, with no Resume and nothing left to change", async () => {
     apiGetMock.mockImplementation((url: string) => {
       if (url.includes("/sessions")) return Promise.resolve([]);
-      if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
       if (url.includes("/activity")) return Promise.resolve([]);
       return Promise.resolve({
         ...mockDetail,
@@ -213,14 +209,12 @@ describe("AdminUserDetailPage", () => {
       expect(screen.queryByText(/Suspended/)).toBeNull();
       expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Suspend" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Issue" })).toBeNull();
       expect(screen.getByLabelText("Role")).toHaveProperty("disabled", true);
       expect(screen.getByRole("button", { name: "Approve AI access" })).toHaveProperty("disabled", true);
       expect(screen.getByRole("button", { name: "Delete" })).toHaveProperty("disabled", true);
     } finally {
       apiGetMock.mockImplementation((url: string) => {
         if (url.includes("/sessions")) return Promise.resolve([]);
-        if (url.includes("/api-keys")) return Promise.resolve({ keys: [], truncated: false });
         if (url.includes("/activity")) return Promise.resolve([]);
         return Promise.resolve(mockDetail);
       });

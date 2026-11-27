@@ -5,15 +5,21 @@ from datetime import date
 
 import pytest
 
-from pipeline import agg_registry, ch_aggregates
+from pipeline import agg_registry, ch_aggregates, feed_quality, stop_supply
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.analyze import _AGG_TABLES_ORDERED, _STATIC_ONLY_AGG_TABLES
 
-ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {"agg_route_headway_daily", "agg_route_daily_dwell_run"}
+ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {
+    "agg_route_headway_daily",
+    "agg_route_daily_dwell_run",
+    "agg_route_segment_runtime",
+}
 
 
 def test_every_table_analyze_builds_is_registered_and_nothing_else():
-    assert set(agg_registry.TABLES) == set(_AGG_TABLES_ORDERED) | set(ch_aggregates.INTERNAL_TABLES)
+    # The scorecard is keyed by month, so it purges and builds in its own step.
+    built = set(_AGG_TABLES_ORDERED) | set(ch_aggregates.INTERNAL_TABLES) | {feed_quality.TABLE}
+    assert set(agg_registry.TABLES) == built
 
 
 def test_each_entry_is_keyed_by_its_own_name():
@@ -35,8 +41,23 @@ def test_static_only_tables_match_analyze():
     assert {n for n, t in agg_registry.TABLES.items() if t.kind is Kind.STATIC_ONLY} == set(_STATIC_ONLY_AGG_TABLES)
 
 
-def test_only_agg_route_headway_is_built_from_the_loaded_timetable():
-    assert {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED} == {"agg_route_headway"}
+def test_only_agg_route_headway_and_the_scorecard_are_built_from_the_loaded_timetable():
+    loaded = {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED}
+    assert loaded == {"agg_route_headway", feed_quality.TABLE}
+
+
+def test_only_the_stop_supply_tables_are_kept_per_archived_version():
+    kept = {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.VERSIONS}
+    assert kept == {stop_supply.DAYS_TABLE, stop_supply.TABLE}
+    assert agg_registry.TABLES[stop_supply.TABLE].depends_on == (stop_supply.DAYS_TABLE,)
+
+
+def test_the_scorecard_is_rebuilt_with_the_tables_it_reads():
+    assert agg_registry.TABLES[feed_quality.TABLE].depends_on == (
+        "agg_route_daily",
+        "agg_route_daily_dist",
+        "agg_feed_health",
+    )
 
 
 def test_the_archive_joined_tables_are_the_stop_tables_dwell_and_the_daily_headways():
@@ -140,6 +161,7 @@ def test_each_archive_joined_table_names_what_it_reads_of_its_timetable():
     assert inputs == {
         **dict.fromkeys(ch_aggregates.STATIC_JOINED_TABLES, ArchivedInput.STOP_TIMES),
         "agg_route_daily_dwell_run": ArchivedInput.STOP_TIMES,
+        "agg_route_segment_runtime": ArchivedInput.STOP_TIMES,
         "agg_route_headway_daily": ArchivedInput.MEDIANS,
     }
     assert all(t.archived_input is None for t in agg_registry.TABLES.values() if t.timetable is not Timetable.ARCHIVED)

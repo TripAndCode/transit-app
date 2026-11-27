@@ -11,9 +11,12 @@ GitHub-hosted runner this repo doesn't use.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
+import shlex
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -55,6 +58,19 @@ _NoDuplicateKeys.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
 
 def _workflow_yaml() -> dict:
     return yaml.load(_workflow_text(), _NoDuplicateKeys)
+
+
+def _all_workflows() -> list[tuple[Path, Any]]:
+    return [
+        (workflow, yaml.load(workflow.read_text(), _NoDuplicateKeys))
+        for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    ]
+
+
+def _triggers(doc: dict) -> list | dict:
+    # YAML 1.1 reads a bare `on` key as the boolean True.
+    triggers = doc.get("on", doc.get(True))
+    return [triggers] if isinstance(triggers, str) else triggers
 
 
 def test_workflow_has_no_duplicate_keys() -> None:
@@ -406,8 +422,7 @@ def test_no_workflow_names_a_self_hosted_runner_outright() -> None:
     way back is `vars.CI_BACKEND_RUNNER`, set by a maintainer after
     registering one, so no workflow may name a self-hosted label itself."""
     offenders = []
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+    for workflow, doc in _all_workflows():
         for job_name, job in doc["jobs"].items():
             if _names_self_hosted(job.get("runs-on", "")):
                 offenders.append(f"{workflow.name} / {job_name}: {job['runs-on']}")
@@ -423,13 +438,8 @@ def test_no_pull_request_target_workflow_checks_out_code() -> None:
     steps to a reusable workflow (job-level `uses:`) fails too, because its steps
     would go unchecked."""
     offenders = []
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
-        # YAML 1.1 reads a bare `on` key as the boolean True.
-        triggers = doc.get("on", doc.get(True))
-        if isinstance(triggers, str):
-            triggers = [triggers]
-        if "pull_request_target" not in triggers:
+    for workflow, doc in _all_workflows():
+        if "pull_request_target" not in _triggers(doc):
             continue
         for job_name, job in doc["jobs"].items():
             if "uses" in job:
@@ -438,6 +448,48 @@ def test_no_pull_request_target_workflow_checks_out_code() -> None:
                 if str(step.get("uses", "")).startswith("actions/checkout"):
                     offenders.append(f"{workflow.name} / {job_name}: {step['uses']}")
     assert not offenders, "pull_request_target jobs that check out code: " + "; ".join(offenders)
+
+
+REPORT_SCHEDULED_FAILURE = "./.github/workflows/report-scheduled-failure.yml"
+# A job past its timeout-minutes ends `cancelled`, which failure() does not see,
+# while cancelled() stays false for the jobs that need it; cancelled() turns true
+# only for a run a person cancelled, which someone is already watching.
+SCHEDULED_RUN_FAILED = (
+    "github.event_name == 'schedule' && !cancelled() && (failure() || contains(needs.*.result, 'cancelled'))"
+)
+
+
+def test_every_scheduled_workflow_reports_a_failed_scheduled_run_in_an_issue() -> None:
+    """GitHub tells only the account that last edited a cron line about a
+    failed scheduled run, so every scheduled workflow ends in one job that
+    calls the reporting workflow. It waits on every other job, so a failure or
+    timeout in any of them reaches it, and runs only for a scheduled run, since
+    a person who dispatched one is already watching it. It is also the only
+    job that may hold any write scope."""
+    scheduled = []
+    for workflow, doc in _all_workflows():
+        if "schedule" not in _triggers(doc):
+            continue
+        scheduled.append(workflow.name)
+        jobs = doc["jobs"]
+        reporters = [name for name, job in jobs.items() if job.get("uses") == REPORT_SCHEDULED_FAILURE]
+        assert len(reporters) == 1, f"{workflow.name} has {len(reporters)} jobs calling {REPORT_SCHEDULED_FAILURE}"
+        name = reporters[0]
+        reporter = jobs[name]
+        needs = reporter.get("needs", [])
+        assert set([needs] if isinstance(needs, str) else needs) == set(jobs) - {name}, (
+            f"{workflow.name} / {name} does not wait on every other job, so a failure there would go unreported"
+        )
+        assert reporter.get("if") == SCHEDULED_RUN_FAILED, (
+            f"{workflow.name} / {name} must run for a failed or timed-out scheduled run and only then"
+        )
+        assert reporter.get("permissions") == {"issues": "write"}
+        assert "write" not in str(doc.get("permissions")), f"{workflow.name} grants a write scope to every job"
+        writers = [other for other, job in jobs.items() if other != name and "write" in str(job.get("permissions"))]
+        assert not writers, f"{workflow.name}: only {name} may hold a write scope, not {writers}"
+    assert {"nightly-extended.yml", "secrets-scan-full-history.yml"} <= set(scheduled), (
+        f"the probe no longer finds the known scheduled workflows; it found {scheduled}"
+    )
 
 
 def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:
@@ -484,8 +536,7 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
     accepted. An inline `set -o pipefail` would work as well, but recognising it
     means reading the script as shell, which this check deliberately does not."""
     checked = 0
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+    for workflow, doc in _all_workflows():
         for job_name, job in doc["jobs"].items():
             for step in job.get("steps", []):
                 if "| tee" not in step.get("run", ""):
@@ -499,14 +550,74 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
     assert checked >= 1, "expected at least one `| tee` step (nightly-extended.yml); the probe found none"
 
 
-def test_the_test_job_installs_the_ml_group_and_requires_its_tests() -> None:
-    """The model tests skip where the optional `ml` group is absent. In CI's test
-    job a missing group must fail them, or they would pass by never running."""
-    steps = _workflow_yaml()["jobs"]["test"]["steps"]
-    setup = next(step for step in steps if step.get("uses") == "./.github/actions/setup-backend")
-    assert "ml" in str(setup["with"].get("groups", "")).split()
-    run_tests = next(step for step in steps if step.get("name") == "Run tests")
-    assert str(run_tests["env"].get("ML_DEPS_REQUIRED")) == "1"
+_SUITE_RUNNERS = {"pytest", "run_integration_tests.sh", "run_full_ci.sh"}
+_SUITE_MAKE_TARGETS = {"test", "check"}
+
+
+def _runs_pytest(script: str) -> bool:
+    """Whether the script runs pytest: named as a word of its own (`pytest`,
+    `poetry run pytest`, `python -m pytest`), through one of the repository's
+    wrapper scripts, or through the Make targets that call them. Any other
+    indirection is not seen, so its job is not checked."""
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    tokens = list(lexer)
+    if any(Path(token).name in _SUITE_RUNNERS for token in tokens):
+        return True
+    for i, token in enumerate(tokens):
+        if token == "make":
+            arguments = itertools.takewhile(lambda t: not set(t) <= set(lexer.punctuation_chars), tokens[i + 1 :])
+            if _SUITE_MAKE_TARGETS & set(arguments):
+                return True
+    return False
+
+
+@pytest.mark.parametrize(
+    ("script", "runs"),
+    [
+        ("poetry run pytest -q tests/", True),
+        ("python -m pytest", True),
+        ("scripts/run_integration_tests.sh tests/api", True),
+        ("make test", True),
+        ("make -C . check && echo done", True),
+        ("make build && test -f out", False),
+        ("grep -c SKIPPED pytest.log", False),
+        ("pip install pytest-xdist", False),
+    ],
+)
+def test_the_pytest_probe_sees_direct_and_wrapped_runs(script: str, runs: bool) -> None:
+    assert _runs_pytest(script) is runs
+
+
+def test_every_job_that_runs_the_suite_installs_the_ml_group_and_requires_its_tests() -> None:
+    """The model tests skip where the optional `ml` group is absent. In a CI job
+    a missing group must fail them, or they would pass by never running.
+
+    The check covers every job in every workflow that runs pytest, not one named
+    job, because a job that sets up its own toolchain drifts from the shared
+    action without anything noticing. A test module that imports an `ml`
+    package directly then fails collection, and with it the whole run."""
+    checked = set()
+    for workflow, doc in _all_workflows():
+        for job_name, job in doc["jobs"].items():
+            steps = job.get("steps", [])
+            for step in steps:
+                if not _runs_pytest(step.get("run", "")):
+                    continue
+                where = f"{workflow.name} / {job_name}"
+                checked.add(where)
+                setup = next((s for s in steps if s.get("uses") == "./.github/actions/setup-backend"), None)
+                assert setup is not None, f"{where} runs pytest without setting up through the shared action"
+                assert steps.index(setup) < steps.index(step), f"{where} sets up the backend only after running pytest"
+                assert "ml" in str(setup.get("with", {}).get("groups", "")).split(), (
+                    f"{where} runs pytest without the ml group"
+                )
+                assert str((step.get("env") or {}).get("ML_DEPS_REQUIRED")) == "1", (
+                    f"{where} runs pytest without ML_DEPS_REQUIRED=1, so the model tests may skip instead of run"
+                )
+    assert {"ci.yml / test", "nightly-extended.yml / python-extended"} <= checked, (
+        f"the probe no longer finds the known pytest jobs; it found {sorted(checked)}"
+    )
 
 
 def test_the_shared_action_installs_the_groups_it_is_given_and_caches_them_apart() -> None:

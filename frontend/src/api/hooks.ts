@@ -13,6 +13,7 @@ import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
 import { requestLanguage } from "./requestLanguage";
 import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
+import { cancelThreadFilter, flushThreadFilter, pendingThreadFilter, saveThreadFilter, type FilterWrite } from "./threadFilterSaver";
 import { scopeSummaryQuery } from "./scopeSummaryQuery";
 import type { RouteTableSort } from "../routes/destinations";
 import type {
@@ -21,7 +22,7 @@ import type {
   ScopeSummary,
   AnonThread,
   AppendMessageResult,
-  AskResponse,
+  CardAnswer,
   ConvMessage,
   Conversation,
   DelayRecordStopsResponse,
@@ -35,8 +36,8 @@ import type {
   LiveTripsResponse,
   NetworkSummary,
   OverviewSummary,
-  PeakHourBreakdown,
   PerformanceStandardsResponse,
+  ReplayResponse,
   ReportMeta,
   ReportResponse,
   Route,
@@ -48,8 +49,13 @@ import type {
   ServiceHoursResponse,
   StopBounds,
   StopBoundsResponse,
-  Suggestion,
-  SuggestionEnvelope,
+  RevisionDayType,
+  TimetableRevisionDiff,
+  TimetableRevisionNewGaps,
+  TimetableRevisionRoutes,
+  TimetableRevisionsResponse,
+  TransferPairsResponse,
+  TransferReliability,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -60,7 +66,7 @@ import { useSession } from "./auth";
  *  language joins the end of the cache key, so a language switch fetches
  *  again rather than serving text cached in the other language, and a key
  *  prefix still matches every language's entry. */
-function useLocalizedQuery<TQueryFnData, TData = TQueryFnData>(
+export function useLocalizedQuery<TQueryFnData, TData = TQueryFnData>(
   options: UseQueryOptions<TQueryFnData, Error, TData>,
 ): UseQueryResult<TData> {
   const { i18n } = useTranslation();
@@ -103,6 +109,153 @@ export function useStopBounds(agencyId: number | null): UseQueryResult<StopBound
       apiGet<StopBoundsResponse>(`/api/${agencyId}/stops/bounds`, { signal }).then((r) => r.bounds),
     enabled: agencyId != null,
     staleTime: 60 * 60 * 1000,
+  });
+}
+
+/** Shared by `useReplayWindow` and Bus Town's own `useQueries` call for its
+ *  neighbouring windows, so both build the exact same cache key and URL for
+ *  the same (date, fromHour, toHour) rather than risking two sets of query
+ *  options drifting apart. `date` null asks for the agency's default
+ *  (newest observed) service day, and `fromHour`/`toHour` null together asks
+ *  the server to pick that day's own default window — the one call this
+ *  doubles as both "find the day and its first window" and "load one more
+ *  window of an already-known day". A past service day's observations never
+ *  change, so it never goes stale for the session (`staleTime: Infinity`);
+ *  an unused window is still evicted after 10 minutes (`gcTime`). */
+export function replayWindowQueryOptions(
+  agencyId: number | null,
+  date: string | null,
+  fromHour: number | null,
+  toHour: number | null,
+): UseQueryOptions<ReplayResponse> {
+  const params = new URLSearchParams();
+  if (date != null) params.set("date", date);
+  if (fromHour != null && toHour != null) {
+    params.set("from_hour", String(fromHour));
+    params.set("to_hour", String(toHour));
+  }
+  const qs = params.toString();
+  return {
+    queryKey: ["bus-town-replay", agencyId, date, fromHour, toHour],
+    queryFn: ({ signal }) => apiGet<ReplayResponse>(`/api/agencies/${agencyId}/replay${qs ? `?${qs}` : ""}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: Infinity,
+    gcTime: 10 * 60_000,
+  };
+}
+
+export function useReplayWindow(
+  agencyId: number | null,
+  date: string | null,
+  fromHour: number | null,
+  toHour: number | null,
+): UseQueryResult<ReplayResponse> {
+  return useQuery(replayWindowQueryOptions(agencyId, date, fromHour, toHour));
+}
+
+/** The agency's timetable revisions, newest first. They change only when a
+ *  timetable is loaded and kept, so a few minutes' staleness is harmless. */
+export function useTimetableRevisions(agencyId: number | null): UseQueryResult<TimetableRevisionsResponse> {
+  return useQuery({
+    queryKey: ["timetable-revisions", agencyId],
+    queryFn: ({ signal }) => apiGet<TimetableRevisionsResponse>(`/api/${agencyId}/timetable-revisions`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** What the revision starting on `on` changed at every stop, the changed
+ *  stops of `dayType` alone. */
+export function useTimetableRevisionDiff(
+  agencyId: number | null,
+  on: string,
+  dayType: RevisionDayType,
+): UseQueryResult<TimetableRevisionDiff> {
+  const query = new URLSearchParams({ on, day_type: dayType }).toString();
+  return useQuery({
+    queryKey: ["timetable-revision-diff", agencyId, on, dayType],
+    queryFn: ({ signal }) => apiGet<TimetableRevisionDiff>(`/api/${agencyId}/timetable-revisions/diff?${query}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+    // A day-type switch keeps the same revision's tabs and totals on screen
+    // while its stops load; another revision's would be wrong figures.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
+  });
+}
+
+/** A band of service-day hours and the gap over it, in minutes, that the
+ *  new-gap list reads. */
+interface NewGapBand {
+  fromHour: number;
+  toHour: number;
+  gapMin: number;
+}
+
+/** The stops the revision starting on `on` left with a new gap over `band`,
+ *  those of `dayType` alone. */
+export function useTimetableRevisionNewGaps(
+  agencyId: number | null,
+  on: string,
+  dayType: RevisionDayType,
+  band: NewGapBand,
+): UseQueryResult<TimetableRevisionNewGaps> {
+  const query = new URLSearchParams({
+    on,
+    day_type: dayType,
+    from_hour: String(band.fromHour),
+    to_hour: String(band.toHour),
+    gap_min: String(band.gapMin),
+  }).toString();
+  return useQuery({
+    queryKey: ["timetable-revision-new-gaps", agencyId, on, dayType, band.fromHour, band.toHour, band.gapMin],
+    queryFn: ({ signal }) =>
+      apiGet<TimetableRevisionNewGaps>(`/api/${agencyId}/timetable-revisions/new-gaps?${query}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
+  });
+}
+
+/** The active transfer pairs the agency arrives or departs in. */
+export function useTransferPairs(agencyId: number | null): UseQueryResult<TransferPairsResponse> {
+  return useQuery({
+    queryKey: ["transfer-pairs", agencyId],
+    queryFn: ({ signal }) => apiGet<TransferPairsResponse>(`/api/${agencyId}/transfer-pairs`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** One pair's reliability over the last closed days of `dayType`. */
+export function useTransferReliability(
+  agencyId: number | null,
+  pairId: number | null,
+  dayType: RevisionDayType | null,
+): UseQueryResult<TransferReliability> {
+  const query = dayType == null ? "" : `?${new URLSearchParams({ day_type: dayType }).toString()}`;
+  return useQuery({
+    queryKey: ["transfer-reliability", agencyId, pairId, dayType],
+    queryFn: ({ signal }) =>
+      apiGet<TransferReliability>(`/api/${agencyId}/transfer-pairs/${pairId}/reliability${query}`, { signal }),
+    enabled: agencyId != null && pairId != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** What the revision starting on `on` did to each route on `dayType`. */
+export function useTimetableRevisionRoutes(
+  agencyId: number | null,
+  on: string,
+  dayType: RevisionDayType,
+): UseQueryResult<TimetableRevisionRoutes> {
+  const query = new URLSearchParams({ on, day_type: dayType }).toString();
+  return useQuery({
+    queryKey: ["timetable-revision-routes", agencyId, on, dayType],
+    queryFn: ({ signal }) =>
+      apiGet<TimetableRevisionRoutes>(`/api/${agencyId}/timetable-revisions/routes?${query}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
   });
 }
 
@@ -285,19 +438,23 @@ export function useHeadwayQuality(
 
 /** Per-route minimum-performance-standard achievement rate / estimated
  *  bonus-or-deduction panel data -- an internal simulation only (see
- *  `PerformanceStandardsResponse.disclaimer`), rendered beside the `on_time`
- *  report. */
+ *  `PerformanceStandardsResponse.disclaimer`), rendered beside the route
+ *  table and on a route's own page. `route` is that page's route: the API
+ *  then judges that route alone instead of every route the agency has. */
 export function usePerformanceStandards(
   agencyId: number | null,
   ctx: Scope,
   enabled: boolean,
+  route?: string,
 ): UseQueryResult<PerformanceStandardsResponse> {
+  const routeParam = route == null ? "" : `&route=${encodeURIComponent(route)}`;
   return useLocalizedQuery({
-    queryKey: ["performance-standards", agencyId, ...scopeKey(ctx)],
+    queryKey: ["performance-standards", agencyId, ...scopeKey(ctx), route ?? null],
     queryFn: ({ signal }) =>
-      apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${scopeToQueryString(ctx)}`, {
-        signal,
-      }),
+      apiGet<PerformanceStandardsResponse>(
+        `/api/${agencyId}/performance_standards?${scopeToQueryString(ctx)}${routeParam}`,
+        { signal },
+      ),
     enabled: agencyId != null && enabled,
   });
 }
@@ -319,25 +476,6 @@ export function useWeatherDelay(
   });
 }
 
-export function useSuggestion(
-  agencyId: number | null,
-  exclude: string[],
-): UseQueryResult<Suggestion | null> {
-  const excludeKey = exclude.join(",");
-  return useLocalizedQuery({
-    queryKey: ["reports-suggest", agencyId, excludeKey],
-    queryFn: ({ signal }) => {
-      const qs = exclude.map((e) => `exclude=${encodeURIComponent(e)}`).join("&");
-      return apiGet<SuggestionEnvelope>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, {
-        signal,
-      }).then((r) => r.suggestion);
-    },
-    enabled: agencyId != null,
-    staleTime: 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
-  });
-}
-
 export function useOverviewSummary(
   agencyId: number | null,
   ctx: Scope,
@@ -347,25 +485,6 @@ export function useOverviewSummary(
     queryFn: ({ signal }) =>
       apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
-  });
-}
-
-export function usePeakHourBreakdown(
-  agencyId: number | null,
-  hour: number | null,
-  dow: number | null,
-): UseQueryResult<PeakHourBreakdown> {
-  return useQuery({
-    queryKey: ["peak-hour-breakdown", agencyId, hour, dow],
-    enabled: agencyId != null && hour != null,
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams({ hour: String(hour) });
-      if (dow != null) params.set("dow", String(dow));
-      return apiGet<PeakHourBreakdown>(
-        `/api/${agencyId}/peak-hour-breakdown?${params}`,
-        { signal },
-      );
-    },
   });
 }
 
@@ -590,6 +709,37 @@ export function useConversations(agencyId: number): UseQueryResult<Conversation[
   });
 }
 
+/** A conversation as its filter saves will leave it: a refetch while one is
+ *  in flight or queued must not show the filter it is replacing. */
+function withPendingFilter(conversation: Conversation): Conversation {
+  const pending = pendingThreadFilter(conversation.conversation_id);
+  return pending ? { ...conversation, filter_ctx: pending } : conversation;
+}
+
+/** An open thread's filter, saved as it is edited (`api/threadFilterSaver.ts`)
+ *  and shown at once through the conversation's cached copy. `flush` resolves
+ *  once the thread's saves have landed, and rejects if the last one failed. */
+export function useThreadFilter(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  function save(threadId: string, filter: FilterCtx) {
+    qc.setQueryData<{ conversation: Conversation; messages: ConvMessage[] } | null>(
+      ["conversation", agencyId, threadId, authed ? "server" : "anon"],
+      (old) => (old ? { ...old, conversation: { ...old.conversation, filter_ctx: filter } } : old),
+    );
+    const write: FilterWrite = authed
+      ? (next) => apiPatch<Conversation>(`/api/${agencyId}/conversations/${threadId}`, { filter_ctx: next })
+      : async (next) => {
+          if (!conversationsAnon.update(threadId, { filter_ctx: next })) throw new Error("thread not found");
+        };
+    saveThreadFilter(threadId, filter, write, () => {
+      void qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      void qc.invalidateQueries({ queryKey: ["conversation", agencyId, threadId] });
+    });
+  }
+  return { save, flush: flushThreadFilter };
+}
+
 export function useConversation(
   agencyId: number,
   conversationId: string | null,
@@ -604,11 +754,11 @@ export function useConversation(
           apiGet<Conversation>(`/api/${agencyId}/conversations/${conversationId}`, { signal }),
           apiGet<ConvMessage[]>(`/api/${agencyId}/conversations/${conversationId}/messages`, { signal }),
         ]);
-        return { conversation: conv, messages: msgs };
+        return { conversation: withPendingFilter(conv), messages: msgs };
       }
       const anon = conversationsAnon.get(conversationId, agencyId);
       if (!anon) return null;
-      return { conversation: toServerLikeConversation(anon), messages: anon.messages };
+      return { conversation: withPendingFilter(toServerLikeConversation(anon)), messages: anon.messages };
     },
     enabled: agencyId > 0 && Boolean(conversationId),
   });
@@ -656,6 +806,7 @@ export function useDeleteConversation(agencyId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      cancelThreadFilter(id);
       if (authed) {
         return apiDelete<{ ok: true }>(`/api/${agencyId}/conversations/${id}`);
       }
@@ -700,8 +851,8 @@ type AppendMessageVars = {
    *  rendered_summary for the anonymous path instead of the machine-generated
    *  builderSummary() fallback. */
   user_summary?: string;
-  /** Current filter context (date range + routes). Forwarded as `ctx` in the
-   *  anonymous POST /ask body so the backend scopes the query correctly. */
+  /** Current filter context (date range + routes). Sent with a signed-out
+   *  card so the backend scopes it as a stored thread's filters scope one. */
   filter_ctx?: FilterCtx;
 };
 
@@ -722,27 +873,14 @@ export function useAppendMessage(agencyId: number) {
           { tool: vars.tool, args: vars.args, user_summary: humanLabel },
         );
       }
-      // Anonymous path: dispatch via POST /ask with __build__ sentinel.
-      const dispatchTool = vars.tool;
-      const dispatchArgs = vars.args;
-      const chipTitle = humanLabel;
-
-      const question = `__build__ ${dispatchTool} ${JSON.stringify(dispatchArgs)}`;
-      // Forward filter context so the backend scopes the query to the user's
-      // chosen date range and route list (scenario 08 — filter mid-thread).
-      const fc = vars.filter_ctx;
-      const askBody: Record<string, unknown> = { question };
-      if (fc) {
-        askBody.ctx = {
-          from: fc.from_date,
-          to: fc.to_date,
-          dow: fc.dow ?? "all",
-          time_band: fc.time_band ?? "all",
-          service: fc.service ?? "all",
-          routes: fc.routes ?? [],
-        };
-      }
-      const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, askBody);
+      // Signed out, the thread lives only in this browser: the card is
+      // answered without being stored, scoped by the thread's filters as a
+      // stored thread's are, and kept here with its method stamp.
+      const card = await apiPost<CardAnswer>(`/api/${agencyId}/ask/card`, {
+        tool: vars.tool,
+        args: vars.args,
+        filter_ctx: vars.filter_ctx ?? {},
+      });
 
       const now = new Date().toISOString();
       const baseId = -(Date.now());
@@ -751,11 +889,13 @@ export function useAppendMessage(agencyId: number) {
         conversation_id: vars.conversationId,
         role: "user",
         chip_id: null,
-        tool: dispatchTool,
-        args: dispatchArgs,
+        tool: vars.tool,
+        args: vars.args,
         signature_hash: null,
         result: null,
-        rendered_summary: chipTitle,
+        rendered_summary: humanLabel,
+        conditions: null,
+        definition: null,
         created_at: now,
       };
       const asstMsg: ConvMessage = {
@@ -763,20 +903,7 @@ export function useAppendMessage(agencyId: number) {
         conversation_id: vars.conversationId,
         role: "assistant",
         chip_id: null,
-        tool: dispatchTool,
-        args: askResp.canonical_args ?? dispatchArgs,
-        signature_hash: askResp.signature_hash ?? null,
-        result: askResp.result
-          ? {
-              kind: askResp.result.kind,
-              summary: askResp.result.summary ?? null,
-              rows: (askResp.result.rows as unknown[] | undefined) ?? null,
-              columns: askResp.result.columns ?? null,
-              series: askResp.result.series ?? null,
-              pairs: askResp.result.pairs ?? null,
-            }
-          : null,
-        rendered_summary: askResp.answer ?? null,
+        ...card,
         created_at: now,
       };
       conversationsAnon.appendMessage(vars.conversationId, userMsg);

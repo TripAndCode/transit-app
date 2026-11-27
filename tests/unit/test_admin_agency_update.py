@@ -85,6 +85,7 @@ class _Conn:
                 "lock_wait_ms": None,
                 "error": None,
                 "requested_by": args[2],
+                "rebuild_headline": None,
             }
         return self._row
 

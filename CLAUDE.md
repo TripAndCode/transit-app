@@ -19,6 +19,13 @@ same source. This section only maps them onto Claude Code tooling.
     enforcement, high-risk paths, or material fixes.
   - Human prose outside the process docs may use its direct trivial path.
 - `/cleanup-merged` is the post-merge cleanup.
+- For authorized multi-issue work, use `/work-issues`. It owns task routing,
+  completion notifications, and private handoffs; `issue-worker` owns implementation.
+- Subagent models follow the work, not the session. Mechanical edits and code
+  location go to Sonnet or Haiku (`model` on the Agent call); an agent's default is
+  its frontmatter `model:`. Opus is for design, high-risk paths, and debugging that
+  cheaper models have already failed. `/work-issues` owns when `issue-worker`
+  escalates.
 - `.claude/settings.json` wires three hooks that enforce rules for Claude Code
   sessions:
   - `.claude/hooks/guard-dev-db.sh`, a wrapper around `guard_dev_db.py`, enforces
@@ -27,3 +34,12 @@ same source. This section only maps them onto Claude Code tooling.
     enforces the shared-clone git rule: no push that lands on `main`, no force-push
     spelled `--force`, `-f` or `+refspec`, no `stash pop`/`drop`/`clear`.
   - `.claude/hooks/guard-push-quality.sh` enforces the pre-push verification rule.
+
+## Compact instructions
+
+Preserve the current objective and acceptance criteria, user decisions and authorized
+scope, active worker/task IDs, absolute worktree paths, branch/base/head SHAs,
+verification results tied to those SHAs, unresolved findings, and the private handoff
+path. Drop completed-task narratives and successful command output. Read the current
+handoff when one exists and recheck mutable Git/task state after compaction before
+resuming work.

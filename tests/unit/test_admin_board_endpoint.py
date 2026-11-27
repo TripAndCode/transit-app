@@ -55,6 +55,7 @@ _RUN_ROWS = [
         "lock_wait_ms": None,
         "error": None,
         "requested_by": None,
+        "rebuild_headline": None,
     }
 ]
 
@@ -371,7 +372,7 @@ async def test_collectors_are_abandoned_once_the_budget_expires(monkeypatch):
 
 
 async def test_only_one_collection_runs_however_many_polls_arrive(monkeypatch):
-    """The default executor is shared with the embedder and the LLM calls
+    """The default executor is shared with the LLM calls
     and holds only a handful of threads, so a board left open in several
     tabs must not spend them all on abandoned collections."""
     started = 0

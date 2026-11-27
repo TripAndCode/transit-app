@@ -12,16 +12,16 @@ const HIROSHIMA_FEED = "https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updat
 const AOMORI_FEED = "https://aomoricitybus.com/TripUpdate.pb";
 
 function agency(over: Partial<Agency>): Agency {
-  return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, ...over };
+  return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "full", ...over };
 }
 
-/** A signed-out guest on a deployment with sign-in available but not
- *  required, unless `visitor` says otherwise; `session: undefined` is a
- *  session still loading. */
-function mockVisitor(visitor: { auth_enabled?: boolean; login_required?: boolean; session?: object | null } = {}) {
-  const { auth_enabled = true, login_required = false } = visitor;
+/** A signed-out guest on a deployment with sign-in available, unless
+ *  `visitor` says otherwise; `session: undefined` is a session still loading
+ *  and `configPending` a config not yet loaded. */
+function mockVisitor(visitor: { auth_enabled?: boolean; configPending?: boolean; session?: object | null } = {}) {
+  const { auth_enabled = true, configPending = false } = visitor;
   vi.spyOn(config, "useConfig").mockReturnValue({
-    data: { auth_enabled, local_admin_enabled: false, login_required },
+    data: configPending ? undefined : { auth_enabled, local_admin_enabled: false },
   } as never);
   vi.spyOn(auth, "useSession").mockReturnValue({ data: "session" in visitor ? visitor.session : null } as never);
 }
@@ -150,7 +150,7 @@ describe("OnboardingGate", () => {
     vi.useRealTimers();
   });
 
-  it("leaves a fresh signed-out browser on the picker; RequireAuth owns sending it to /welcome", () => {
+  it("leaves a fresh signed-out browser on the picker rather than sending it to /welcome", () => {
     localStorage.clear();
     mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
     renderGate();
@@ -160,8 +160,8 @@ describe("OnboardingGate", () => {
 
   it("names the newest data day once, above the cards, instead of on each card", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "First", latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 2, agency_name: "Second", latest_data_date: "2026-10-22" }),
+      agency({ agency_id: 1, agency_name: "First", latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 2, agency_name: "Second", latest_data_date: "2026-10-22", capability_tier: "full" }),
       agency({ agency_id: 3, agency_name: "Never collected" }),
     ]);
     renderGate();
@@ -173,9 +173,9 @@ describe("OnboardingGate", () => {
 
   it("notes only the agency whose data stopped well behind the others", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14" }),
-      agency({ agency_id: 2, agency_name: "Current", latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 3, agency_name: "A day late", latest_data_date: "2026-10-22" }),
+      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14", capability_tier: "full" }),
+      agency({ agency_id: 2, agency_name: "Current", latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 3, agency_name: "A day late", latest_data_date: "2026-10-22", capability_tier: "full" }),
     ]);
     renderGate();
     expect(screen.getByRole("button", { name: /^Stopped/ })).toHaveTextContent("No updates after Oct 14");
@@ -188,9 +188,9 @@ describe("OnboardingGate", () => {
 
   it("keeps the stopped note when a search leaves only that agency", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14" }),
+      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14", capability_tier: "full" }),
       ...Array.from({ length: 8 }, (_, i) =>
-        agency({ agency_id: i + 2, agency_name: `Agency ${i + 2}`, latest_data_date: "2026-10-23" }),
+        agency({ agency_id: i + 2, agency_name: `Agency ${i + 2}`, latest_data_date: "2026-10-23", capability_tier: "full" }),
       ),
     ]);
     renderGate();
@@ -200,9 +200,9 @@ describe("OnboardingGate", () => {
 
   it("groups the agencies by prefecture, with how many each holds", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Aomori City Bus", feed_url: AOMORI_FEED, latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 8, agency_name: "Hiroden", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 9, agency_name: "Hiroshima Bus", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23" }),
+      agency({ agency_id: 1, agency_name: "Aomori City Bus", feed_url: AOMORI_FEED, latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 8, agency_name: "Hiroden", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 9, agency_name: "Hiroshima Bus", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23", capability_tier: "full" }),
     ]);
     renderGate();
     const groups = screen.getAllByRole("heading", { level: 2 });
@@ -224,22 +224,30 @@ describe("OnboardingGate", () => {
   it("lists the agencies with data first, then by name", () => {
     mockAgencies([
       agency({ agency_id: 1, agency_name: "Empty one" }),
-      agency({ agency_id: 2, agency_name: "Full two", latest_data_date: "2026-10-03" }),
-      agency({ agency_id: 3, agency_name: "Full one", latest_data_date: "2026-10-03" }),
+      agency({ agency_id: 2, agency_name: "Full two", latest_data_date: "2026-10-03", capability_tier: "full" }),
+      agency({ agency_id: 3, agency_name: "Full one", latest_data_date: "2026-10-03", capability_tier: "full" }),
     ]);
     renderGate();
     const names = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((n) => /one|two/.test(n));
     expect(names).toEqual(["Full one", "Full two", "Empty oneNo data collected yet"]);
   });
 
-  it("explains the app, and offers help, about and login to a signed-out guest", () => {
+  it("explains the app, and offers help, about and the admin sign-in to a signed-out guest", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Choose an agency");
     expect(screen.getByText(/Look up bus delays/)).toHaveTextContent("No sign-in needed.");
     expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
     expect(screen.getByRole("link", { name: "About this app" })).toHaveAttribute("href", "/welcome");
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "Admin sign-in" })).toHaveAttribute("href", "/login");
+  });
+
+  it("tells a signed-out guest login is unneeded before the config has loaded", () => {
+    mockVisitor({ configPending: true });
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    expect(screen.getByText(/Look up bus delays/)).toHaveTextContent("No sign-in needed.");
+    expect(screen.queryByRole("link", { name: "Admin sign-in" })).toBeNull();
   });
 
   it.each([
@@ -249,13 +257,12 @@ describe("OnboardingGate", () => {
     mockVisitor(visitor);
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
-    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Admin sign-in" })).toBeNull();
     expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
   });
 
   it.each([
     ["a signed-in user", { session: { user_id: 1 } }],
-    ["a guest on a deployment that requires login", { login_required: true, session: null }],
     ["a session still loading", { session: undefined }],
   ])("does not say login is unneeded to %s", (_, visitor) => {
     mockVisitor(visitor);

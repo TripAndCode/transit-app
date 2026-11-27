@@ -15,13 +15,14 @@ all DB queries are scoped to the request's ``agency_id``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+from datetime import date, datetime, timezone
+from typing import Any, NamedTuple
 
 from api.range import RangeCtx
 from api.sqlutil import escape_like
 from pipeline.query.results import ToolResult
-from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.recorded_floor import retention_floor_async
+from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
 from pipeline.service_day import service_date_ch, service_date_of
 
 VALID_KINDS = (
@@ -60,6 +61,33 @@ def _name_contains(column: str, n: int) -> str:
 def _contains_pattern(substring: str) -> str:
     """``substring`` as a LIKE pattern that matches it literally anywhere."""
     return f"%{escape_like(substring)}%"
+
+
+class _Retained(NamedTuple):
+    floor: date | None  # pipeline.retention.retention_floor
+    first_aggregated: date | None
+    last_aggregated: date | None
+
+
+async def _retained_span(conn, agency_id: int) -> _Retained:
+    """The agency's retention floor and the first and last dates its
+    aggregates hold, all None without a floor. Below the floor `updates` no
+    longer holds every row, so its earliest reading is no longer where the
+    data starts, and once every raw row is gone the aggregates alone say
+    where it does."""
+    floor = await retention_floor_async(conn, agency_id)
+    if floor is None:
+        return _Retained(None, None, None)
+    first, last = await conn.fetchrow(
+        "SELECT MIN(date), MAX(date) FROM agg_route_daily WHERE agency_id = $1", agency_id
+    )
+    return _Retained(floor, first, last)
+
+
+def _retained_pairs(retained: _Retained) -> list[tuple[str, str]]:
+    assert retained.floor is not None
+    pairs = [("first_aggregated_date", retained.first_aggregated.isoformat())] if retained.first_aggregated else []
+    return [*pairs, ("raw_readings_kept_from", retained.floor.isoformat())]
 
 
 async def describe_data(
@@ -275,14 +303,27 @@ async def describe_data(
         # forces a full-table scan; a single query also can't get both the
         # index-served min AND max at once, so this is split into two cheap
         # probes instead, combined in Python.
+        retained = await _retained_span(conn, agency_id)
         first_result = await ch.query(
             "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at ASC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
         if not first_result.result_rows:
+            if retained.floor is None or retained.first_aggregated is None:
+                return ToolResult(
+                    kind="empty",
+                    summary=_summary("mt_no_observations", locale),
+                )
             return ToolResult(
-                kind="empty",
-                summary=_summary("mt_no_observations", locale),
+                kind="kv",
+                summary=_summary(
+                    "mt_date_range_summary_floor",
+                    locale,
+                    first_date=retained.first_aggregated,
+                    last_date=retained.last_aggregated,
+                    floor=retained.floor,
+                ),
+                pairs=_retained_pairs(retained),
             )
         first_obs = first_result.result_rows[0][0]
         last_result = await ch.query(
@@ -310,19 +351,26 @@ async def describe_data(
             ("distinct_days", str(days)),
             ("total_rows", str(rows_n)),
         ]
-        return ToolResult(
-            kind="kv",
-            # Service days, as every date in this app is (pipeline.service_day):
-            # a 00:30 JST capture still belongs to the previous day, and a
-            # 06:00 JST capture is the previous UTC day.
-            summary=_summary(
-                "mt_date_range_summary",
+        # Service days, as every date in this app is (pipeline.service_day):
+        # a 00:30 JST capture still belongs to the previous day, and a
+        # 06:00 JST capture is the previous UTC day.
+        first_date = service_date_of(first_obs)
+        if retained.floor is None:
+            summary = _summary(
+                "mt_date_range_summary", locale, first_date=first_date, last_date=service_date_of(last_obs)
+            )
+        else:
+            if retained.first_aggregated is not None:
+                first_date = min(first_date, retained.first_aggregated)
+            pairs += _retained_pairs(retained)
+            summary = _summary(
+                "mt_date_range_summary_floor",
                 locale,
-                first_date=service_date_of(first_obs),
+                first_date=first_date,
                 last_date=service_date_of(last_obs),
-            ),
-            pairs=pairs,
-        )
+                floor=retained.floor,
+            )
+        return ToolResult(kind="kv", summary=summary, pairs=pairs)
 
     if kind == "agencies":
         # Tenant isolation: the caller only ever sees its own agency. The
@@ -367,7 +415,7 @@ async def describe_data(
         # tool's `deduped` CTE keeps "samples" meaning one consistent thing
         # across the whole Ask surface. This also applies ctx's dow/
         # time_band/service/routes scoping like every other ctx-driven Ask tool.
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
+        cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
         ch_result = await ch.query(
             f"""
             WITH {cte_sql}
@@ -477,6 +525,7 @@ async def describe_data(
         obs_last = last_result.result_rows[0][0] if last_result.result_rows else None
         obs_first = _as_utc(obs_first)
         obs_last = _as_utc(obs_last)
+        retained = await _retained_span(conn, agency_id)
         pairs = [
             ("routes", str(route_count)),
             ("stops", str(stop_count)),
@@ -490,6 +539,8 @@ async def describe_data(
                 obs_last.isoformat() if obs_last else "—",
             ),
         ]
+        if retained.floor is not None:
+            pairs += _retained_pairs(retained)
         return ToolResult(
             kind="kv",
             summary=_summary("mt_overview_summary", locale),
@@ -497,22 +548,7 @@ async def describe_data(
         )
 
     if kind == "metrics":
-        if locale == "en":
-            metric_list = [
-                ("avg_delay", "average delay (min)"),
-                ("p50_min", "median delay (min)"),
-                ("p90_min", "90th percentile delay (min)"),
-                ("on_time_pct", "on-time rate (%) — default threshold 60 s"),
-                ("samples", "observation sample count"),
-            ]
-        else:
-            metric_list = [
-                ("avg_delay", "平均遅延 (分)"),
-                ("p50_min", "中央値遅延 (分)"),
-                ("p90_min", "90 パーセンタイル遅延 (分)"),
-                ("on_time_pct", "定時率 (%) — 既定しきい値 60 秒"),
-                ("samples", "観測サンプル数"),
-            ]
+        metric_list = _METRIC_LABELS["en" if locale == "en" else "ja"]
         return ToolResult(
             kind="kv",
             summary=_summary("mt_metrics_summary", locale),
@@ -523,6 +559,24 @@ async def describe_data(
     return ToolResult(kind="empty", summary="impossible")
 
 
+# The metrics `describe_data kind=metrics` lists, labelled per locale.
+_METRIC_LABELS: dict[str, list[tuple[str, str]]] = {
+    "en": [
+        ("avg_delay", "average delay (min)"),
+        ("p50_min", "median delay (min)"),
+        ("p90_min", "90th percentile delay (min)"),
+        ("on_time_pct", "on-time rate (%) — by default the industry standard: ≤1 min early, ≤5 min late"),
+        ("samples", "observations (count)"),
+    ],
+    "ja": [
+        ("avg_delay", "平均遅延 (分)"),
+        ("p50_min", "中央値遅延 (分)"),
+        ("p90_min", "90 パーセンタイル遅延 (分)"),
+        ("on_time_pct", "定時率 (%) — 既定は業界標準 (早発1分・遅延5分以内)"),
+        ("samples", "観測数"),
+    ],
+}
+
 _CAPABILITY_EXAMPLES_JP = {
     "single_route": "路線22171の遅延 / A1の運行情報",
     "ranking": "遅延ワースト10 / 定時率TOP5 / 5分超過の多い路線",
@@ -531,7 +585,7 @@ _CAPABILITY_EXAMPLES_JP = {
     "on_time": "5分以内の定時率 / 定時率ランキング / しきい値別の率",
     "stop_level": "区間別の遅延ホットスポット / どの停留所で遅延が蓄積 / 停留所ごとの遅れ",
     "causal": "なぜ遅れる？どこで発生 / 時間帯・曜日パターン / 時刻表の妥当性・余裕時間 / 慢性的か最近悪化か",
-    "meta": "どんな路線がある？ / いつからのデータ？ / サンプル数の多い路線",
+    "meta": "どんな路線がある？ / いつからのデータ？ / 観測数の多い路線",
 }
 
 _CAPABILITY_EXAMPLES_EN = {
@@ -542,7 +596,7 @@ _CAPABILITY_EXAMPLES_EN = {
     "on_time": "on-time rate within 5min / on-time ranking / by threshold",
     "stop_level": "per-segment delay hotspots / which stop the delay builds up at / delay by stop",
     "causal": "why is it late / time-of-day and dow pattern / schedule padding realism / chronic vs recent shift",
-    "meta": "what routes exist? / since when do we have data? / top routes by samples",
+    "meta": "what routes exist? / since when do we have data? / top routes by observations",
 }
 
 

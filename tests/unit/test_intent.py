@@ -147,55 +147,25 @@ def test_date_object_args_serialize_to_iso():
 # --- derive_confidence ---
 
 
-def test_derive_confidence_embedding_only():
-    """With no LLM self-reported value, the confidence is purely embedding-derived."""
+def test_derive_confidence_without_a_report_is_the_ceiling():
     from pipeline.query.intent import derive_confidence
 
-    # Strong NN match (cosine distance 0.05) → high confidence
-    assert derive_confidence(nn_distance_same_tool=0.05) == pytest.approx(0.95, abs=1e-6)
-    # Weak match (distance 0.6) → low
-    assert derive_confidence(nn_distance_same_tool=0.6) == pytest.approx(0.4, abs=1e-6)
-    # Floor at 0.0
-    assert derive_confidence(nn_distance_same_tool=1.5) == 0.0
+    assert derive_confidence() == 0.4
+    assert derive_confidence(None) == 0.4
 
 
-def test_derive_confidence_no_same_tool_match_floor():
-    """If no chunk with the same tool exists in the NN window, default to 0.4 floor."""
+def test_derive_confidence_caps_the_llm_self_report():
     from pipeline.query.intent import derive_confidence
 
-    assert derive_confidence(nn_distance_same_tool=None) == 0.4
-
-
-def test_derive_confidence_llm_caps_embedding():
-    """LLM self-reported confidence caps the embedding-derived score (min of the two)."""
-    from pipeline.query.intent import derive_confidence
-
-    # Strong embedding (0.95) but LLM only 0.3 → result 0.3
-    assert derive_confidence(nn_distance_same_tool=0.05, llm_self_reported=0.3) == pytest.approx(0.3, abs=1e-6)
-    # Weak embedding (0.4 floor) and high LLM (0.9) → result 0.4 (the lower wins)
-    assert derive_confidence(nn_distance_same_tool=None, llm_self_reported=0.9) == 0.4
+    assert derive_confidence(0.3) == pytest.approx(0.3, abs=1e-6)
+    assert derive_confidence(0.9) == 0.4
 
 
 def test_derive_confidence_clamps_to_unit_interval():
-    """LLM > 1.0 or < 0.0 must clamp before the min."""
     from pipeline.query.intent import derive_confidence
 
-    assert derive_confidence(nn_distance_same_tool=0.05, llm_self_reported=1.5) == pytest.approx(0.95, abs=1e-6)
-    assert derive_confidence(nn_distance_same_tool=0.05, llm_self_reported=-0.5) == 0.0
-
-
-def test_build_schema_defaults_match_canonical_defaults():
-    """A builder field's advertised default must be what dispatch uses when the
-    field is left unset, so a metric-dependent default cannot be advertised."""
-    from api.routers.ask import _BUILD_TOOL_META
-    from pipeline.query.intent import _TOOL_DEFAULTS
-
-    for tool, meta in _BUILD_TOOL_META.items():
-        for f in meta["fields"]:
-            if "default" in f:
-                canonical = _TOOL_DEFAULTS[tool].get(f["key"])
-                assert not callable(canonical), (tool, f["key"])
-                assert f["default"] == canonical, (tool, f["key"])
+    assert derive_confidence(1.5) == 0.4
+    assert derive_confidence(-0.5) == 0.0
 
 
 @pytest.mark.parametrize("tool", ["on_time", "on_time_rate"])
@@ -207,7 +177,7 @@ def test_on_time_tools_collapse_their_best_first_default(tool):
     assert canonicalize(tool, {"k": 5, "best_first": False}) != omitted
 
 
-async def test_explicit_all_services_survives_canonicalization_and_dispatches_the_same(monkeypatch):
+async def test_explicit_all_services_survives_canonicalization_and_dispatches_the_same(monkeypatch, unstamped_tools):
     """With the UI on 平日, an explicit service_type='all' ranks every service,
     where leaving it out keeps 平日. Canonicalization must not turn the first
     into the second, or the intent-cache path answers a different question

@@ -292,7 +292,7 @@ function RecordCard({
       <p className="report-footnote">{t("reports.certificate.reading_note")}</p>
       {!trip.matched && <p className="report-footnote">{t("reports.certificate.unmatched_note")}</p>}
       <p className="cert-card__disclaimer">{t("reports.certificate.disclaimer", { operator: agencyName })}</p>
-      <button type="button" className="btn-ghost cert-card__print" onClick={() => window.print()}>
+      <button type="button" className="btn btn--secondary btn--sm cert-card__print" onClick={() => window.print()}>
         {t("reports.print")}
       </button>
     </section>

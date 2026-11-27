@@ -2,12 +2,18 @@ import type { RouteTableOrder, RouteTableSort } from "../routes/destinations";
 import type { DowFilter, TimeBand } from "./scope";
 import type { Band } from "./timeBands";
 
+/** Which figures an agency's feed can support (pipeline.reports.capability):
+ *  `basic` feeds carry on-time data only, so the timetable-matched figures
+ *  are stated as outside the tier rather than given a pipeline reason. */
+export type CapabilityTier = "full" | "basic";
+
 export type Agency = {
   agency_id: number;
   agency_name: string;
   feed_url: string;
   static_url: string | null;
   latest_data_date: string | null;
+  capability_tier: CapabilityTier;
 };
 
 type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
@@ -194,19 +200,6 @@ export type RouteShapeResponse = {
   unobserved_stops?: UnobservedStop[];
 };
 
-/** One route at the hour, pooled across every service id it ran under. */
-type PeakHourBreakdownRoute = {
-  route_code: string;
-  avg_min: number;
-  samples: number;
-};
-
-export type PeakHourBreakdown = {
-  hour: number;
-  dow: number | null;
-  routes: PeakHourBreakdownRoute[];
-};
-
 type ResponseCtx = {
   from: string;
   to: string;
@@ -303,15 +296,128 @@ export type ReportMeta = {
  *  report or comparison view's numbers actually used -- always present, but
  *  `preset`/`early_tolerance_sec`/`late_tolerance_sec` are `null` for report
  *  types with no on-time/late tolerance concept (e.g. `ranking`, `trend`).
+ *  `method_version` names the analysis method the figures were made with;
+ *  `source` whether they came from the aggregates or a live scan;
+ *  `built_at` (ISO instant) when the aggregates were last built, `null` for a
+ *  live scan or when no build is recorded.
  *  See pipeline/reports/definition.py, the single source of truth these
  *  values are resolved from. */
 export type DefinitionMeta = {
   preset: string | null;
   early_tolerance_sec: number | null;
   late_tolerance_sec: number | null;
+  /** How many seconds early a departure must be for the early-departure rate
+   *  to count it, on the reports that show that rate; null elsewhere. */
+  early_departure_sec: number | null;
   exclusion_threshold_sec: number;
   measurement_point: string;
   dedup_rule: string;
+  method_version: string;
+  source: "aggregates" | "live";
+  built_at: string | null;
+  /** What the figures are made from: `"feed_prediction"`, the delays the
+   *  operator's feed last predicted for each stop. A string, so a basis this
+   *  build has no words for is shown as sent. */
+  value_basis: string;
+  /** The timetables in force over the request's days, each listed agency's
+   *  adding up to the range; null when the API named none. */
+  timetable_versions: TimetableVersion[] | null;
+  /** Which ingest source each of the request's days' observations came from,
+   *  per listed agency, adding up to the range; null when the API named none. */
+  source_mix: SourceMix[] | null;
+  /** Each listed agency's realtime completeness and clamp share over the
+   *  period; null when the API stated none, and absent from a definition
+   *  saved before the stamp carried them. */
+  feed_quality?: FeedQuality[] | null;
+  /** Beside aggregates, the period's dates before each listed agency's
+   *  retention floor, with the method each was frozen under, whether or not
+   *  it is the current one; null when the period reaches no such date, for a
+   *  live scan, and absent from a definition saved before the stamp carried
+   *  them. */
+  pre_floor_methods?: PreFloorMethod[] | null;
+  /** The newest prediction validation recorded for each listed agency,
+   *  whatever the request's dates; null when none is recorded, and absent
+   *  from a definition saved before the stamp carried them. */
+  prediction_validations?: PredictionValidation[] | null;
+};
+
+/** An agency's feed's kept delays held against the passages its vehicles
+ *  were observed making on the service dates `from_date` to `to_date`:
+ *  `on_time_offset_pt` is how many points the on-time rate from the kept
+ *  delays stood above the one from the observed delays, negative when below,
+ *  unrounded, under the window the tolerances name (`early_tolerance_sec`
+ *  null: any early departure). See pipeline/reports/definition.py's
+ *  PredictionValidation. */
+export type PredictionValidation = {
+  agency_id: number;
+  from_date: string;
+  to_date: string;
+  early_tolerance_sec: number | null;
+  late_tolerance_sec: number;
+  on_time_offset_pt: number;
+};
+
+/** Dates of the period before an agency's retention floor, whose aggregates
+ *  stand as analyze last built them, and the method they were built under:
+ *  the one in force when the drop that made them final was recorded. A null
+ *  `method_version` means that drop recorded none, so the method is unknown.
+ *  See pipeline/reports/definition.py's PreFloorMethod. */
+export type PreFloorMethod = {
+  agency_id: number;
+  from_date: string;
+  to_date: string;
+  method_version: string | null;
+};
+
+/** Why a feed-quality coverage is null: no observation in the period, or why
+ *  the agencies board cannot measure it (network.coverage_unknown_why). */
+type CoverageMissing = "no_data" | "unreadable" | "unmatched" | "no_plan" | "no_plan_observed";
+
+/** An agency's realtime completeness (`coverage_pct`, `observed_trips` of
+ *  `coverage_planned_trips`, the agencies board's observation coverage) and
+ *  the share of readings dropped as implausible (`clamp_pct`) over the
+ *  period, for the whole agency, by the comparability gate's own rules. A
+ *  null figure comes with its reason, never as 0. `coverage_low` and
+ *  `clamp_high` are whether the gate flags the figure, against the
+ *  thresholds in force when the stamp was made. See
+ *  pipeline/reports/definition.py's FeedQuality. */
+export type FeedQuality = {
+  agency_id: number;
+  coverage_pct: number | null;
+  observed_trips: number | null;
+  coverage_planned_trips: number | null;
+  coverage_missing: CoverageMissing | null;
+  coverage_low: boolean;
+  clamp_pct: number | null;
+  clamp_missing: "no_data" | null;
+  clamp_high: boolean;
+  min_coverage_pct: number;
+  max_clamp_pct: number;
+};
+
+/** How many of the request's days an agency's observations came mostly from
+ *  the collector's archive (every poll it made) or from the live path (only
+ *  what the app received in real time), and on how many none was recorded. */
+export type SourceMix = {
+  agency_id: number;
+  archive_days: number;
+  live_days: number;
+  none_days: number;
+};
+
+/** A timetable an agency's observations were ingested against, and on how
+ *  many of the request's days it was the one most of them carried. `name` is
+ *  the loaded zip's version name and `fetched_on` (ISO date) the day it says
+ *  the zip was fetched; `name` is null for the days with none recorded.
+ *  `content_hash` is the first digits of the hash of the content the
+ *  timetable archive maps the name to: null for a name it does not map, and
+ *  absent from a definition saved before the stamp carried it. */
+export type TimetableVersion = {
+  agency_id: number;
+  name: string | null;
+  fetched_on: string | null;
+  days: number;
+  content_hash?: string | null;
 };
 
 /** A report cell the backend computes as a Python `Decimal` (chosen so its
@@ -354,8 +460,9 @@ type OnTimeRow = [
 
 /** `route_table` -- the Routes screen's table, one row per route sorted by
  *  the request's `sort`. `late5_pct` and `late5_count` are the departures
- *  over five minutes late; the trailing pair is the on-time rate's caveat,
- *  as on `on_time` rows. */
+ *  over five minutes late; `early_pct` the departures more than the
+ *  definition's `early_departure_sec` early; the trailing pair is the
+ *  on-time rate's caveat, as on `on_time` rows. */
 type RouteTableRow = [
   route_code: string,
   avg_min: DecimalCell,
@@ -363,6 +470,7 @@ type RouteTableRow = [
   late5_pct: DecimalCell,
   late5_count: number,
   samples: number,
+  early_pct: DecimalCell,
   low_confidence: boolean,
   margin_pp: number,
 ];
@@ -400,11 +508,14 @@ type DowRankingRow = [
 ];
 
 /** `council_summary` -- exactly one row. `on_time_pct`/`avg_delay_min`/
- *  `samples` follow the whole scope (`scope_applied`); `planned_trips` onward
- *  cover the whole agency for the dates (`delivered_scope_applied`).
- *  `on_time_pct`/`avg_delay_min` are null together when nothing matched the
- *  range; `executed_trips`/`service_delivered_pct` are null together when the
- *  delivered ratio isn't computable, which is never the same as zero. */
+ *  `samples`/`early_departure_pct` follow the whole scope (`scope_applied`);
+ *  `planned_trips` through `service_delivered_pct` cover the whole agency for
+ *  the dates (`delivered_scope_applied`). `on_time_pct`/`avg_delay_min`/
+ *  `early_departure_pct` are null together when nothing matched the range;
+ *  `executed_trips`/`service_delivered_pct` are null together when the
+ *  delivered ratio isn't computable, which is never the same as zero.
+ *  `early_departure_pct` counts the departures more than the definition's
+ *  `early_departure_sec` early. */
 export type CouncilSummaryRow = [
   on_time_pct: number | null,
   avg_delay_min: number | null,
@@ -412,6 +523,7 @@ export type CouncilSummaryRow = [
   planned_trips: number,
   executed_trips: number | null,
   service_delivered_pct: number | null,
+  early_departure_pct: number | null,
 ];
 
 /** `delay_certificate` -- one row per physical trip-run exceeding the
@@ -533,6 +645,10 @@ type ReportEnvelope<T extends ReportType, Row> = {
   covered_days?: number | null;
   window_days?: number | null;
   delivered_missing?: DeliveredMissing | null;
+  /** council_summary only: whether the agencies board ranks this agency over
+   *  the same dates. Null for every other report, while the board's cached
+   *  result does not list the agency yet, and when the board cannot be built. */
+  comparability?: CouncilComparability | null;
   report_type: T;
   rendered_at: string;
   text: string;
@@ -562,11 +678,39 @@ type ReportEnvelope<T extends ReportType, Row> = {
    *  still showing this response while another sort loads labels them by. */
   sort?: RouteTableSort | null;
   order?: RouteTableOrder | null;
+  /** route_table and on_time only (null elsewhere): each listed route's own
+   *  figures over the 90 days before the period, under the same scope and
+   *  on-time window. */
+  reference?: RouteReferences | null;
+};
+
+/** One route's figures over the reference window: null whenever `reason`
+ *  names why the window cannot stand as the route's usual level. */
+export type RouteReference = {
+  on_time_pct: number | null;
+  avg_min: number | null;
+  samples: number;
+  reason: OverviewReferenceReason | null;
+};
+
+/** The reference window of a route list, and each listed route's figures over
+ *  it. `reason` is set when no route can be compared: the window as a whole
+ *  falls short, or it is `not_aggregated`, under a time band or an on-time
+ *  window the aggregates cannot split, either of which would need a live scan
+ *  of the whole window. That is decided before anything is read, so its
+ *  counts are 0. */
+export type RouteReferences = Omit<OverviewHeadlineReference, "avg_min" | "delta_min" | "delta_pct"> & {
+  routes: Record<string, RouteReference>;
 };
 
 /** Discriminated on `report_type`: each report's `rows` element type is
  *  derived from what api/routers/reports.py actually returns for it, so a
  *  consumer narrows on `report_type` instead of casting `rows` blind. */
+/** A report's figures without its prose, as a route page snapshot stores the
+ *  agency's route lists: written in no language, so kept once. */
+export type ReportFigures = WithoutProse<ReportResponse>;
+type WithoutProse<R> = R extends unknown ? Omit<R, "text"> : never;
+
 export type ReportResponse =
   | ReportEnvelope<"route_table", RouteTableRow>
   | ReportEnvelope<"ranking" | "ranking_best", RankingRow>
@@ -579,10 +723,11 @@ export type ReportResponse =
   | ReportEnvelope<"council_summary", CouncilSummaryRow>
   | ReportEnvelope<"delay_certificate", DelayCertificateRow>;
 
-/** One high-frequency route's pooled Excess Waiting Time / coefficient of
- *  variation / long-gap rate over the request's range -- see
- *  pipeline/reports/headway_quality.py's compute_headway_quality. A
- *  non-high-frequency route never appears in this list at all. */
+/** One route's pooled Excess Waiting Time / coefficient of variation /
+ *  long-gap rate over the days in the request's range that it is
+ *  high-frequency on, each by the timetable in force that day -- see
+ *  pipeline/reports/headway_quality.py's compute_headway_quality. A route
+ *  high-frequency on no such day never appears in this list at all. */
 type HeadwayQualityRow = {
   route_code: string;
   ewt_sec: number | null;
@@ -591,6 +736,10 @@ type HeadwayQualityRow = {
   samples: number;
   /** The class of day pooled, its main timetable's; null when every day is. */
   day_type?: OverviewDayType | null;
+  /** Gaps under a quarter of the scheduled headway, of those judged; null when not measured. */
+  bunched?: number | null;
+  bunching_judged?: number | null;
+  bunching_rate?: number | null;
 };
 
 export type HeadwayQualityResponse = {
@@ -598,6 +747,10 @@ export type HeadwayQualityResponse = {
   rows: HeadwayQualityRow[];
   /** Routes with data in range but none of it on a day of their main timetable. */
   routes_off_timetable?: number;
+  /** Days in range left out because the timetable in force on them has no kept scheduled headways. */
+  days_timetable_not_kept?: number;
+  /** Days pooled whose timetable keeps its median but not its scheduled wait, so the routes pooling them show no EWT. */
+  days_scheduled_wait_not_kept?: number;
   /** Why `rows` is bound to be empty: the timetable has no high-frequency
    *  route, or the feed's fields aren't trusted. Null when the rows are worth reading. */
   unavailable_reason?: "no_high_frequency_routes" | CoverageGapReason | null;
@@ -615,26 +768,47 @@ export type HeadwayQualityResponse = {
  *
  *  `actual_value`/`achievement_rate`/`estimated_bonus_deduction` are always
  *  null together (insufficient data, or a zero threshold_value making the
- *  ratio undefined). `metric_scope` is `"agency"` for
- *  `vehicle_km_delivered_pct` (no per-route breakdown exists -- every route
- *  configured with it reads its own agency's rate) and `"route"` for
- *  `ewt_sec`. */
+ *  ratio undefined). Every figure is the route's own: a service-delivered or
+ *  vehicle-km row reads the route's service-delivered rate over the dates.
+ *  `meets` says whether the actual value is at least as good as the
+ *  threshold, null exactly when `actual_value` is. `not_judged` says why an
+ *  on-time, service-delivered or vehicle-km row has no figure: too few
+ *  observations or planned trips in the scope (the count and the floor a
+ *  verdict needs), a feed that records zero delay only, a period with a day
+ *  whose plan by route was never saved, a timetable without route shapes, or
+ *  the agency's own reason for having no service-delivered rate. Null on a
+ *  judged row and on every excess-wait row. */
 export type PerformanceStandardRow = {
   route_code: string;
-  metric_type: "ewt_sec" | "vehicle_km_delivered_pct";
-  metric_scope: "route" | "agency";
+  metric_type: "ewt_sec" | "vehicle_km_delivered_pct" | "on_time_pct" | "service_delivered_pct";
   threshold_value: number;
   bonus_malus_rate: number;
   actual_value: number | null;
   achievement_rate: number | null;
   estimated_bonus_deduction: number | null;
+  meets: boolean | null;
+  not_judged: {
+    reason:
+      | "too_few_observations"
+      | "zero_delay_feed"
+      | "too_few_planned_trips"
+      | "route_plan_unknown"
+      | "no_shapes"
+      | Exclude<DeliveredMissing, "unreadable">;
+    observations: number | null;
+    floor: number | null;
+    planned_trips?: number | null;
+  } | null;
 };
 
+/** `on_time_definition` is the on-time definition the `on_time_pct` rows were
+ *  judged on, null when there are none. */
 export type PerformanceStandardsResponse = {
   scope_applied?: ScopeApplied;
   rows: PerformanceStandardRow[];
   ctx: ResponseCtx;
   disclaimer: string;
+  on_time_definition: DefinitionMeta | null;
 };
 
 /** The one documented representative observation station an agency's rain-
@@ -698,25 +872,6 @@ export type WeatherDelayResponse = {
   disclaimer: string;
   attribution: string;
   buckets?: WeatherDelayBucket[];
-};
-
-export type Suggestion = {
-  report_type: string;
-  route_code: string;
-  reason_text: string;
-  severity: "notable" | "normal";
-  // The evaluation window the rule that produced this suggestion actually
-  // used (ISO date strings) -- pin click-through navigation to this window
-  // rather than the user's ambient Analysis tab filter.
-  from_date: string;
-  to_date: string;
-};
-
-/** GET /:agency/reports/suggest. `suggestion` is null when no rule produced a
- *  pick — an object body rather than a bare `null`, so the endpoint has
- *  somewhere to say more about the empty case later. */
-export type SuggestionEnvelope = {
-  suggestion: Suggestion | null;
 };
 
 export type TrendDay = {
@@ -791,22 +946,6 @@ export type ToolResult = {
   pairs?: [string, unknown][];
 };
 
-export type AskResponse = {
-  answer: string;
-  tool_call: { name: string; arguments: Record<string, unknown> } | null;
-  result: ToolResult | null;
-  ctx: ResponseCtx;
-  // Canonical intent fields — null when ASK_INTENT_CACHE_ENABLED is off
-  signature_hash?: string | null;
-  confidence?: number | null;
-  canonical_args?: Record<string, unknown> | null;
-  cache_outcome?: CacheOutcome | null;
-};
-
-// Canonical intent + guided UX
-
-type CacheOutcome = "hit" | "miss" | "bypass";
-
 export type FilterCtx = {
   dow?: DowFilter;
   time_band?: string;
@@ -845,16 +984,38 @@ export type ConvMessage = {
     pairs: unknown | null;
   } | null;
   rendered_summary: string | null;
-  /** The dow/time_band/service the message's dispatch actually ran under —
-   *  distinct from `args` (the tool's own arguments) and from the live,
-   *  editable conversation `filter_ctx`, which can change after this
-   *  message was sent. `null` for user messages and for a dispatch-free
-   *  assistant reply (e.g. an LLM-grounded follow-up). */
-  conditions?: { dow: string; time_band: string; service: string } | null;
+  /** The scope the message's dispatch actually ran under — distinct from
+   *  `args` (the tool's own arguments) and from the live, editable
+   *  conversation `filter_ctx`, which can change after this message was
+   *  sent. `null` for user messages and for a dispatch-free assistant reply
+   *  (e.g. an LLM-grounded follow-up). */
+  conditions?: CardConditions | null;
+  /** The method stamp the report computing this card's figures carries, as
+   *  the card was answered. `null` when no report computes them, and absent
+   *  from a card saved before cards carried one: neither shows a stamp. */
+  definition?: DefinitionMeta | null;
   created_at: string;
 };
 
+/** A card's recorded scope. The period and routes are recorded only for a card
+ *  answered since they were, so a reader must allow for their absence. */
+export type CardConditions = {
+  dow?: string;
+  time_band?: string;
+  service?: string;
+  from_date?: string;
+  to_date?: string;
+  routes?: string[];
+};
+
 export type AppendMessageResult = { user: ConvMessage; assistant: ConvMessage };
+
+/** POST /ask/card: a signed-out card's answer, the assistant fields a
+ *  signed-in thread stores, for the browser to keep in its own thread. */
+export type CardAnswer = Pick<
+  ConvMessage,
+  "tool" | "args" | "signature_hash" | "result" | "rendered_summary" | "conditions" | "definition"
+>;
 
 // Anonymous (localStorage) shape — mirrors a Conversation + inline messages
 export type AnonThread = {
@@ -895,7 +1056,7 @@ export type RoutesResponse = {
 
 export interface ForecastHeatmapCell {
   dow: number; // 1=Mon .. 7=Sun (ISODOW)
-  hour: number; // 0..23
+  hour: number; // 0..23, then 24 and on past midnight on the service day's clock
   expected_avg_min: number | null;
   samples: number;
   low_confidence: boolean;
@@ -915,7 +1076,7 @@ export interface ForecastDay {
 export interface ForecastHeatmap {
   scope_applied?: ScopeApplied;
   route: string;
-  cells: ForecastHeatmapCell[]; // always 168 (7×24)
+  cells: ForecastHeatmapCell[]; // 7 × the route's hours: 168, more when it runs past midnight
   /** The dates this route's ML cells forecast, oldest first. */
   forecast_days: ForecastDay[];
   /** First and last analyzed day this route's past averages pool; null when it has none. */
@@ -982,13 +1143,39 @@ export type OverviewHeadline = {
   delta_min: number | null;
   delta_pct: number | null;
   samples: number;
-  /** ISO date of the start of the 7-day window the headline covers
-   *  (always anchored at ctx.to and 7 days wide, regardless of the
-   *  full ctx range). Use this for the eyebrow label. */
+  /** ISO date of the start of the window the headline covers: the period's
+   *  first day. The baseline is the same number of days just before it. */
   window_from: string;
-  /** ISO date of the end of the headline 7-day window (anchored at the
-   *  latest date that has data inside ctx, not necessarily ctx.to). */
+  /** ISO date of the end of the headline's window: the latest date that has
+   *  data inside the period, not necessarily its last day. */
   window_to: string;
+  reference?: OverviewHeadlineReference;
+};
+
+/** Why a reference has no figure. `not_aggregated`: a time of day together
+ *  with a routes filter, which no aggregate holds by date. */
+type OverviewReferenceReason = "no_data" | "insufficient_days" | "insufficient_samples" | "not_aggregated";
+
+/** The headline's figure over the `days` days before the period, under the
+ *  same scope: the agency's own usual level. */
+export type OverviewHeadlineReference = {
+  /** Null whenever `reason` is set: the figure is withheld, not zero. */
+  avg_min: number | null;
+  /** The headline's change from it, as the baseline's `delta_min` / `delta_pct`. */
+  delta_min: number | null;
+  delta_pct: number | null;
+  samples: number;
+  window_from: string;
+  window_to: string;
+  days: number;
+  /** The window's days the scope's day-of-week and service filters keep. */
+  days_selected: number;
+  /** Of those, the days the agency's feed holds data on. */
+  days_collected: number;
+  /** The fewest collected days, and observations, the figure needs. */
+  min_days: number;
+  min_samples: number;
+  reason: OverviewReferenceReason | null;
 };
 
 type OverviewMover = {
@@ -998,9 +1185,9 @@ type OverviewMover = {
   /** Null when the previous-window average is too close to zero for a
    *  percentage change to be a meaningful figure (see backend). */
   delta_pct: number | null;
-  /** Avg delay (min) in the current 7-day window. */
+  /** Avg delay (min) in the headline's window. */
   current_avg_min: number;
-  /** Avg delay (min) in the prior 7-day window. */
+  /** Avg delay (min) in the same number of days just before it. */
   previous_avg_min: number;
   streak_weeks: number;
   sparkline_points: number[];
@@ -1023,42 +1210,25 @@ export type OverviewConcentration = {
   rest_route_count?: number;
 };
 
-export type OverviewTopDelayedRoute = {
-  route_code: string;
-  route_short_name: string | null;
-  avg_min: number;
-  /** Change (minutes) from the same-length window before; null when the
-   *  route was too thinly observed there to compare. */
-  delta_min?: number | null;
-};
-
 type OverviewBandCount = {
   count: number;
-  /** The band's lower bound, in minutes. */
+  /** The bound, in minutes, the count is of routes averaging at least. */
   threshold_min: number;
 };
 
-/** Routes in each routes-to-check band, over every route rather than only
- *  the listed ones. */
-export type OverviewBandCounts = {
-  severe: OverviewBandCount;
-  moderate: OverviewBandCount;
-  mild: OverviewBandCount;
-};
-
+/** The Pulse hero's late-route count over the headline's window. */
 type OverviewTopDelayed = {
-  routes: OverviewTopDelayedRoute[];
-  delayed_count: number;
-  /** The average delay (minutes) at or above which a route was counted. */
-  delayed_threshold_min: number;
-  band_counts: OverviewBandCounts;
-  /** The routes every count is out of: those observed at least
-   *  `min_samples` times in the headline's window. */
+  band_counts: { severe: OverviewBandCount };
+  /** The routes the count is out of, those observed at least `min_samples`
+   *  times: counted over the same window, scope, floor and left-out routes as
+   *  the Routes table. */
   route_count: number;
   min_samples: number;
 };
 
 export type OverviewPeakHour = {
+  /** Hours 0..23, and on through the latest hour past midnight (24, 25, …)
+   *  the profile has. */
   by_hour: (number | null)[];
   peak_hour: number;
   peak_avg_min: number;
@@ -1093,17 +1263,14 @@ export type OverviewServiceSplitDay = {
 export type OverviewSummary = {
   scope_applied?: ScopeApplied;
   headline: OverviewHeadline;
-  movers: OverviewMovers;
+  /** Null, like the headline's baseline, when the window before the period could not be read. */
+  movers: OverviewMovers | null;
   concentration: OverviewConcentration;
   top_delayed: OverviewTopDelayed;
   peak_hour: OverviewPeakHour | null;
-  /** Weekday-only 24-hour profile, used by the peak-hour modal split. */
-  peak_hour_weekday?: OverviewPeakHour | null;
-  /** Weekend-only 24-hour profile, used by the peak-hour modal split. */
-  peak_hour_weekend?: OverviewPeakHour | null;
   /** Every bucket the agency is split into, in display order. */
   service_split: OverviewServiceSplitEntry[];
-  /** One row per date with data, tagged with its day type; used by the service-split modal. */
+  /** One row per date with data, tagged with its day type: where the headline's last day stands. */
   service_split_daily?: OverviewServiceSplitDay[];
   sparkline_points: number[];
   /** The window's sample-weighted mean delay; null without observations. */
@@ -1119,11 +1286,70 @@ export type StopBounds = [number, number, number, number];
 /** `GET /api/{agency_id}/stops/bounds`: null for an agency with no located stop. */
 export type StopBoundsResponse = { bounds: StopBounds | null };
 
+/** Every stop any returned trip visits, columnar: `lat[i]`/`lon[i]` go with
+ *  `id[i]`. A stop with no current static match keeps null coordinates. */
+type ReplayStops = {
+  id: string[];
+  lat: (number | null)[];
+  lon: (number | null)[];
+};
+
+type ReplayRoute = {
+  code: string;
+  name: string;
+  /** Always null: no route carries a color in this schema yet. */
+  color: string | null;
+};
+
+/** One trip's observed stops over the requested window, in schedule order.
+ *  `stop_idx`, `t` and `delay` are parallel arrays indexing into that same
+ *  response's own `stops` — an index is only meaningful against the `stops`
+ *  it was returned with, never across two different windows. */
+export type ReplayTrip = {
+  trip_id: string;
+  route_code: string | null;
+  stop_idx: number[];
+  /** Seconds since the service day's 00:00: scheduled second plus delay. */
+  t: number[];
+  delay: number[];
+};
+
+export type ReplayHour = { hour: number; departures: number };
+
+/** `GET /api/agencies/{agency_id}/replay`: one agency's buses over a bounded
+ *  window of one past service day. */
+export type ReplayResponse = {
+  /** The service day replayed, or null when the agency has no observations at all. */
+  date: string | null;
+  /** The window replayed, [from_hour, to_hour) in service-day hours; null
+   *  when there is no day to replay. */
+  from_hour: number | null;
+  to_hour: number | null;
+  /** Up to the agency's last 14 service days with observations, newest first. */
+  available_dates: string[];
+  /** Observed departures per service-day hour across the whole day, not just
+   *  this window; hours past midnight run on as 24, 25, … Ascending by hour,
+   *  only hours with departures; empty when the day has no hourly aggregate
+   *  yet. */
+  departures_by_hour: ReplayHour[];
+  stops: ReplayStops;
+  routes: ReplayRoute[];
+  trips: ReplayTrip[];
+};
+
+/** Why the agencies board leaves an agency unranked: the first check of
+ *  pipeline.reports.comparability it fails, in that module's order. */
+type ComparableReason = "no_data" | "coverage_unknown" | "coverage_low" | "ci_wide" | "clamp_high" | "predicted_basis";
+
 export type NetworkAgencyRow = {
   agency_id: number;
   agency_name: string;
   avg_delay_min: number | null;
   on_time_pct: number | null;
+  /** on_time_pct's 95% interval in percent, counting trips rather than
+   *  stop events; null without a trip count. */
+  ci_low: number | null;
+  ci_high: number | null;
   samples: number;
   raw_samples: number;
   clamp_count: number;
@@ -1142,6 +1368,15 @@ export type NetworkAgencyRow = {
   /** Why service_delivered_pct is null, or null beside a rate:
    *  `unreadable` means planned_trips' 0 is a failed read, not a plan. */
   delivered_missing: DeliveredMissing | null;
+  capability_tier: CapabilityTier;
+  /** Observation coverage and its two counts; docs/features/network-tab.md
+   *  ("Comparability gate") defines them and when each is null. */
+  observed_trips: number | null;
+  coverage_planned_trips: number | null;
+  coverage_pct: number | null;
+  /** Whether the board ranks this agency; otherwise the first check it fails. */
+  comparable: boolean;
+  comparable_reason: ComparableReason | null;
   /** False whenever this agency has no manually-configured ridership weights
    * at all -- the weighted-view toggle must key off this, not off
    * weighted_on_time_pct being null (a configured agency with zero samples
@@ -1164,11 +1399,45 @@ export type NetworkAgencyRow = {
   vehicle_km_delivered_pct: number | null;
 };
 
+/** The comparability gate's thresholds, each inclusive. */
+export type ComparabilityThresholds = {
+  min_coverage_pct: number;
+  max_ci_half_width_pp: number;
+  max_clamp_pct: number;
+};
+
+/** The council report's verdict: whether the agencies board would rank this
+ *  agency over the report's dates, with the figures the gate judged. It
+ *  reads the board's figures (the whole agency, on the board's on-time
+ *  definition), so no filter or tolerance on the report changes it. */
+type CouncilComparability = {
+  comparable: boolean;
+  /** The first check the gate fails; null beside `comparable`. */
+  reason: ComparableReason | null;
+  coverage_pct: number | null;
+  observed_trips: number | null;
+  coverage_planned_trips: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  clamp_pct: number | null;
+  /** The board's own plan figures for the agency, which say why coverage
+   *  could not be measured, so a verdict's reason comes from one read. */
+  planned_trips: number;
+  delivered_missing: DeliveredMissing | null;
+  thresholds: ComparabilityThresholds;
+};
+
 export type NetworkSummary = {
   scope_applied?: ScopeApplied;
   from: string;
   to: string;
+  /** Comparable agencies first, worst delay first; then the rest in
+   *  agency_id order, which the board re-sorts by name. */
   agencies: NetworkAgencyRow[];
+  comparability: ComparabilityThresholds;
+  /** The newest day any agency has observations for: where every row's
+   *  observation coverage stops. Null when none has any. */
+  coverage_through: string | null;
   definition: DefinitionMeta;
 };
 
@@ -1255,4 +1524,226 @@ export interface MlEvaluations {
   history: MlEvaluationWeek[];
   forecast_in_use: boolean;
   live: MlLiveScorecard | null;
+}
+
+/** The day types a timetable revision is compared on (api/routers/timetable_revisions.py). */
+export type RevisionDayType = "weekday" | "saturday" | "sunday_holiday";
+
+/** One side of a timetable revision: the version first in force over its run
+ *  of service dates, its short content hash, and that run. */
+interface RevisionVersion {
+  version: string;
+  content: string;
+  first_day: string;
+  last_day: string;
+}
+
+export interface TimetableRevision {
+  first_day: string;
+  before: RevisionVersion;
+  after: RevisionVersion;
+}
+
+export interface TimetableRevisionsResponse {
+  revisions: TimetableRevision[];
+}
+
+interface RevisionHourChange {
+  hour: number;
+  before: number;
+  after: number;
+}
+
+/** A stop's departures on one day type's typical day before and after a
+ *  revision. Times are seconds after the service day's midnight. */
+export interface RevisionStopChange {
+  stop_id: string;
+  stop_name: string | null;
+  day_type: RevisionDayType;
+  before: number;
+  after: number;
+  lost: number;
+  gained: number;
+  first_before: number | null;
+  first_after: number | null;
+  last_before: number | null;
+  last_after: number | null;
+  last_shift_min: number | null;
+  ended: boolean;
+  hours: RevisionHourChange[];
+}
+
+/** A day type's totals; a side with no typical day leaves its figures null. */
+export interface RevisionDayTypeSummary {
+  day_type: RevisionDayType;
+  before_date: string | null;
+  after_date: string | null;
+  departures_before: number | null;
+  departures_after: number | null;
+  stops_ended: number | null;
+  last_earlier: number | null;
+}
+
+export interface TimetableRevisionDiff {
+  available: boolean;
+  reason: "no_revision" | "no_calendar" | null;
+  revision: TimetableRevision | null;
+  day_types: RevisionDayTypeSummary[];
+  stops: RevisionStopChange[];
+}
+
+/** A stop whose longest gap over the band exceeds the threshold on the
+ *  typical day after a revision and did not before. Departures are those
+ *  within the band; gaps are seconds. */
+export interface RevisionNewGap {
+  stop_id: string;
+  stop_name: string | null;
+  day_type: RevisionDayType;
+  departures_before: number;
+  departures_after: number;
+  longest_gap_before: number;
+  longest_gap_after: number;
+}
+
+/** How many stops a day type has new gaps at; null when either timetable
+ *  has no typical day of it. */
+interface RevisionNewGapDayType {
+  day_type: RevisionDayType;
+  stops: number | null;
+}
+
+export interface TimetableRevisionNewGaps {
+  available: boolean;
+  reason: "no_revision" | "no_calendar" | null;
+  revision: TimetableRevision | null;
+  from_hour: number;
+  to_hour: number;
+  gap_min: number;
+  day_types: RevisionNewGapDayType[];
+  stops: RevisionNewGap[];
+}
+
+/** One side of a transfer pair: the arriving route's stops, or the
+ *  departing one's. Each side is its own operator's stop ids. */
+export interface TransferPairSide {
+  agency_id: number;
+  agency_name: string;
+  route_code: string;
+  route_name: string | null;
+  direction: number | null;
+  stop_ids: string[];
+  stop_names: (string | null)[];
+}
+
+export interface TransferPairSummary {
+  id: number;
+  name: string;
+  arriving: TransferPairSide;
+  departing: TransferPairSide;
+  walk_sec: number;
+  day_types: RevisionDayType[];
+}
+
+export interface TransferPairsResponse {
+  pairs: TransferPairSummary[];
+}
+
+/** Connections planned and how each turned out. `held_share` is held over
+ *  held plus missed; unobserved connections are in neither. */
+export interface TransferTally {
+  planned: number;
+  held: number;
+  missed: number;
+  unobserved: number;
+  stranded: number;
+  held_share: number | null;
+  small_sample: boolean;
+}
+
+export interface TransferReliability {
+  pair: TransferPairSummary;
+  from_date: string;
+  to_date: string;
+  day_type: RevisionDayType;
+  min_samples: number;
+  buffer_share: number;
+  total: TransferTally;
+  /** Null below `min_samples` observed connections. */
+  held_share: number | null;
+  no_onward: number;
+  waits: number;
+  wait_p50_sec: number | null;
+  wait_p90_sec: number | null;
+  wait_bands: { max_sec: number; share: number }[] | null;
+  buffer_min: number | null;
+  by_hour: (TransferTally & { hour: number })[];
+  by_day: (TransferTally & { day: string })[];
+  worst_days: (TransferTally & { day: string })[];
+  no_plan_days: string[];
+  /** Why the arriving agency's arrival delays were not read, null when
+   *  they were; its arrivals then come from departure delays alone. */
+  arrivals_unread_reason: "feed_unsupported" | "probe_refuted" | "probe_expired" | "never_probed" | null;
+  arrivals_last_checked: string | null;
+  definition: DefinitionMeta;
+}
+
+/** Departures observed on one side of a revision, pooled; the rate and mean
+ *  are null under the ranking floor of observations, and `uncertain` marks a
+ *  shown rate whose interval is too wide to read. */
+export interface RevisionTally {
+  observations: number;
+  on_time_pct: number | null;
+  mean_delay_sec: number | null;
+  uncertain: boolean;
+}
+
+type RevisionRouteClass = "cut" | "added" | "unchanged" | "new" | "removed";
+
+/** One route on a day type's typical days before and after a revision.
+ *  Times and gaps are seconds. */
+export interface RevisionRouteRow {
+  route_code: string;
+  route_class: RevisionRouteClass;
+  trips_before: number;
+  trips_after: number;
+  last_before: number | null;
+  last_after: number | null;
+  main_stop_id: string | null;
+  main_stop_name: string | null;
+  longest_gap_before: number | null;
+  longest_gap_after: number | null;
+  observed_before: RevisionTally | null;
+  observed_after: RevisionTally | null;
+}
+
+interface RevisionClassRow {
+  route_class: RevisionRouteClass;
+  routes: number;
+  before: RevisionTally;
+  after: RevisionTally;
+}
+
+interface RevisionWindow {
+  weeks: number;
+  before_first: string;
+  before_last: string;
+  after_first: string;
+  after_last: string;
+}
+
+export interface TimetableRevisionRoutes {
+  available: boolean;
+  reason: "no_revision" | "no_calendar" | null;
+  day_type: RevisionDayType;
+  day_type_known: boolean;
+  /** Whole weeks each side can ever pool, up to four, and what holds it
+   *  under four for good. */
+  weeks_cap: number;
+  capped_by: "timetable" | "history" | null;
+  full_through: string | null;
+  complete: boolean;
+  window: RevisionWindow | null;
+  routes: RevisionRouteRow[];
+  classes: RevisionClassRow[];
+  definition: DefinitionMeta | null;
 }

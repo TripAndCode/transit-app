@@ -37,7 +37,7 @@ describe("WeatherDelayPanel", () => {
         attribution: "Source: example weather service",
       },
     });
-    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.getByText("No weather station is set up for this agency.")).toBeInTheDocument();
     expect(screen.queryByText(/one documented weather station/)).not.toBeInTheDocument();
@@ -60,7 +60,7 @@ describe("WeatherDelayPanel", () => {
         attribution: "a",
       },
     });
-    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.getByText(/one documented weather station/)).toBeInTheDocument();
     expect(screen.getByText("No weather observation matches a service day in this range.")).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe("WeatherDelayPanel", () => {
         attribution: "Source: example weather service",
       },
     });
-    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.getByText("Low confidence")).toBeInTheDocument();
   });
@@ -102,7 +102,7 @@ describe("WeatherDelayPanel", () => {
         attribution: "Source: example weather service",
       },
     });
-    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.getByText(/Example Station/)).toBeInTheDocument();
     expect(screen.getByText("Nearest documented station.")).toBeInTheDocument();
@@ -131,7 +131,7 @@ describe("WeatherDelayPanel", () => {
         attribution: "a",
       },
     });
-    const { container } = renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    const { container } = renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(container.textContent).not.toMatch(/-\s*0\.0/);
     expect(screen.getByText("0.0s")).toBeInTheDocument();
     expect(screen.getByText(/\+0\.0\s*s/)).toBeInTheDocument();
@@ -139,7 +139,7 @@ describe("WeatherDelayPanel", () => {
 
   it("shows a skeleton while loading", () => {
     mockWeatherDelay({ isLoading: true });
-    const { container } = renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    const { container } = renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(container.querySelector(".skeleton")).toBeInTheDocument();
   });
 
@@ -158,7 +158,7 @@ describe("WeatherDelayPanel", () => {
         attribution: "Source: example weather service",
       },
     });
-    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.queryByText("Delay by rainfall amount")).not.toBeInTheDocument();
   });
@@ -179,7 +179,7 @@ describe("WeatherDelayPanel", () => {
         buckets: [],
       },
     });
-    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.queryByText("Delay by rainfall amount")).not.toBeInTheDocument();
   });
@@ -205,7 +205,7 @@ describe("WeatherDelayPanel", () => {
         ],
       },
     });
-    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<WeatherDelayPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.getByText("Delay by rainfall amount")).toBeInTheDocument();
     expect(screen.getByText("0mm")).toBeInTheDocument();
@@ -214,7 +214,7 @@ describe("WeatherDelayPanel", () => {
     expect(screen.getByText("20mm+")).toBeInTheDocument();
     expect(screen.getByText("80.1s")).toBeInTheDocument();
     expect(screen.getByText("110.4s")).toBeInTheDocument();
-    expect(screen.getByText("660 samples")).toBeInTheDocument();
+    expect(screen.getByText("660 observations")).toBeInTheDocument();
     expect(screen.getByText("No data")).toBeInTheDocument();
   });
 });

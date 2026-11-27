@@ -45,6 +45,7 @@ const ERROR_KEYS: Record<string, string> = {
   provider_down: "account.login.error.provider_down",
   local_account_conflict: "account.login.error.local_account_conflict",
   suspended: "account.login.error.suspended",
+  not_admin: "account.login.error.not_admin",
 };
 
 export function LoginPage() {
@@ -111,7 +112,7 @@ export function LoginPage() {
           {configError ? (
             <button
               type="button"
-              className="login-card__btn login-card__btn--local"
+              className="btn btn--primary login-card__btn login-card__btn--local"
               onClick={() => { void refetchConfig(); }}
             >
               <span>{t("common.retry")}</span>
@@ -138,12 +139,8 @@ export function LoginPage() {
           <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
         </div>
 
-        <h1 className="login-card__h1">{t("common.login")}</h1>
-        <p className="login-card__sub">
-          {config?.local_admin_enabled && !config.auth_enabled
-            ? t("account.login.username_prompt")
-            : t("account.login.choose_provider")}
-        </p>
+        <h1 className="login-card__h1">{t("common.admin_login")}</h1>
+        <p className="login-card__sub">{t("account.login.admin_note")}</p>
 
         {error && (
           <div className="login-card__error" role="alert">
@@ -160,9 +157,11 @@ export function LoginPage() {
 
         {config?.auth_enabled && (
           <div className="login-card__buttons">
+            {/* Every identity provider wears the same button, so none reads as
+                the recommended one. */}
             <button
               type="button"
-              className="login-card__btn login-card__btn--provider"
+              className="btn btn--secondary login-card__btn"
               aria-label={t("account.login.google_aria")}
               aria-disabled={pending !== null}
               onClick={handleSubmit("google")}
@@ -172,7 +171,7 @@ export function LoginPage() {
             </button>
             <button
               type="button"
-              className="login-card__btn login-card__btn--provider"
+              className="btn btn--secondary login-card__btn"
               aria-label={t("account.login.github_aria")}
               aria-disabled={pending !== null}
               onClick={handleSubmit("github")}
@@ -214,7 +213,7 @@ export function LoginPage() {
             </div>
             <button
               type="submit"
-              className="login-card__btn login-card__btn--local"
+              className="btn btn--primary login-card__btn login-card__btn--local"
               aria-disabled={localPending}
               disabled={localPending}
             >
@@ -224,16 +223,15 @@ export function LoginPage() {
           </form>
         )}
 
-        {/* Only a deployment that serves signed-out visitors offers the way
-            past sign-in; `next` is already a same-origin path. */}
-        {config != null && !config.login_required && (
-          <p className="login-card__guest">
-            <Link to={next}>
-              {t("account.login.guest_link")}
-              <span aria-hidden="true"> →</span>
-            </Link>
-          </p>
-        )}
+        {/* Every reader screen serves a signed-out visitor, so the guest link
+            always shows. A guarded `next` (/admin, /me) leads back here.
+            `next` is already a same-origin path. */}
+        <p className="login-card__guest">
+          <Link to={next}>
+            {t("account.login.guest_link")}
+            <span aria-hidden="true"> →</span>
+          </Link>
+        </p>
 
         {/* One sentence per language, so each locale keeps its own word order
             and spacing around the two links. */}

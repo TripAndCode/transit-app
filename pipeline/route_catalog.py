@@ -11,9 +11,7 @@ punctuality, yet it would top every punctuality list.
 :func:`zero_delay_route_codes` names those codes.
 
 :func:`route_list` leaves both out of a list unless asked and says how many
-it left, so a route list can offer each back. A list over an aggregate that
-pools every analysed day, and so has no window, asks
-:func:`pooled_left_out_codes` which of its codes to leave out. A list that offers nothing back
+it left, so a route list can offer each back. A list that offers nothing back
 leaves out :func:`left_out_unless_named`'s codes, so a route its scope names
 is still listed.
 """
@@ -21,17 +19,20 @@ is still listed.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
-from api.range import MAX_RANGE_DAYS, RangeCtx
+from api.range import RangeCtx
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import bucketize
 
 # The route_code a static route's id maps to. Aomori's ids carry the code in a
 # parenthesised tail ('国道・古川線(1021)'); every other feed's id is its code,
-# which the replace leaves as it is.
-ROUTE_CODE_SQL = "regexp_replace({route_id}, '.*\\((\\d+)\\)$', '\\1')"
+# which the replace leaves as it is. Postgres and ClickHouse read the one
+# pattern, so an aggregate's route code and an archived route's agree.
+ROUTE_CODE_PATTERN = r".*\((\d+)\)$"
+ROUTE_CODE_REPLACEMENT = r"\1"
+ROUTE_CODE_SQL = f"regexp_replace({{route_id}}, '{ROUTE_CODE_PATTERN}', '{ROUTE_CODE_REPLACEMENT}')"
 
 # How recently, before the agency's last observed day in the window, a route
 # must have been seen to count as still running.
@@ -72,7 +73,7 @@ async def retired_route_codes(conn, agency_id: int, ctx: RangeCtx) -> frozenset[
     return await _retired_between(conn, agency_id, ctx.from_date, ctx.to_date)
 
 
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _retired_between(conn, agency_id: int, from_date: date, to_date: date) -> frozenset[str]:
     rows = await conn.fetch(
         "SELECT route_code, max(date) AS last_seen FROM agg_route_daily "
@@ -88,16 +89,15 @@ async def _retired_between(conn, agency_id: int, from_date: date, to_date: date)
     )
 
 
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def retired_among(conn, agency_id: int, codes: frozenset[str], last_day: date) -> frozenset[str]:
     """The ``codes``, each observed at some point, that the current timetable
     lacks and that went unobserved over the :data:`RECENT_DAYS` through
     ``last_day``, the agency's last observed day.
 
-    The one retirement rule: :func:`retired_route_codes` asks it of the codes
-    a window holds, and :func:`pooled_left_out_codes` of the codes an
-    aggregate with no date holds. An agency with no timetable loaded retires
-    nothing, since there is nothing to compare against.
+    The one retirement rule, which :func:`retired_route_codes` asks of the
+    codes a window holds. An agency with no timetable loaded retires nothing,
+    since there is nothing to compare against.
     """
     rows = await conn.fetch(
         "WITH recent AS ("
@@ -143,7 +143,7 @@ async def zero_delay_route_codes(conn, agency_id: int, ctx: RangeCtx) -> frozens
     return await _zero_delay_between(conn, agency_id, ctx.from_date, ctx.to_date)
 
 
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _zero_delay_between(conn, agency_id: int, from_date: date, to_date: date) -> frozenset[str]:
     # Every observation in the histogram bucket 0 opens, which holds no early
     # departure, and a sum of 0 leave only exact zeros. The sum alone would
@@ -173,29 +173,6 @@ async def left_out_route_codes(conn, agency_id: int, ctx: RangeCtx) -> dict[str,
     (:func:`_by_reason`)."""
     retired = await retired_route_codes(conn, agency_id, ctx)
     return _by_reason(retired, await zero_delay_route_codes(conn, agency_id, ctx))
-
-
-async def pooled_left_out_codes(conn, agency_id: int, codes: Collection[str]) -> dict[str, frozenset[str]]:
-    """Which of ``codes``, the codes an aggregate pooling every analysed day
-    holds, a route list over it leaves out, by reason.
-
-    Such an aggregate keeps a code's rows however long ago it was last seen,
-    so each of its codes is judged retired on the agency's last days alone
-    (:func:`retired_among`). The zero-delay judgement reads every day it
-    spans, and the analysed history only grows, so it reaches back at most
-    :data:`api.range.MAX_RANGE_DAYS` from the agency's last analysed day: the
-    widest window any route list may be asked about.
-    """
-    span = await conn.fetchrow(
-        "SELECT min(date) AS first, max(date) AS last FROM agg_route_daily WHERE agency_id = $1", agency_id
-    )
-    if span["last"] is None:
-        return {}
-    last = span["last"]
-    pooled = frozenset(codes)
-    retired = await retired_among(conn, agency_id, pooled, last)
-    window = RangeCtx(from_date=max(span["first"], last - timedelta(days=MAX_RANGE_DAYS - 1)), to_date=last)
-    return _by_reason(retired, await zero_delay_route_codes(conn, agency_id, window) & pooled)
 
 
 def _by_reason(retired: frozenset[str], zero_delay: frozenset[str]) -> dict[str, frozenset[str]]:

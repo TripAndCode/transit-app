@@ -262,3 +262,200 @@ def test_leader_from_before_clear_leaves_newer_leader_inflight():
         assert await asyncio.wait_for(c, 1) == "compute-1"
 
     asyncio.run(run())
+
+
+def test_a_brief_result_is_served_for_the_short_ttl_then_computed_afresh(cache_clock):
+    """A call that marks its result is served from cache for
+    DEGRADED_TTL_SECONDS and computed again after; the full result that
+    replaces it keeps the decorator's TTL."""
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            cache.cache_briefly()
+            return "degraded"
+        return "full"
+
+    async def run():
+        assert await fn(1) == "degraded"
+        cache_clock.now += cache.DEGRADED_TTL_SECONDS
+        assert await fn(1) == "degraded"
+        cache_clock.now += 1
+        assert await fn(1) == "full"
+        cache_clock.now += 300
+        assert await fn(1) == "full"
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_a_full_result_keeps_the_decorators_ttl(cache_clock):
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        return x
+
+    async def run():
+        await fn(1)
+        cache_clock.now += 300
+        await fn(1)
+        assert calls["n"] == 1
+        cache_clock.now += 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_cache_briefly_from_a_task_the_call_gathers_marks_the_call(cache_clock):
+    """The mark reaches the call from a task it starts, as a degrade decided
+    inside an ``asyncio.gather`` does."""
+    calls = {"n": 0}
+
+    async def probe():
+        cache.cache_briefly()
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        await asyncio.gather(probe())
+        return x
+
+    async def run():
+        await fn(1)
+        cache_clock.now += cache.DEGRADED_TTL_SECONDS + 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_cache_briefly_outside_a_cached_call_marks_nothing(cache_clock):
+    """Outside a cached call the mark has nothing to mark, and a later cached
+    call in the same context keeps the decorator's TTL."""
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        return x
+
+    async def run():
+        cache.cache_briefly()
+        await fn(1)
+        cache_clock.now += cache.DEGRADED_TTL_SECONDS + 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 1
+
+
+def test_a_brief_result_never_outlives_the_decorators_own_ttl(cache_clock):
+    calls = {"n": 0}
+    ttl = cache.DEGRADED_TTL_SECONDS // 3
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=ttl)
+    async def fn(x):
+        calls["n"] += 1
+        cache.cache_briefly()
+        return x
+
+    async def run():
+        await fn(1)
+        cache_clock.now += ttl + 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def _counting(**options):
+    calls: list[tuple] = []
+
+    @cache.async_lru_cache(maxsize=16, ttl_seconds=60, **options)
+    async def fn(day, agency_id, *, extra=0):
+        calls.append((day, agency_id, extra))
+        return agency_id
+
+    return fn, calls
+
+
+def test_a_rebuild_evicts_only_that_agencys_entries_however_the_key_was_spelt():
+    fn, calls = _counting(agency_arg="agency_id")
+
+    async def run():
+        await fn("d", 1)
+        await fn("d", agency_id=1, extra=2)
+        await fn("d", 2)
+        await fn("d", None)
+        cache.evict_for_rebuild([1])
+        calls.clear()
+        await fn("d", 1)
+        await fn("d", agency_id=1, extra=2)
+        await fn("d", 2)
+        await fn("d", None)
+
+    asyncio.run(run())
+    assert sorted(calls, key=repr) == sorted([("d", 1, 0), ("d", 1, 2), ("d", None, 0)], key=repr)
+
+
+def test_a_cache_without_an_agency_is_evicted_whole_and_a_never_cache_is_kept():
+    whole, whole_calls = _counting()
+    kept, kept_calls = _counting(agency_arg="agency_id", rebuild="never")
+
+    async def run():
+        await whole("d", 2)
+        await kept("d", 2)
+        cache.evict_for_rebuild([1])
+        await whole("d", 2)
+        await kept("d", 2)
+
+    asyncio.run(run())
+    assert len(whole_calls) == 2
+    assert len(kept_calls) == 1
+
+
+def test_a_key_that_cannot_name_its_agency_is_evicted_by_every_rebuild():
+    calls = []
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60, agency_arg="agency_id")
+    async def fn(agency_id=cache._UNREADABLE):
+        calls.append(agency_id)
+
+    async def run():
+        await fn()
+        cache.evict_for_rebuild([1])
+        await fn()
+
+    asyncio.run(run())
+    assert len(calls) == 2
+
+
+def test_a_keyword_only_agency_is_read_from_the_keywords():
+    calls = []
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60, agency_arg="agency_id")
+    async def fn(day, *, agency_id):
+        calls.append(agency_id)
+
+    async def run():
+        await fn("d", agency_id=1)
+        await fn("d", agency_id=2)
+        cache.evict_for_rebuild([1])
+        await fn("d", agency_id=1)
+        await fn("d", agency_id=2)
+
+    asyncio.run(run())
+    assert calls == [1, 2, 1]
+
+
+def test_an_agency_argument_the_function_does_not_take_is_refused_at_decoration():
+    with pytest.raises(TypeError):
+
+        @cache.async_lru_cache(agency_arg="agency_id")
+        async def fn(day):
+            return day

@@ -8,7 +8,7 @@ import { usePatchUser, useDeleteUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { AdminButton } from "./adminControls";
 import { Drawer } from "../../components/admin/Drawer";
-import { ActivitySection, ApiKeysSection, SessionsSection } from "./UserDrawerSections";
+import { ActivitySection, SessionsSection } from "./UserDrawerSections";
 
 type AdminUserDetail = {
   user_id: number;
@@ -28,11 +28,10 @@ type AdminUserDetail = {
     meta: Record<string, unknown> | null;
     created_at: string;
   }[];
-  byok_provider: string | null;
 };
 
-/** Admin user drawer: identity, role/LLM-approval/BYOK status, sessions,
- * API keys, login history, and a danger zone -- rendered as a right-hand
+/** Admin user drawer: identity, role/LLM-approval status, sessions,
+ * login history, and a danger zone -- rendered as a right-hand
  * panel over `AdminUsersPage` (mounted via the nested `users/:uid` route;
  * see main.tsx). Escape and the back link both navigate to `/admin/users`,
  * which unmounts this route and closes the drawer. There is no overlay to
@@ -179,12 +178,6 @@ function AdminUserDetailBody({
             {data.llm_approved ? t("admin.users.llm_approved.yes") : t("admin.users.llm_approved.no")}
           </div>
           <div>
-            {t("admin.user_detail.byok_label")}:{" "}
-            {data.byok_provider
-              ? t("admin.user_detail.byok_configured", { provider: data.byok_provider })
-              : t("admin.user_detail.byok_not_configured")}
-          </div>
-          <div>
             {t("admin.user_detail.created_label")}: {formatDateTime(data.created_at)}
           </div>
         </div>
@@ -255,7 +248,6 @@ function AdminUserDetailBody({
         )}
 
         <SessionsSection uid={data.user_id} />
-        <ApiKeysSection uid={data.user_id} canIssue={!isDeleted} />
         <ActivitySection uid={data.user_id} />
 
         <section style={{ marginBottom: 24 }}>

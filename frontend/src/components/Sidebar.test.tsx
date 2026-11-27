@@ -15,7 +15,7 @@ import * as hooks from "../api/hooks";
 import { togglePinnedRoute } from "../api/pinnedRoutes";
 import { blockStorage } from "../test/blockStorage";
 
-const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports"];
+const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Day types & agencies", "Live", "Reports"];
 
 function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, "matchMedia").mockReturnValue({
@@ -60,6 +60,26 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
   });
 
+  it.each([
+    ["en", "Days & agencies", "Day types & agencies"],
+    ["ja", "日種別・事業者", "日種別・事業者の比較"],
+  ])("shows the short %s name on the rail and keeps the full one as the link's name", async (lang, shortName, fullName) => {
+    await i18n.changeLanguage(lang);
+    try {
+      renderSidebar();
+      const link = within(screen.getByRole("navigation", { name: i18n.t("nav.destinations_label") })).getByRole("link", { name: fullName });
+      expect(link.querySelector(".rail-name")).toHaveTextContent(new RegExp(`^${shortName}$`));
+      expect(link.querySelector(".rail-name")).toHaveAttribute("title", fullName);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
+  it("never lists Bus Town in the desktop rail, which reaches it only through the command palette", () => {
+    renderSidebar();
+    expect(screen.queryByRole("link", { name: "Bus Town" })).toBeNull();
+  });
+
   it("keeps its destinations on Help, leading back to the last chosen agency", () => {
     writeLastAgency(3);
     try {
@@ -72,9 +92,9 @@ describe("Sidebar", () => {
   });
 
   describe("each screen keeps its own filters", () => {
-    it("keeps a visible Ask entry below the destinations, without the current screen's filters", () => {
+    it("keeps a visible Notebook entry below the destinations, without the current screen's filters", () => {
       renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
-      expect(screen.getByRole("link", { name: "Ask" })).toHaveAttribute("href", "/agencies/8/ask");
+      expect(screen.getByRole("link", { name: "Notebook" })).toHaveAttribute("href", "/agencies/8/ask");
     });
 
     it("points Live, the screen on show, at its own current filters", () => {
@@ -115,6 +135,34 @@ describe("Sidebar", () => {
     expect(within(other).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
     expect(within(other).queryByRole("link", { name: "Admin" })).toBeNull();
   });
+
+  describe("the feedback link", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("is not shown when the deployment names no address", () => {
+      vi.spyOn(config, "useConfig").mockReturnValue({
+        data: { auth_enabled: false, local_admin_enabled: false, feedback_url: null },
+        isLoading: false,
+      } as never);
+      renderSidebar();
+      const other = screen.getByRole("navigation", { name: "Other" });
+      expect(within(other).queryByRole("link", { name: "Send feedback" })).toBeNull();
+    });
+
+    it("links the deployment's address under Other, opening it outside the app", () => {
+      vi.spyOn(config, "useConfig").mockReturnValue({
+        data: { auth_enabled: false, local_admin_enabled: false, feedback_url: "https://forms.example.test/feedback" },
+        isLoading: false,
+      } as never);
+      renderSidebar();
+      const other = screen.getByRole("navigation", { name: "Other" });
+      const link = within(other).getByRole("link", { name: "Send feedback" });
+      expect(link).toHaveAttribute("href", "https://forms.example.test/feedback");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
+  });
+
 
   it("does not list the model evaluation page for a visitor who is not an admin", () => {
     renderSidebar();
@@ -410,7 +458,7 @@ describe("Sidebar", () => {
     });
 
     it("opens no stops on a screen with a single view", () => {
-      renderSidebar("/agencies/8/why");
+      renderSidebar("/agencies/8/pulse");
       expect(screen.queryByRole("group", { name: /views$/ })).toBeNull();
     });
 
@@ -419,7 +467,8 @@ describe("Sidebar", () => {
       ["/agencies/8/routes?sort=late5_share", "Routes views", "Share over 5 min"],
       ["/agencies/8/routes?sort=worst_5min", "Routes views", "Impact (count)"],
       ["/agencies/8/time", "Time views", "Trend"],
-      ["/agencies/8/compare?by=agencies", "Compare views", "Agencies"],
+      ["/agencies/8/why?by=segments", "Why views", "Slow segments"],
+      ["/agencies/8/compare?by=agencies", "Day types & agencies views", "Agencies"],
       ["/agencies/8/reports?doc=saved", "Reports views", "Saved analyses"],
     ])("on %s marks the stop the page shows", (path, group, current) => {
       renderSidebar(path);
@@ -445,8 +494,13 @@ describe("Sidebar", () => {
       const user = userEvent.setup();
       renderSidebar("/agencies/8/compare");
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      const stops = within(screen.getByRole("group", { name: "Compare views" })).getAllByRole("link");
-      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends/holidays", "Agencies"]);
+      const stops = within(screen.getByRole("group", { name: "Day types & agencies views" })).getAllByRole("link");
+      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual([
+        "Weekdays and weekends/holidays",
+        "Agencies",
+        "Planned departures",
+        "Transfers",
+      ]);
     });
 
     it("marks each station with its screen's own icon rather than a station code, the link carrying the name", async () => {
@@ -464,9 +518,9 @@ describe("Sidebar", () => {
       expect(screen.getByRole("link", { name: "Pulse" })).toBeTruthy();
     });
 
-    it("names Ask by its label alone, with no transfer tag that reads as a journey planner", () => {
+    it("names Notebook by its label alone, with no transfer tag that reads as a journey planner", () => {
       renderSidebar();
-      expect(screen.getByRole("link", { name: "Ask" })).not.toHaveTextContent("Transfer");
+      expect(screen.getByRole("link", { name: "Notebook" })).not.toHaveTextContent("Transfer");
       expect(screen.queryByText("Transfer")).toBeNull();
     });
 
@@ -528,10 +582,10 @@ describe("Sidebar", () => {
       vi.restoreAllMocks();
     });
 
-    it("renders Pulse, Routes, Live and Ask as tabs, leaving the rest to the More sheet", () => {
+    it("renders Pulse, Routes, Live and Notebook as tabs, leaving the rest to the More sheet", () => {
       renderSidebar();
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Pulse", "Routes", "Live", "Ask"]);
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Pulse", "Routes", "Live", "Notebook"]);
     });
 
     it("marks the active tab", () => {
@@ -561,6 +615,16 @@ describe("Sidebar", () => {
       const more = screen.getByRole("button", { name: "More" });
       const pulse = screen.getByRole("link", { name: "Pulse" });
       expect(more.style.fontSize).toBe(pulse.style.fontSize);
+    });
+
+    it("sets the tab labels bold at the 12px text floor, and the icons at 20px with a heavier stroke", () => {
+      renderSidebar();
+      const pulse = screen.getByRole("link", { name: "Pulse" });
+      expect(pulse.style.fontSize).toBe("var(--text-xs)");
+      expect(pulse.style.fontWeight).toBe("700");
+      const icon = pulse.querySelector("svg")!;
+      expect(icon.getAttribute("width")).toBe("20");
+      expect(icon.getAttribute("stroke-width")).toBe("2");
     });
 
     it("renders a More trigger that does not mount the agency picker until opened", () => {
@@ -622,15 +686,47 @@ describe("Sidebar", () => {
       expect(close.parentElement?.style.position).toBe("sticky");
     });
 
-    it("carries the destinations that have no tab of its own on a phone, and Help", async () => {
+    it("carries the destinations that have no tab of its own on a phone, Bus Town, and Help", async () => {
       const user = userEvent.setup();
       renderSidebar("/agencies/1/live?from=2026-06-01&to=2026-06-07");
       await user.click(screen.getByRole("button", { name: "More" }));
       const dialog = screen.getByRole("dialog");
       const nav = within(dialog).getByRole("navigation", { name: "Destinations" });
-      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Time", "Why", "Compare", "Reports"]);
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual([
+        "Time",
+        "Why",
+        "Day types & agencies",
+        "Reports",
+        "Bus Town",
+      ]);
       expect(within(nav).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/agencies/1/reports");
+      expect(within(nav).getByRole("link", { name: "Bus Town" })).toHaveAttribute("href", "/agencies/1/bus-town");
       expect(within(dialog).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    });
+
+    it("closes the sheet when the Bus Town link is clicked, like its other destinations", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("link", { name: "Bus Town" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("leaves Bus Town out of the sheet outside any agency context, like the other agency-scoped links", async () => {
+      const user = userEvent.setup();
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <I18nextProvider i18n={i18n}>
+            <ToastProvider>
+              <MemoryRouter initialEntries={["/"]}>
+                <Sidebar />
+              </MemoryRouter>
+            </ToastProvider>
+          </I18nextProvider>
+        </QueryClientProvider>,
+      );
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.queryByRole("link", { name: "Bus Town" })).toBeNull();
     });
 
     it("closes when the close button inside it is clicked", async () => {

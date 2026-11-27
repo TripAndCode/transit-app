@@ -18,6 +18,7 @@ from pipeline.retention import (
     PERSONAL_DATA_RETENTION_MONTHS,
     PIPELINE_RUNS_RETENTION_DAYS,
     QUERY_LOG_RETENTION_DAYS,
+    UPDATES_RETENTION_DAYS,
     personal_data_prune_sql,
     prune_admin_audit_sql,
     prune_pipeline_runs_sql,
@@ -30,9 +31,10 @@ DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 
 # sysexits.h EX_TEMPFAIL -- distinct from a genuine failure's exit(1), so a
 # per-agency shell loop (scripts/fetch_and_ingest.sh, docs/deploy-railway.md's
-# Railway sketch) can tell "lock busy, will resolve on the next scheduled
-# run" apart from "broken" and `continue` to the next agency instead of
-# aborting the whole remaining loop under `set -euo pipefail`.
+# Railway sketch) can tell "will resolve on the next scheduled run" (the lock
+# busy, or an archive ingest that left a day unsettled) apart from "broken" and
+# `continue` to the next agency instead of aborting the whole remaining loop
+# under `set -euo pipefail`.
 EX_TEMPFAIL = 75
 
 # sysexits.h EX_DATAERR -- `ingest --strict` finished but skipped files, so
@@ -195,12 +197,12 @@ def _lock_or_skip_agency(conn, cmd: str, kind: str, agency_id: int | None = None
 def _lock_or_exit(conn, cmd: str, kind: str) -> None:
     """Exit(1) if another ingest/analyze process holds the lock.
 
-    For `analyze_all` and `ingest_live` -- the whole-fleet commands that no
-    shell script loops over (docs/deploy-railway.md calls each exactly once,
-    after -- not inside -- the per-agency `ingest` loop), so the abort-risk
-    that justifies skipping in _lock_or_skip_agency doesn't apply here. Both
-    fail loudly instead: a whole-fleet run that silently did nothing would
-    read as a clean run.
+    For `analyze_all`, `ingest_live` and `prune-updates` -- the whole-fleet
+    commands that no shell script loops over (docs/deploy-railway.md calls
+    each exactly once, after -- not inside -- the per-agency `ingest` loop),
+    so the abort-risk that justifies skipping in _lock_or_skip_agency doesn't
+    apply here. They fail loudly instead: a whole-fleet run that silently did
+    nothing would read as a clean run.
     """
     got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
     if got:
@@ -245,7 +247,16 @@ def _require_agency(args, conn) -> int:
 
 
 def cmd_add_agency(args):
-    """Insert a new agency row and print the assigned agency_id."""
+    """Add an agency. With ``--static-url``, probe the feed against the
+    timetable first (``pipeline.feed_probe``) and add it only when the probe
+    accepts it; without, insert the row as given, with no strategies."""
+    if args.static_url is None:
+        _add_agency_unprobed(args)
+        return
+    _add_agency_probed(args)
+
+
+def _add_agency_unprobed(args) -> None:
     conn = _get_conn()
     with conn.cursor() as cur:
         cur.execute(
@@ -255,7 +266,66 @@ def cmd_add_agency(args):
         aid = cur.fetchone()[0]
     conn.commit()
     logger.info(f"Added agency {aid}: {args.name}")
+    logger.warning(
+        "It has no ingest strategy, so its feed is read as aomori_regex. Pass --static-url to probe the feed "
+        "and choose the strategies instead."
+    )
     conn.close()
+
+
+def _add_agency_probed(args) -> None:
+    import pathlib
+
+    from pipeline import feed_probe
+    from pipeline.clickhouse import get_client
+    from pipeline.poller import configured_interval_sec
+    from pipeline.static_fetcher import DEFAULT_STATIC_DEST
+    from pipeline.url_guard import redact_url
+
+    seconds = feed_probe.DEFAULT_PROBE_SECONDS if args.probe_seconds is None else args.probe_seconds
+    interval = configured_interval_sec()
+    logger.info(f"add_agency: probing {redact_url(args.feed_url)} for {seconds:.0f}s, every {interval:.0f}s")
+    conn = _get_conn()
+    try:
+        result = feed_probe.onboard(
+            conn,
+            DATABASE_URL,
+            args.feed_url,
+            args.static_url,
+            dest_dir=pathlib.Path(DEFAULT_STATIC_DEST),
+            ch_client=get_client,
+            dry_run=args.dry_run,
+            name=args.name,
+            seconds=seconds,
+            interval=interval,
+            accept_empty=args.accept_empty,
+        )
+    finally:
+        conn.close()
+    sys.stdout.write("\n".join(feed_probe.report_lines(result.outcome)) + "\n")
+    accepted = result.outcome.decision.accepted
+    if args.dry_run:
+        logger.info("add_agency: dry run; nothing was written.")
+        sys.exit(0 if accepted else 1)
+    if result.store_error is not None:
+        logger.error(f"add_agency: nothing was added: the stores cannot take a timetable load ({result.store_error}).")
+        sys.exit(1)
+    if result.agency_id is None:
+        logger.error("add_agency: nothing was added.")
+        sys.exit(1)
+    if result.load_error is not None:
+        logger.error(
+            f"add_agency: agency {result.agency_id} was added, but its timetable did not load "
+            f"({result.load_error}). Until it does, ingest refuses the agency; load it with "
+            f"`refresh-static --agency-id {result.agency_id}`."
+        )
+        sys.exit(1)
+    sys.stdout.write(
+        f"agency_id: {result.agency_id}\n"
+        "Next: the poller picks the agency up on its next cycle.\n"
+        "Live shows its trips within minutes.\n"
+        "Pulse and Reports show a day only after that JST day has closed.\n"
+    )
 
 
 def cmd_seed_agencies(args):
@@ -403,8 +473,12 @@ def cmd_ingest(args):
 
     A skipped file is logged and the run still exits 0, which a per-agency
     shell loop relies on; ``--strict`` exits EX_DATAERR instead. An agency
-    refused for having no timetable loaded exits EX_CONFIG.
+    refused for having no timetable loaded exits EX_CONFIG. A day the run
+    could not leave with one source exits EX_TEMPFAIL, after the rest of the
+    agency's work: the run is recorded as failed, and the next run settles
+    the day, so the loop moves on to the next agency.
     """
+    from pipeline.archive_replace import ReplacementIncomplete
     from pipeline.clickhouse import get_client
     from pipeline.ingest import IngestIncomplete, StaticTimetableMissing, ingest
 
@@ -422,6 +496,10 @@ def cmd_ingest(args):
     except IngestIncomplete:
         conn.close()
         sys.exit(EX_DATAERR)
+    except ReplacementIncomplete as exc:
+        logger.error("ingest: %s", exc)
+        conn.close()
+        sys.exit(EX_TEMPFAIL)
     except StaticTimetableMissing as exc:
         _exit_no_timetable(conn, exc)
     conn.close()
@@ -484,8 +562,8 @@ def cmd_analyze(args):
     if args.full:
         mark_for_full_rebuild(conn, [agency_id])
     ch_client = get_client(send_receive_timeout=ANALYZE_SEND_RECEIVE_TIMEOUT_SEC)
-    with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id):
-        analyze(agency_id, conn, ch_client)
+    with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id) as run:
+        run.rebuild_headline = analyze(agency_id, conn, ch_client, db_url=DATABASE_URL)
     conn.close()
 
 
@@ -516,8 +594,8 @@ def cmd_analyze_all(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- analyze agency_id={aid} ---")
-            with pipeline_runs.record_run(conn, "analyze", agency_id=aid):
-                analyze(aid, conn, ch_client)
+            with pipeline_runs.record_run(conn, "analyze", agency_id=aid) as run:
+                run.rebuild_headline = analyze(aid, conn, ch_client, db_url=DATABASE_URL)
         except Exception:
             logger.exception(f"analyze failed for agency {aid}")
             failed.append(aid)
@@ -609,7 +687,7 @@ def cmd_restamp_archive(args):
             # since the rerun finds nothing left to move. A swap that then
             # fails costs only a rebuild that was not needed.
             mark_for_full_rebuild(conn, moved)
-            restamp_archive_rows(ch_client, before_swap=still_locked)
+            restamp_archive_rows(ch_client, agencies=moved, before_swap=still_locked)
         logger.info("restamped.")
         next_steps(sum(p.rows_refused for p in plan))
     finally:
@@ -618,12 +696,19 @@ def cmd_restamp_archive(args):
 
 
 def cmd_check_aggs(args):
-    """Report agencies whose aggregates lag their newest completed day.
+    """Report agencies whose aggregates lag their newest completed day, and
+    list the analyzed days whose rows came mostly from the live path.
 
     Exits nonzero if any agency is stale — the post-merge / monitoring guard.
+    A live-sourced day is listed but does not fail it: it is history the
+    archive has yet to replace, not a stale aggregate. Nor does a day holding
+    both sources, though analyze counts it twice: dev's upgrade runs this
+    check with no sanctioned way to settle one, and the next archive ingest
+    whose folder reaches the day settles it: to its archive when that folder
+    covers it, else to its live copy.
     """
     from pipeline.clickhouse import get_client
-    from pipeline.freshness import check_agg_freshness
+    from pipeline.freshness import check_agg_freshness, day_ranges, live_sourced_days, two_source_days
 
     conn = _get_conn()
     with conn.cursor() as cur:
@@ -631,13 +716,24 @@ def cmd_check_aggs(args):
         agency_ids = [r[0] for r in cur.fetchall()]
     ch_client = get_client()
     stale = check_agg_freshness(conn, ch_client, agency_ids)
+    live = live_sourced_days(conn, agency_ids)
+    both = two_source_days(conn, ch_client, agency_ids)
     conn.close()
+    for days in live:
+        final = f"; {days.final} more on or before its retention floor are final" if days.final else ""
+        listed = f": {day_ranges(days.open)}" if days.open else ""
+        logger.warning(f"LIVE-SOURCED agency {days.agency_id}: {len(days.open)} day(s){listed}{final}")
+    for agency_id, mixed in both.items():
+        logger.warning(
+            f"TWO SOURCES agency {agency_id}: {day_ranges(mixed)} hold archive and live rows at once, which analyze "
+            "counts twice; the next archive ingest whose folder reaches the day settles it: to its archive when "
+            "that folder covers it, else to its live copy"
+        )
+    for s in stale:
+        logger.error(
+            f"STALE agency {s.agency_id}: aggs cover {s.agg_max_day}, live completed through {s.live_max_completed_day}"
+        )
     if stale:
-        for s in stale:
-            logger.error(
-                f"STALE agency {s.agency_id}: aggs cover {s.agg_max_day}, "
-                f"live completed through {s.live_max_completed_day}"
-            )
         sys.exit(1)
     logger.info(f"check-aggs: all {len(agency_ids)} agencies fresh.")
 
@@ -742,66 +838,55 @@ def cmd_ingest_live(args):
     logger.info(f"ingest-live: all {len(agency_ids)} agencies ingested.")
 
 
-def cmd_migrate(args):
-    """Apply or roll back schema migrations."""
-    from db.migrate import migrate_down, migrate_up
+def cmd_poll(args):
+    """Run the standalone GTFS-RT poller until SIGTERM (pipeline.poller)."""
+    import pathlib
+    import threading
+
+    from pipeline.poller import Poller, configured_heartbeat, configured_interval_sec, install_stop_handlers
+
+    interval = args.interval or configured_interval_sec()
+    archive_dir = pathlib.Path(args.archive_dir or os.environ.get("POLLER_ARCHIVE_DIR") or "archive")
+    if os.environ.get("OBJECT_STORE_BUCKET"):
+        logger.warning("poll: OBJECT_STORE_BUCKET is set, but the poller keeps its tarballs on %s only", archive_dir)
+    stop = threading.Event()
+    install_stop_handlers(stop)
+    Poller(archive_dir, interval_sec=interval, heartbeat=configured_heartbeat(), stop=stop).run()
+
+
+def cmd_migrate(args) -> list[str]:
+    """Apply or roll back schema migrations. Returns the versions an `up` applied."""
+    from db.migrate import DestructiveMigrationError, allowed_destructive_ups, migrate_down, migrate_up
 
     # The one command whose whole purpose is a database that does not have the
     # schema yet, so it cannot require one.
     conn = _get_conn(require_schema=False)
-    if args.direction == "up":
-        migrate_up(conn)
-    else:
+    try:
+        if args.direction == "up":
+            return migrate_up(conn, allow_destructive=allowed_destructive_ups(args.allow_destructive_up))
         migrate_down(args.target, conn, force_destructive=args.force_destructive)
-    conn.close()
+        return []
+    except DestructiveMigrationError as refused:
+        sys.exit(f"migrate {args.direction}: {refused}")
+    finally:
+        conn.close()
 
 
-def cmd_build_rag_index(args):
-    """Embed every (id, question) line from tests/ask_eval/golden_set.jsonl
-    into rag_chunks for the named agency (or every agency in `agencies` if
-    --all-agencies is set). Idempotent via content_hash."""
-    import asyncio
-    from pathlib import Path
+def cmd_schema_up(args):
+    """Bring both stores' schemas up to date: `migrate up` for Postgres, then
+    the ClickHouse schema (db.clickhouse.bootstrap), then record the release
+    (pipeline.deploys). What a deployment runs before it starts."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import get_client
+    from pipeline.deploys import record_deploy, release_sha
 
-    import asyncpg
-
-    from pipeline.query.rag_index import build_index
-
-    golden = Path(__file__).resolve().parent / "tests" / "ask_eval" / "golden_set.jsonl"
-    if not golden.exists():
-        raise SystemExit(f"golden set not found: {golden}")
-
-    async def run():
-        """Async body executed via asyncio.run()."""
-        _log_target()
-        pool = await asyncpg.create_pool(DATABASE_URL)
-        # try/finally so the pool closes on the early exits too — the guard
-        # below and the missing-argument check both leave before the loop.
-        try:
-            async with pool.acquire() as conn:
-                await guard_async_conn(conn)
-            if args.all_agencies:
-                async with pool.acquire() as conn:
-                    rows = await conn.fetch(
-                        "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
-                    )
-                ids = [(r["agency_id"], r["agency_name"]) for r in rows]
-            else:
-                if args.agency_id is None:
-                    raise SystemExit("--agency-id or --all-agencies required")
-                ids = [(args.agency_id, f"agency {args.agency_id}")]
-
-            for aid, name in ids:
-                async with pool.acquire() as conn:
-                    counts = await build_index(conn, aid, golden)
-                logger.info(
-                    f"  {aid:>3} {name}: "
-                    f"inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}"
-                )
-        finally:
-            await pool.close()
-
-    asyncio.run(run())
+    applied = cmd_migrate(argparse.Namespace(direction="up", allow_destructive_up=args.allow_destructive_up))
+    client = get_client()
+    try:
+        apply_schema(client)
+    finally:
+        client.close()
+    record_deploy(lambda: _get_conn(require_schema=False), release_sha(), applied)
 
 
 def cmd_prune_query_log(args):
@@ -893,6 +978,43 @@ def cmd_prune_personal_data(args):
     asyncio.run(run())
 
 
+def cmd_prune_updates(args):
+    """Drop the ClickHouse `updates` months past the horizon whose aggregates
+    are complete, raising each affected agency's retention floor
+    (pipeline.retention.prune_updates). Drops only while updates_prune_enabled
+    is on; ``--dry-run`` lists what a run would drop and what it keeps,
+    whatever the switch says."""
+    from pipeline.clickhouse import get_client
+    from pipeline.retention import prune_updates
+
+    conn = _get_conn()
+    try:
+        result = prune_updates(
+            conn,
+            get_client(),
+            acquire=lambda: _lock_or_exit(conn, "prune-updates", "retention"),
+            days=int(args.days),
+            dry_run=args.dry_run,
+        )
+    finally:
+        conn.close()
+    if not result.enabled and not args.dry_run:
+        return
+    drop = "would drop" if args.dry_run else "dropped"
+    for verdict in result.verdicts:
+        partition = verdict.partition
+        if verdict.held_by is None:
+            agencies = ", ".join(map(str, partition.agency_ids))
+            logger.info(
+                f"prune_updates: {drop} {partition.partition_id} ({partition.rows} rows, {partition.bytes} bytes); "
+                f"agencies {agencies} keep their aggregates before {verdict.floor.isoformat()} as final"
+            )
+        else:
+            logger.info(f"prune_updates: keeping {partition.partition_id}: {verdict.held_by}")
+    if not result.verdicts:
+        logger.info(f"prune_updates: no partition is past the {int(args.days)}-day horizon")
+
+
 def cmd_ingest_weather(args):
     """Fetch observed daily weather for every configured representative station."""
     from pipeline.weather import PUBLICATION_WINDOW_DAYS, ingest_weather
@@ -940,12 +1062,12 @@ def cmd_reprobe_rt_coverage(args):
 
 
 def cmd_ingest_ml(args):
-    """Pull the ML workbench's latest published forecast and its weekly evaluation summaries and live scorecards
-    from R2 into Postgres.
+    """Pull the ML workbench's latest published forecast, its weekly evaluation summaries and live scorecards,
+    and the daily GTFS-RT validator summaries from R2 (transit-ml) into Postgres.
 
     Operator-run, so it fails loudly: the cron sweep's copy of this step logs
     and carries on, which would turn a wrong token into a silent "0 rows"."""
-    from pipeline import ml_evaluation_ingest, ml_forecast_ingest
+    from pipeline import ml_evaluation_ingest, ml_forecast_ingest, rt_validation_ingest
 
     try:
         s3, bucket = ml_forecast_ingest.s3_client_from_env()
@@ -957,11 +1079,14 @@ def cmd_ingest_ml(args):
         forecast = ml_forecast_ingest.load_forecast(conn, s3, bucket)
         evaluations = ml_evaluation_ingest.load_evaluations(conn, s3, bucket)
         live = ml_evaluation_ingest.load_live_evaluations(conn, s3, bucket)
+        validation = rt_validation_ingest.load_validation(conn, s3, bucket)
     except (
         ml_forecast_ingest.ForecastReadError,
         ml_forecast_ingest.ForecastWriteError,
         ml_evaluation_ingest.EvaluationReadError,
         ml_evaluation_ingest.EvaluationWriteError,
+        rt_validation_ingest.ValidationReadError,
+        rt_validation_ingest.ValidationWriteError,
     ) as exc:
         logger.error(f"ingest_ml: {type(exc).__name__}: {exc}")
         sys.exit(1)
@@ -983,6 +1108,19 @@ def cmd_ingest_ml(args):
         logger.info(f"ingest_ml: upserted {live.upserted} live scorecard(s)")
     if live.skipped:
         logger.warning(f"ingest_ml: skipped unreadable or unsupported live scorecards: {', '.join(live.skipped)}")
+    if validation.listed == 0:
+        logger.info("ingest_ml: no validator summary has been published yet")
+    else:
+        logger.info(f"ingest_ml: upserted {validation.upserted} validator summary(ies) of {validation.fetched} fetched")
+    # Untrusted and malformed keys need fixing at their source; an unknown
+    # agency's keys are history waiting for it, picked up once it is added.
+    for reason in (rt_validation_ingest.UNTRUSTED, rt_validation_ingest.MALFORMED):
+        if validation.skipped.get(reason):
+            logger.warning(
+                f"ingest_ml: skipped validator summaries ({reason}): {', '.join(validation.skipped[reason])}"
+            )
+    if unknown := validation.skipped.get(rt_validation_ingest.UNKNOWN_AGENCY):
+        logger.warning(f"ingest_ml: {len(unknown)} validator summary key(s) name an agency not in this database")
 
 
 def main():
@@ -993,10 +1131,26 @@ def main():
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
 
-    p_add = sub.add_parser("add_agency")
-    p_add.add_argument("--name", required=True)
+    p_add = sub.add_parser(
+        "add_agency",
+        help="Probe a GTFS-RT feed against its static zip and add it with the strategies the probe chooses",
+    )
     p_add.add_argument("--feed-url", required=True)
-    p_add.add_argument("--static-url", default=None)
+    p_add.add_argument(
+        "--static-url",
+        default=None,
+        help="GTFS static zip; given, the feed is probed first. Without it, --name is required and the row is "
+        "added with no strategies",
+    )
+    p_add.add_argument("--name", default=None, help="default: the static zip's agency.txt name")
+    p_add.add_argument(
+        "--probe-seconds",
+        type=float,
+        default=None,
+        help="how long to poll the feed (default 120), once every $POLL_INTERVAL_SEC, else 60, seconds",
+    )
+    p_add.add_argument("--accept-empty", action="store_true", help="add a feed that sent nothing during the probe")
+    p_add.add_argument("--dry-run", action="store_true", help="probe and report; write nothing")
 
     p_seed = sub.add_parser("seed_agencies", help="Upsert agencies from a CSV (idempotent)")
     p_seed.add_argument("csv", help="Path to agencies CSV (default: ./agencies.csv)", nargs="?", default="agencies.csv")
@@ -1047,6 +1201,19 @@ def main():
     p_live = sub.add_parser("ingest_live", help="Fetch and ingest live GTFS-RT from each agency's feed_url")
     p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
 
+    p_schema = sub.add_parser("schema-up", help="migrate up, then apply the ClickHouse schema")
+    p_schema.add_argument(
+        "--allow-destructive-up",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="as for `migrate up`",
+    )
+
+    p_poll = sub.add_parser("poll", help="Poll every enabled agency's GTFS-RT feed, archive it and ingest it")
+    p_poll.add_argument("--archive-dir", default=None, help="default: $POLLER_ARCHIVE_DIR, else ./archive")
+    p_poll.add_argument("--interval", type=float, default=None, help="seconds; default: $POLL_INTERVAL_SEC, else 60")
+
     p_migrate = sub.add_parser("migrate", help="Apply or roll back schema migrations")
     p_migrate.add_argument("direction", choices=["up", "down"], nargs="?", default="up")
     p_migrate.add_argument(
@@ -1057,12 +1224,17 @@ def main():
     p_migrate.add_argument(
         "--force-destructive",
         action="store_true",
-        help="Allow rolling back a down migration marked `-- DESTRUCTIVE` (see db/migrations/README.md)",
+        help="Allow rolling back a down migration marked `-- DESTRUCTIVE`, or one that loses data below a "
+        "retention floor (see db/migrations/README.md)",
     )
-
-    p_rag = sub.add_parser("build_rag_index", help="Embed golden_set.jsonl into rag_chunks")
-    p_rag.add_argument("--agency-id", type=int, default=None)
-    p_rag.add_argument("--all-agencies", action="store_true")
+    p_migrate.add_argument(
+        "--allow-destructive-up",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="the owner's go-ahead for a pending up migration that loses data below this database's retention "
+        "floor; also read from MIGRATE_ALLOW_DESTRUCTIVE_UP=V1,V2",
+    )
 
     p_prune = sub.add_parser("prune_query_log", help="Delete ask_query_log rows older than N days")
     p_prune.add_argument("--days", type=int, default=QUERY_LOG_RETENTION_DAYS)
@@ -1077,6 +1249,16 @@ def main():
         "prune-personal-data", help="Delete usage counts and login history older than N months, and expired sessions"
     )
     p_prune_personal.add_argument("--months", type=int, default=PERSONAL_DATA_RETENTION_MONTHS)
+
+    p_prune_updates = sub.add_parser(
+        "prune-updates",
+        help="Drop ClickHouse `updates` months past the horizon whose aggregates are complete "
+        "(off unless updates_prune_enabled is on)",
+    )
+    p_prune_updates.add_argument("--days", type=int, default=UPDATES_RETENTION_DAYS)
+    p_prune_updates.add_argument(
+        "--dry-run", action="store_true", help="List what a run would drop and keep; write nothing"
+    )
 
     p_weather = sub.add_parser(
         "ingest_weather",
@@ -1100,6 +1282,13 @@ def main():
 
     args = parser.parse_args()
     if args.command == "add_agency":
+        if args.static_url is None:
+            if not args.name:
+                p_add.error("--name is required without --static-url")
+            if args.dry_run or args.accept_empty or args.probe_seconds is not None:
+                p_add.error("--probe-seconds, --accept-empty and --dry-run need --static-url")
+        if args.probe_seconds is not None and args.probe_seconds < 0:
+            p_add.error("--probe-seconds must be >= 0")
         cmd_add_agency(args)
     elif args.command == "seed_agencies":
         cmd_seed_agencies(args)
@@ -1123,10 +1312,12 @@ def main():
         cmd_ingest_live(args)
     elif args.command == "refresh-static":
         cmd_refresh_static(args)
+    elif args.command == "schema-up":
+        cmd_schema_up(args)
+    elif args.command == "poll":
+        cmd_poll(args)
     elif args.command == "migrate":
         cmd_migrate(args)
-    elif args.command == "build_rag_index":
-        cmd_build_rag_index(args)
     elif args.command == "prune_query_log":
         cmd_prune_query_log(args)
     elif args.command == "prune-pipeline-runs":
@@ -1135,6 +1326,8 @@ def main():
         cmd_prune_admin_audit(args)
     elif args.command == "prune-personal-data":
         cmd_prune_personal_data(args)
+    elif args.command == "prune-updates":
+        cmd_prune_updates(args)
     elif args.command == "ingest_weather":
         cmd_ingest_weather(args)
     elif args.command == "ingest_ml":

@@ -1,0 +1,14 @@
+/* The hour x date grid's cells are SVG rects, which lift unreliably across
+   browsers, so a hovered cell gets a stroke ring plus a brightness lift
+   instead. A focused cell already gets the same ring from the overlay the
+   component paints above the grid at the focused cell, so focus-visible
+   drops the generic [tabindex] outline rather than stacking a second ring. The delay fill
+   colour (`delayRampVar`) is untouched. */
+.heat-cell:hover {
+  stroke: var(--accent);
+  stroke-width: 2;
+  filter: brightness(1.1);
+}
+.heat-cell:focus-visible {
+  outline: none;
+}

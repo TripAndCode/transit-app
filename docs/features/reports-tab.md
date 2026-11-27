@@ -6,6 +6,10 @@ menu (chart PNG, combined CSV, share link, browser print/PDF), and
 browser-local saved-analysis bookmarks — plus a link out to Time for deeper
 reports.
 
+The slowest-routes table shows each route's observation count only while the
+reader's statistics setting is on (`analysis-tab.md` ▸ The Routes table); the
+combined CSV always carries it.
+
 ## How a user reaches it
 
 - Route: Reports at `/agencies/:agencyId/reports`, rendered by
@@ -107,7 +111,7 @@ reports.
   (`compute_delay_certificate`'s `stop_name`/`stop_is_first`, named only when
   the loaded timetable runs the trip that day, as above); the CSV keeps both
   columns. The record's day and route are its whole scope, so this document has
-  no scope sentence.
+  no scope bar.
 - The council document's planned trips, executed trips and service-delivered
   rate count only the days a timetable plans: a day's count saved in
   `planned_trips_daily` while its timetable was loaded, or else the loaded
@@ -117,21 +121,81 @@ reports.
   agencies board, and a footnote repeats it. Days from before the first save
   stay uncounted: the reload that replaced their timetable had already erased
   their plan.
-- The council document's tiles are 定時率, 平均遅延, 観測データ数（停留所単位）
-  (one reading per trip per stop, so far larger than the planned trips), 計画便数
-  and 運行率 (`frontend/src/components/analysis/CouncilSummaryBlock.tsx`). A
+- The council document's tiles are 定時率, 早発率 (naming the threshold it counts
+  past, the definition's `early_departure_sec`), 平均遅延, 観測数（停留所単位）
+  (one observation per trip per stop, so far larger than the planned trips), 計画便数,
+  運行率 and 他事業者との比較 (`frontend/src/components/analysis/CouncilSummaryBlock.tsx`). A
   missing 運行率 shows 「—」 with the response's `delivered_missing` reason in
   the agencies board's words (`network.delivered_missing.*`), and the server's
   footnote (`format_council_summary_footnotes`) gives the same reason. A feed
   that sent no cancellation in the period or the 90 days up to its end reads
   「運行率：—（この配信は運休を伝えていません）」, never a 100% that measures
   nothing. The
-  on-time definition footnote states the tolerance in words, 「定時の定義：定刻
-  から1分以内の遅れ（早発も定時として数えます）」, not its preset name; the CSV
-  preamble keeps the preset for comparing exports. Each figure keeps to one
+  on-time definition footnote states the tolerance in words and a preset by
+  its reader's name, never its identifier: by default 「定時の定義（業界標準）：
+  定刻から5分以内の遅れと、1分以内の早発」, and under `legacy_60s`
+  「定時の定義（従来の基準）：定刻から1分以内の遅れ（早発も定時として数えます）」.
+  The CSV preamble keeps the identifier for comparing exports, with the same
+  name beside it (`プリセット=standard_m1_p5（業界標準）`). A window is named
+  as its preset however the request spelt it, so the scope's `early=any&late=60`
+  reads as `legacy_60s`.
+  The next footnote defines the early-departure rate,
+  「早発率：定刻より1分を超えて早く発車した割合」; the CSV puts 早発率(%) after
+  運行実績率(%), and its preamble names the threshold
+  (早発率=60秒を超える早発の割合). Each figure keeps to one
   line (`white-space: nowrap`), so a phone never breaks a number in two.
+- The council document says whether the agency's figures meet the agencies
+  board's comparability conditions, as defined in
+  [network-tab.md's Comparability gate](network-tab.md#comparability-gate).
+  - `compute_council_summary` takes its agency's row from the board's own
+    cached `compute_network_summary` for the same dates, so the council
+    report and the board read one result and cannot disagree, even in the
+    minutes after an analyze run before the board's cache expires. Coverage
+    therefore stops at the board's `coverage_through` (see network-tab.md),
+    never at this agency's own last day. The staleness note and the
+    data-quality share come from the same row, so the quality note and a
+    `clamp_high` verdict print one share.
+  - While the cached board does not list the agency yet (one added without
+    the agencies API, which invalidates the board), or the board cannot be
+    built (a failure reading any agency's figures), `comparability` is null.
+    The tile, the footnote and the CSV columns are then left out or blank
+    rather than guessed, and the report reads its staleness and quality share
+    for its own agency.
+  - The verdict reads the board's figures: the whole agency, every day of the
+    period and the board's on-time definition, the default preset
+    (`standard_m1_p5`). A route, day, service or
+    time-band filter, or another tolerance, changes the on-time figures but
+    never the verdict. The agency-wide footnote lists the comparison among the
+    whole-agency figures, and under another tolerance a footnote says the
+    comparison keeps the definition shared by every operator.
+  - The response carries it as `comparability`: `comparable`, `reason` (the
+    board's `comparable_reason` codes), `coverage_pct` with its
+    `observed_trips`/`coverage_planned_trips`, `ci_low`/`ci_high`,
+    `clamp_pct`, the board row's `planned_trips`/`delivered_missing` (which
+    say why coverage could not be measured, so the reason comes from the
+    same read as the verdict) and the gate's `thresholds`.
+  - The tile 他事業者との比較 / "Comparison with other operators" reads
+    比較できます / "Comparable" or 比較できません / "Not comparable". Under
+    "Not comparable" it gives the reason in the board's words
+    (`unrankedReason` in `frontend/src/components/comparabilityReason.ts`,
+    shared with the board).
+  - The server footnote states the same verdict
+    (`format_council_summary_footnotes`): 「※他事業者との比較: 比較の条件を満たします
+    （観測カバー率 90.0%、定時率の95%信頼区間 87.8–91.8%）」. When the agency
+    fails a check, it reads 「…条件を満たしません。観測カバー率 41.0%（70%未満）。
+    この事業者の数字を他事業者と順位付けて比べないでください。」. The reasons use
+    the board's words and its printed rounding. While every figure is the
+    feed's predicted delays, an agency whose data passes every check reads
+    「…条件を満たしません。値はフィードの予測遅延（観測した通過時刻とのずれが事業者ごとに異なる）。…」
+    (`predicted_basis`).
+  - The CSV appends 他事業者と比較できる (はい/いいえ), 比較できない理由 (the reason
+    code), 観測カバー率(%) and the interval's 下限/上限 after the six on-time and
+    delivery columns (定時率 through 運行実績率). The Japanese footnote rows put
+    the reason in words.
 - The document is called 協議会向け報告 / "Council report" wherever it is
   named: its tab, its subtitle, the report list and the printed header.
+- An admin's print of the council report takes a frozen snapshot of it and
+  prints the snapshot's link in the foot ([snapshots.md](snapshots.md#on-paper)).
 - Every printout of an agency page ends with the credit for the open data
   behind it. That covers the period summary, the council report, the delay
   record and any other screen sent to the browser's print. The credit is
@@ -164,36 +228,41 @@ What the user sees/does:
     (trend + ranking rows), a "Create share link" item that copies the
     current URL with its filter query string, and "Print / Save as PDF"
     (`window.print()`).
-  - **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`,
-    greying what the trend report's `scope_applied` did not use.
+  - **Scope bar** — `frontend/src/components/scope/ScopeBar.tsx`, leaving out
+    of the row what the trend report's `scope_applied` did not use.
   - **Trend section** — a daily mean-delay line chart
     (`frontend/src/components/analysis/PeriodChart.tsx`). Under it, the day
     whose mean rose furthest above its 7-day moving average
     (`avg_min_smoothed`), with that day's `top_offenders`: the spike a
     reader of the chart asks about. No day is named when none rose above it.
+    A link under it opens Time's `trend` report (`time?report=trend`), the
+    home of the trend and day × hour questions, over the same scope.
   - **Routes-to-check section** — the ten slowest patterns (pattern, mean
     delay, samples), each row's "Open analysis →" link opening that route's
     dossier (`/agencies/:agencyId/routes/<route_code>`) with the active
     scope's query string, `service` included when one is set. When there are
-    more, a line says how many of how many are shown and links every route
-    on the Routes table, so the page stays one printable sheet.
+    more, a line says how many of how many are shown. A link under it opens
+    the Routes table, the home of "which routes are worst", over the
+    same scope and sorted by mean delay (`routes?sort=avg`), so its first
+    rows are this list.
+  - The chart and the list are part of the printable period document, so
+    they stay on the page as it is printed and filed rather than becoming
+    links; each points to its home instead.
   - The Export menu is the page's only export; its CSV still holds every
     ranked route the API returned.
   - A `DefinitionMetaBlock`, its own collapsed disclosure (on-time/late
     tolerance, measurement point, dedup rule, exclusion threshold) from the
     trend report's `definition` field, then a **definitions** `<details>`
-    showing the active filter window and a **"Detailed reports →"** link to
-    Time's `trend` report (`/agencies/:agencyId/time?report=trend`) carrying
-    the same filter.
+    showing the active filter window.
 - **Saved view** (`?doc=saved`) — lists this browser's saved analyses for
   the current agency (`frontend/src/components/analysis/savedAnalyses.ts`),
   each opening with its saved filter query through `routesHref`: one saved
   route opens that route's dossier, any other selection the Routes list. An
   `EmptyState` ("Save filters on a route's page to see them here") shows
   when none exist for this agency. A note under the local-only one tells
-  these 「保存した分析」 apart from 「保存したビュー」, the account-held views
-  kept under the scope sentence's "Saved views ▾", which this tab does not
-  list; the names are the privacy policy's. Bookmarks are
+  these 「保存した分析」 apart from 「保存したビュー」, the other browser-local
+  views kept under the scope bar's "Saved views ▾", which this tab does
+  not list; the names are the privacy policy's. Bookmarks are
   browser-local filter snapshots, not immutable historical results —
   opening one re-queries the API with today's data under that filter.
 
@@ -217,15 +286,15 @@ than issuing their own requests.
 |---|---|
 | `frontend/src/tabs/SavedExportTab.tsx` | Reports shell: the `doc` strip, the `view` → `doc` replacement, and which screen each document renders |
 | `frontend/src/tabs/ReportsHomeTab.tsx` | Period summary and saved views: trend with its spike, the ten slowest routes, saved-analysis list |
-| `frontend/src/components/ExportMenu.tsx` | The header Export menu: chart PNG, combined CSV, share link, print |
-| `frontend/src/components/PrintFrame.tsx` | What a printout adds: `PrintFrame`'s header (agency and scope) and footer (print time), and `PrintCredit`'s data-source credit at the end |
+| `frontend/src/components/ExportMenu.tsx` | The header Export menu: chart PNG, combined CSV, share link, print, and an admin's frozen snapshot where a screen offers one ([snapshots.md](snapshots.md)) |
+| `frontend/src/components/PrintFrame.tsx` | What a printout adds: `PrintFrame`'s header (agency and scope) and footer (print time, and the slot for a screen's own line: an admin's council report print puts its snapshot link there, [snapshots.md](snapshots.md#on-paper)), and `PrintCredit`'s data-source credit at the end |
 | `frontend/src/components/dataSources.ts`, `dataSources.json` | The open-data source list, `dataSourceOf` (feed URL → source) and `creditText` (a credit as plain text with its URLs) |
 | `frontend/src/routes/destinations.ts` | `savedTarget` (`view` → `doc`), and the `routeHref`/`routesHref`/`reportHref` links out of this screen |
 | `frontend/src/components/analysis/PeriodChart.tsx` | Daily mean-delay trend chart |
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
 | `frontend/src/components/analysis/csv.ts` | `downloadCsv()`, the browser-side CSV download this screen shares with the route dossier, Live and Ask (the `AnalysisTab` screens link to the API's `?format=csv` instead) |
 | `frontend/src/components/DefinitionMetaBlock.tsx` | Renders the on-time/late definition metadata block |
-| `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
+| `frontend/src/components/scope/ScopeBar.tsx` | The scope bar, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useReport`, `useAgencies` |
 
 **Backend**
@@ -246,7 +315,7 @@ than issuing their own requests.
   `ReportsHomeTab` and `RouteAnalysisTab` together on their real routes,
   including a saved analysis opening its route's dossier),
   `frontend/src/tabs/ReportsHomeTab.test.tsx` (the routes-to-check →
-  dossier and "Detailed reports" → Time links),
+  dossier link, and the scoped links to the Routes table and Time's trend),
   `frontend/src/tabs/SavedExportTab.test.tsx` (the `doc` views and the
   `view` → `doc` replacement).
 - Backend: `tests/api/test_reports.py`, `tests/unit/test_reports_rounding.py`
@@ -261,13 +330,15 @@ than issuing their own requests.
 2. Click "Reports" in the rail → URL `/agencies/:agencyId/reports`;
    expect the trend chart and routes-to-check table to populate (or the
    empty state with no data).
-3. Change the scope sentence's period / days / time / routes —
+3. Change the scope bar's period / days / time / routes —
    expect both sections to refetch.
 4. Click a row's "Open analysis →" link in the routes-to-check table —
    expect navigation to that route's dossier,
    `/agencies/:agencyId/routes/<route_code>`, carrying the same filter.
-5. Click "Detailed reports →" — expect navigation to
-   `/agencies/:agencyId/time?report=trend` carrying the same filter.
+5. Click "The trend by day and hour on Time →" under the chart — expect
+   navigation to `/agencies/:agencyId/time?report=trend` carrying the same
+   filter; click "Every route on the Routes table →" — expect the Routes table
+   with the same filter, its first rows this list.
 6. Confirm the sections carry no download buttons of their own; open the
    header's "Export" menu and choose "Download CSV" — expect one combined
    file holding every ranked route, and "Download PNG" — expect an image of

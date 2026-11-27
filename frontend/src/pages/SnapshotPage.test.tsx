@@ -1,0 +1,673 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import i18n from "../i18n";
+import { renderWithProviders } from "../test/renderWithProviders";
+import type { DefinitionMeta, ReportFigures, ReportResponse, Route } from "../api/types";
+import type { Snapshot, SnapshotToday } from "../api/snapshots";
+import * as adminHook from "../api/useIsAdmin";
+import { SnapshotPage } from "./SnapshotPage";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
+
+const ID = "AbCdEfGhIjKlMnOpQrStUv";
+
+const DEFINITION: DefinitionMeta = {
+  preset: "standard_m1_p5",
+  early_tolerance_sec: 60,
+  late_tolerance_sec: 300,
+  early_departure_sec: 60,
+  exclusion_threshold_sec: 7200,
+  measurement_point: "all_stops_all_observations",
+  dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0",
+  source: "aggregates",
+  built_at: "2026-11-05T15:30:00Z",
+  value_basis: "feed_prediction",
+  timetable_versions: null,
+  source_mix: null,
+};
+
+const CTX = { from: "2026-10-01", to: "2026-10-31", dow: "all", time_band: "all", service: "all", routes: [] };
+
+const ROUTES: Route[] = [
+  {
+    route_id: "42",
+    route_short_name: "42",
+    route_long_name: "Hillside line",
+    route_code: "42",
+    trip_headsigns: [],
+    origin_name: null,
+    via_name: null,
+    destination_name: null,
+    is_loop: false,
+    bidirectional: false,
+  },
+];
+
+function routeTable(text: string): ReportResponse {
+  return {
+    report_type: "route_table",
+    rendered_at: "2026-11-09T05:05:00Z",
+    text,
+    rows: [["42", "10.60", "12.3", "40.1", 496, 1236, "3.5", false, 1.9]],
+    ctx: CTX,
+    definition: DEFINITION,
+    scope_applied: {},
+    sort: "on_time",
+    order: "worst",
+    rows_total: 174,
+    reliable_min_samples: 100,
+  } as ReportResponse;
+}
+
+function council(text: string): ReportResponse {
+  return {
+    report_type: "council_summary",
+    rendered_at: "2026-11-09T05:05:00Z",
+    text,
+    rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6, 4.2]],
+    ctx: CTX,
+    definition: DEFINITION,
+    scope_applied: {},
+    delivered_scope_applied: {},
+    covered_days: 31,
+    window_days: 31,
+    delivered_missing: null,
+  } as ReportResponse;
+}
+
+function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
+  return {
+    snapshot_id: ID,
+    created_at: "2026-11-09T05:05:00Z",
+    screen: "route_table",
+    agency_id: 7,
+    agency_name: "Hill Transit",
+    params: {},
+    payloads: {
+      report: { ja: routeTable("路線の表"), en: routeTable("Route table") }, // i18n-ignore: fixture prose
+      routes: ROUTES,
+      credit: { ja: "出典：テスト", en: "Source: test" }, // i18n-ignore: fixture prose
+    },
+    method_version: "2026.11.0",
+    title: null,
+    note: null,
+    capability_tier: "full",
+    ...overrides,
+  };
+}
+
+function stubFetch(status: number, body: unknown) {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+/** The snapshot read, and today's figures at its `/today`, each answered
+ *  afresh on every call. */
+function stubApi(stored: Snapshot, today: { status: number; body: SnapshotToday | { detail: string } }) {
+  const fetchMock = vi.fn((url: RequestInfo | URL) => {
+    const { status, body } = String(url).endsWith("/today") ? today : { status: 200, body: stored };
+    return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function tableRow(code: string, avg: string, onTime: string, samples = 1236): unknown[] {
+  return [code, avg, onTime, "40.1", 496, samples, "3.5", false, 1.9];
+}
+
+function withRows(report: ReportResponse, rows: unknown[][], definition: Partial<DefinitionMeta> = {}): ReportResponse {
+  return { ...report, rows, definition: { ...report.definition, ...definition } } as ReportResponse;
+}
+
+function renderPage() {
+  const router = createMemoryRouter([{ path: "/s/:snapshotId", element: <SnapshotPage /> }], {
+    initialEntries: [`/s/${ID}`],
+  });
+  renderWithProviders(<RouterProvider router={router} />);
+}
+
+describe("SnapshotPage", () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    await i18n.changeLanguage("en");
+  });
+
+  it("states when it was taken, in JST, and the method the figures were made with", async () => {
+    stubFetch(200, snapshot());
+    renderPage();
+    expect(await screen.findByText("Snapshot (created 2026-11-09 14:05 JST, method 2026.11.0)")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Delays by route" })).toBeInTheDocument();
+  });
+
+  it("reads only the snapshot itself, never a live endpoint", async () => {
+    const fetchMock = stubFetch(200, snapshot());
+    renderPage();
+    await screen.findByRole("table");
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+  });
+
+  it("draws the stored Routes table with the stored route labels and sort", async () => {
+    stubFetch(200, snapshot());
+    renderPage();
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText(/Hillside line/)).toBeInTheDocument();
+    expect(within(table).getByText("10.6")).toBeInTheDocument();
+    expect(within(table).getByRole("columnheader", { name: /On-time %/ })).toHaveAttribute("aria-sort", "ascending");
+    expect(within(table).queryByRole("link")).toBeNull();
+    expect(screen.getByText("Source: test")).toBeInTheDocument();
+  });
+
+  it("lays the stored council report out as the live screen does, in the reader's language", async () => {
+    const prose = { ja: "定時率は22.6%でした。", en: "On time 22.6% of the time." }; // i18n-ignore: fixture prose
+    stubFetch(200, snapshot({ screen: "council_report", payloads: { report: { ja: council(prose.ja), en: council(prose.en) }, routes: [], credit: { ja: null, en: null } } }));
+    renderPage();
+    const figures = await screen.findByRole("list", { name: "Headline figures" });
+    expect(figures).toHaveTextContent("22.6%");
+    expect(figures).toHaveTextContent("540,357");
+    expect(screen.getByText(prose.en)).toBeInTheDocument();
+    await i18n.changeLanguage("ja");
+    expect(await screen.findByText(prose.ja)).toBeInTheDocument();
+  });
+
+  it("words a basic-tier agency's missing figures by its tier, which the read carries", async () => {
+    const stored = {
+      ...council("On time 22.6% of the time."),
+      rows: [[22.6, 2.5, 540357, 2130, null, null, 4.2]],
+      delivered_missing: "feed_cannot_report",
+      comparability: {
+        comparable: false,
+        reason: "coverage_unknown",
+        coverage_pct: null,
+        observed_trips: null,
+        coverage_planned_trips: null,
+        ci_low: null,
+        ci_high: null,
+        clamp_pct: 0.2,
+        planned_trips: 2130,
+        delivered_missing: "feed_cannot_report",
+        thresholds: { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 },
+      },
+    } as ReportResponse;
+    const fetchMock = stubFetch(
+      200,
+      snapshot({
+        screen: "council_report",
+        capability_tier: "basic",
+        payloads: { report: { ja: stored, en: stored }, routes: [], credit: { ja: null, en: null } },
+      }),
+    );
+    renderPage();
+    const figures = await screen.findByRole("list", { name: "Headline figures" });
+    expect(figures).toHaveTextContent("not part of basic data");
+    expect(figures).toHaveTextContent("Basic data: on-time only, so observation coverage can't be measured");
+    expect(figures).not.toHaveTextContent("cancellations");
+    expect(figures).not.toHaveTextContent("can't be matched to the timetable");
+    expect(fetchMock.mock.calls.map(([url]) => String(url)).some((url) => url.includes("/api/agencies"))).toBe(false);
+  });
+
+  it("prints a stored council report as it is, taking no new snapshot of it, even for an admin", async () => {
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    const fetchMock = stubFetch(200, snapshot({ screen: "council_report", payloads: { report: { ja: council("報告"), en: council("Report") }, routes: [], credit: { ja: null, en: null } } })); // i18n-ignore: fixture prose
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Print / Save as PDF" }));
+    expect(print).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("names every condition the figures were computed under, marking one the screen did not use", async () => {
+    const params = { from: "2026-10-01", to: "2026-10-31", dow: "weekday", time_band: "morning", service: "all", routes: ["42"], hour: null, stop: null, dir: null, late: 120, early: null };
+    const report = { ...routeTable("Route table"), scope_applied: { from: true, to: true, dow: true, time_band: false, routes: true, late: true } } as ReportResponse;
+    stubFetch(200, snapshot({ params, payloads: { report: { en: report }, routes: ROUTES, credit: {} } }));
+    renderPage();
+    const scope = await screen.findByTestId("snapshot-scope");
+    expect(scope).toHaveTextContent("Hill Transit");
+    expect(scope).toHaveTextContent("Hillside line");
+    expect(scope).toHaveTextContent("weekdays");
+    expect(scope).toHaveTextContent("within 2 min");
+    const unused = within(scope).getByText("Morning (05–09)");
+    expect(unused.closest("s")).not.toBeNull();
+    expect(unused.closest("s")).toHaveAttribute("title", "This screen doesn't use this condition");
+  });
+
+  it("names a stored stop condition from the static stops, with no id and without asking a report endpoint", async () => {
+    const params = { from: "2026-10-01", to: "2026-10-31", dow: "all", time_band: "all", service: "all", routes: [], hour: null, stop: "S9", dir: 1, late: null, early: null };
+    const report = routeTable("Route table");
+    const stored = snapshot({ params, payloads: { report: { en: report }, routes: ROUTES, credit: {} } });
+    const fetchMock = vi.fn((url: RequestInfo | URL) => {
+      const body = String(url).includes("/stops") ? { rows: [{ stop_id: "S9", stop_name: "Harbour Gate" }] } : stored;
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    const scope = await screen.findByTestId("snapshot-scope");
+    await waitFor(() => expect(scope).toHaveTextContent("Harbour Gate"));
+    expect(scope).toHaveTextContent("Direction B");
+    expect(scope).not.toHaveTextContent("S9");
+    expect(scope).not.toHaveTextContent("direction_id");
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.filter((u) => !u.includes("/stops"))).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+  });
+
+  it("states the stored table's floor and left-out routes without offering to change them", async () => {
+    const params = { from: "2026-10-01", to: "2026-10-31", include_sparse: true, include_retired: false, include_zero_delay: false };
+    const report = { ...routeTable("Route table"), retired_rows: 3, zero_delay_rows: 0 } as ReportResponse;
+    stubFetch(200, snapshot({ params, payloads: { report: { en: report }, routes: ROUTES, credit: {} } }));
+    renderPage();
+    const sparse = await screen.findByRole("checkbox", { name: "Include routes observed fewer than 100 times" });
+    expect(sparse).toBeChecked();
+    expect(sparse).toBeDisabled();
+    const retired = screen.getByRole("checkbox", { name: "Include 3 route codes the current timetable no longer runs" });
+    expect(retired).not.toBeChecked();
+    expect(retired).toBeDisabled();
+  });
+
+  it("shows the snapshot's own title and note when it has them", async () => {
+    stubFetch(200, snapshot({ title: "October council", note: "For the 11/20 meeting" }));
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: "October council" })).toBeInTheDocument();
+    expect(screen.getByText("For the 11/20 meeting")).toBeInTheDocument();
+  });
+
+  it("says calmly that an unknown or deleted link has no snapshot", async () => {
+    stubFetch(404, { detail: "snapshot not found" });
+    renderPage();
+    expect(await screen.findByText("Snapshot not found")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("SnapshotPage compared with today", () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await i18n.changeLanguage("en");
+  });
+
+  const stored = withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3"), tableRow("9", "3.00", "80.0")]);
+  const storedSnapshot = snapshot({ payloads: { report: { en: stored, ja: stored }, routes: ROUTES, credit: {} } });
+
+  it("keeps the comparison off until the reader turns it on, asking nothing of today meanwhile", async () => {
+    const fetchMock = stubApi(storedSnapshot, { status: 200, body: { report: stored, unavailable: null } });
+    renderPage();
+    const toggle = await screen.findByRole("checkbox", { name: "Compare with today's figures" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.queryByText(/^today /)).toBeNull();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+  });
+
+  it("marks each moved figure with today's value, and each route only one side lists, leaving equal figures as they are", async () => {
+    const today = withRows(routeTable("Route table"), [tableRow("42", "10.64", "15.0"), tableRow("7", "4.00", "70.0")]);
+    const fetchMock = stubApi(storedSnapshot, { status: 200, body: { report: today, unavailable: null } });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+
+    const table = await screen.findByRole("table");
+    const moved = await within(table).findByText("today 15.0%");
+    expect(moved.closest("td")).toHaveTextContent("12.3%");
+    // 10.60 and 10.64 both print 10.6: nothing extra beside it.
+    expect(within(table).getByText("10.6").closest("td")?.textContent).toBe("10.6");
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toHaveTextContent("only in the snapshot");
+    expect(rows[2]).toHaveTextContent("only today");
+    expect(rows[2]).toHaveTextContent("70.0%");
+    expect(screen.getByText("3 differences from today's figures.")).toBeInTheDocument();
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`)), expect.stringMatching(new RegExp(`/api/snapshots/${ID}/today$`))]);
+  });
+
+  it("keeps the stored rows' bars as they were when a route only today lists runs longer", async () => {
+    const byAvg = { ...withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3"), tableRow("9", "3.00", "80.0")]), sort: "avg" } as ReportResponse;
+    const today = { ...withRows(byAvg, [tableRow("42", "10.60", "12.3"), tableRow("7", "20.00", "50.0")]), sort: "avg" } as ReportResponse;
+    stubApi(snapshot({ payloads: { report: { en: byAvg, ja: byAvg }, routes: ROUTES, credit: {} } }), {
+      status: 200,
+      body: { report: today, unavailable: null },
+    });
+    renderPage();
+    const fill = (row: HTMLElement) => (row.querySelector('[data-testid="bar-track"] > div') as HTMLElement).style.width;
+    const first = () => within(screen.getByRole("table")).getAllByRole("row")[1];
+    await screen.findByRole("table");
+    const before = fill(first());
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare with today's figures" }));
+    await screen.findByText("only today");
+    expect(fill(first())).toBe(before);
+  });
+
+  it("names each side's method, build and on-time definition, and says plainly when the method differs", async () => {
+    const today = withRows(stored, stored.rows as unknown[][], { method_version: "2026.12.0", built_at: "2026-12-01T03:00:00Z" });
+    stubApi(storedSnapshot, { status: 200, body: { report: today, unavailable: null } });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+
+    const sides = await screen.findByTestId("snapshot-compare-sides");
+    expect(sides).toHaveTextContent("Method 2026.11.0, aggregates built 2026-11-06 00:30 JST.");
+    expect(sides).toHaveTextContent("Method 2026.12.0, aggregates built 2026-12-01 12:00 JST.");
+    expect(sides).toHaveTextContent("On time (industry standard)");
+    expect(
+      screen.getByText("Today's figures use method 2026.12.0; the snapshot used 2026.11.0. A difference may come from the method rather than the data."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Every figure matches today's.")).toBeInTheDocument();
+  });
+
+  it("says calmly that today's figures are unavailable when the agency is gone", async () => {
+    stubApi(storedSnapshot, { status: 200, body: { report: null, unavailable: "agency_removed" } });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("Today's figures are unavailable: this agency is no longer in the app.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/^today /)).toBeNull();
+  });
+
+  it("counts no difference in an early-departure figure the snapshot never showed", async () => {
+    const before = withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3")], { early_departure_sec: null });
+    const after = withRows(routeTable("Route table"), [["42", "10.60", "12.3", "40.1", 496, 1236, "9.9", false, 1.9]]);
+    stubApi(snapshot({ payloads: { report: { en: before, ja: before }, routes: ROUTES, credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("Every figure matches today's.")).toBeInTheDocument();
+    expect(screen.queryByText(/^today /)).toBeNull();
+  });
+
+  it("counts no difference in a council early-departure tile the snapshot never showed", async () => {
+    const before = { ...council("On time 22.6% of the time."), definition: { ...DEFINITION, early_departure_sec: null } } as ReportResponse;
+    const after = withRows(council("On time 22.6% of the time."), [[22.6, 2.5, 540357, 2130, 2100, 98.6, 9.9]]);
+    stubApi(snapshot({ screen: "council_report", payloads: { report: { en: before, ja: before }, routes: [], credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("Every figure matches today's.")).toBeInTheDocument();
+    expect(screen.queryByText(/^today /)).toBeNull();
+    expect(screen.queryByText(/Early departures/)).toBeNull();
+  });
+
+  it("marks the board's verdict when the figure its reason prints has moved", async () => {
+    const gate = (coverage: number) => ({
+      comparable: false,
+      reason: "coverage_low" as const,
+      coverage_pct: coverage,
+      observed_trips: 900,
+      coverage_planned_trips: 2130,
+      ci_low: 20,
+      ci_high: 25,
+      clamp_pct: 0.1,
+      planned_trips: 2130,
+      delivered_missing: null,
+      thresholds: { min_coverage_pct: 50, max_ci_half_width_pp: 5, max_clamp_pct: 5 },
+    });
+    const before = { ...council("On time 22.6% of the time."), comparability: gate(45.0) } as ReportResponse;
+    const after = { ...council("On time 22.6% of the time."), comparability: gate(48.2) } as ReportResponse;
+    stubApi(snapshot({ screen: "council_report", payloads: { report: { en: before, ja: before }, routes: [], credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    const figures = await screen.findByRole("list", { name: "Headline figures" });
+    const verdict = (await within(figures).findByText(/^today Not comparable/)).closest("li");
+    expect(verdict).toHaveTextContent("Observation coverage 45.0% (below 50%)");
+    expect(verdict).toHaveTextContent("48.2%");
+    expect(screen.getByText("1 difference from today's figures.")).toBeInTheDocument();
+  });
+
+  it("says plainly that a route is on one side only when neither side reached its row limit", async () => {
+    const before = { ...withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3"), tableRow("9", "3.00", "80.0")]), rows_total: 2 } as ReportResponse;
+    const after = { ...withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3")]), rows_total: 1 } as ReportResponse;
+    stubApi(snapshot({ payloads: { report: { en: before, ja: before }, routes: ROUTES, credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("A route marked as on one side only is listed in that side's figures alone.")).toBeInTheDocument();
+    expect(screen.queryByText(/row limit/)).toBeNull();
+  });
+
+  it("explains the row limit only when a side reached it", async () => {
+    const today = withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3")]);
+    stubApi(storedSnapshot, { status: 200, body: { report: today, unavailable: null } });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(
+      await screen.findByText(
+        "Each side lists only the routes within its row limit, in this order, so a route on one side only may have moved past that limit rather than left the data.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says calmly to wait when today's figures are rate-limited, offering no retry that would hit the limit again", async () => {
+    stubApi(storedSnapshot, { status: 429, body: { detail: "Rate limit exceeded" } });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("High traffic right now. Please wait a moment and retry.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("marks the council report's moved tiles with today's value, never comparing its prose", async () => {
+    const before = council("On time 22.6% of the time.");
+    const after = withRows(council("On time 25.0% of the time."), [[25.0, 2.5, 540357, 2130, 2100, 98.6, 4.2]]);
+    stubApi(snapshot({ screen: "council_report", payloads: { report: { en: before, ja: before }, routes: [], credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    const figures = await screen.findByRole("list", { name: "Headline figures" });
+    const onTime = (await within(figures).findByText("today 25.0%")).closest("li");
+    expect(onTime).toHaveTextContent("22.6%");
+    expect(within(figures).getByText("540,357").closest("li")).not.toHaveTextContent("today");
+    expect(screen.getByText("On time 22.6% of the time.")).toBeInTheDocument();
+    expect(screen.getByText("1 difference from today's figures.")).toBeInTheDocument();
+  });
+});
+
+function listReport(reportType: string, rows: unknown[][]): ReportFigures {
+  return {
+    report_type: reportType,
+    rendered_at: "2026-11-09T05:05:00Z",
+    rows,
+    ctx: CTX,
+    definition: DEFINITION,
+    scope_applied: {},
+    rows_total: 174,
+  } as unknown as ReportFigures;
+}
+
+const ROUTE_LISTS = {
+  ranking: listReport("ranking", [["7", null, "5.1", "4", "9", 500], ["42", null, "3.06", "2", "8", 143516]]),
+  on_time: listReport("on_time", [["42", null, "49.0", "3.06", 143516, false, 0.3]]),
+  worst_5min: listReport("worst_5min", [["42", null, 26192, "3.06", 143516]]),
+};
+
+function routePage(locale: "ja" | "en") {
+  const unnamed = locale === "ja" ? "2番停留所" : "Stop #2"; // i18n-ignore: the server's own name for an unnamed stop
+  return {
+    standards: {
+      rows: [{
+        route_code: "42", metric_type: "on_time_pct", threshold_value: 85, bonus_malus_rate: 0.01, actual_value: 49,
+        achievement_rate: 0.58, estimated_bonus_deduction: -0.4, meets: false, not_judged: null,
+      }],
+      ctx: CTX,
+      disclaimer: locale === "ja" ? "試算です（保存時）" : "A simulation, as stored", // i18n-ignore: fixture prose
+      on_time_definition: DEFINITION,
+      scope_applied: {},
+    },
+    shape: {
+      route: "42",
+      shape_id: "S1",
+      variants: [],
+      segments: [{ from_sequence: 2, to_sequence: 3, increase_min: 1.5, pairs: 40 }],
+      geometry: null,
+      stops: [
+        { stop_sequence: 1, stop_name: "Hill Gate", lon: 140.7, lat: 40.8, avg_min: 0.2, samples: 1200 },
+        { stop_sequence: 2, stop_name: unnamed, lon: 140.71, lat: 40.81, avg_min: 1.0, samples: 1100 },
+        { stop_sequence: 3, stop_name: "Summit", lon: 140.72, lat: 40.82, avg_min: 2.5, samples: 1000 },
+      ],
+      unobserved_stops: [],
+      scope_applied: {},
+    },
+  };
+}
+
+function routePageSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
+  return snapshot({
+    screen: "route_page",
+    params: { from: "2026-10-01", to: "2026-10-31", routes: ["42"], shape: "S1" },
+    payloads: {
+      route_page: { ja: routePage("ja"), en: routePage("en") },
+      route_lists: ROUTE_LISTS,
+      concentration: { top_routes: [{ route_code: "42", route_short_name: "42", share_pct: 5 }], rest_share_pct: 95 },
+      routes: ROUTES,
+      credit: { ja: "出典：テスト", en: "Source: test" }, // i18n-ignore: fixture prose
+    } as Snapshot["payloads"],
+    ...overrides,
+  });
+}
+
+describe("SnapshotPage, a route's page", () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    await i18n.changeLanguage("en");
+  });
+
+  it("draws the stored standing, targets and delay by stop with the live page's own parts", async () => {
+    stubFetch(200, routePageSnapshot());
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: /Hillside line/ })).toBeInTheDocument();
+    const strip = screen.getByRole("region", { name: "This route at a glance" });
+    expect(strip).toHaveTextContent("Mean delay3.1 minNo. 2 of 174 routes, most delayed first");
+    expect(strip).toHaveTextContent("On time49%");
+    expect(strip).toHaveTextContent("Over 5 min late18%");
+    expect(strip).toHaveTextContent("Share of all lateness5.0%No. 1 in the agency");
+    expect(screen.getByText("Minimum performance standard")).toBeInTheDocument();
+    expect(screen.getByText("A simulation, as stored")).toBeInTheDocument();
+    expect(screen.getByText("Below standard")).toBeInTheDocument();
+    const byStop = within(screen.getByRole("region", { name: "Delay by stop" })).getByRole("table");
+    expect(within(byStop).getByText("Stop #2")).toBeInTheDocument();
+    expect(within(byStop).getByText("2.5")).toBeInTheDocument();
+    expect(screen.getByText(/Delay grows most from Stop #2 to Summit/)).toBeInTheDocument();
+    expect(screen.getByText("Source: test")).toBeInTheDocument();
+  });
+
+  it("reads only the snapshot itself, and links to nothing live", async () => {
+    const fetchMock = stubFetch(200, routePageSnapshot());
+    renderPage();
+    await screen.findByRole("region", { name: "Delay by stop" });
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+    expect(screen.queryAllByRole("link")).toEqual([]);
+  });
+
+  it("says plainly what it does not hold, and offers no comparison with today", async () => {
+    stubFetch(200, routePageSnapshot());
+    renderPage();
+    expect(await screen.findByText(/the map, the day's trips and the comparison with the previous period/)).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Compare with today's figures" })).toBeNull();
+  });
+
+  it("follows the reader's language with the language's own stored responses", async () => {
+    stubFetch(200, routePageSnapshot());
+    renderPage();
+    await screen.findByText("A simulation, as stored");
+    await i18n.changeLanguage("ja");
+    expect(await screen.findByText("試算です（保存時）")).toBeInTheDocument(); // i18n-ignore: fixture prose
+    const byStop = within(screen.getByRole("region", { name: "停留所ごとの遅延" })).getByRole("table"); // i18n-ignore: the design namespace's own heading
+    expect(within(byStop).getByText("2番停留所")).toBeInTheDocument(); // i18n-ignore: fixture prose
+  });
+
+  it("names the variant it stored without offering another", async () => {
+    const page = routePage("en");
+    const variants = [
+      { shape_id: "S1", first_stop_name: "Hill Gate", last_stop_name: "Summit", stop_count: 3, samples: 900, share_pct: 90 },
+      { shape_id: "S2", first_stop_name: "Summit", last_stop_name: "Hill Gate", stop_count: 3, samples: 100, share_pct: 10 },
+    ];
+    const withVariants = { ...page, shape: { ...page.shape, variants } };
+    stubFetch(200, routePageSnapshot({
+      payloads: { route_page: { en: withVariants, ja: withVariants }, route_lists: ROUTE_LISTS, concentration: { top_routes: [], rest_share_pct: 0 }, routes: ROUTES, credit: {} } as Snapshot["payloads"],
+    }));
+    renderPage();
+    const picker = await screen.findByRole("combobox", { name: /Path/ });
+    expect(picker).toBeDisabled();
+    expect(picker).toHaveValue("S1");
+    expect(screen.queryByRole("button", { name: "Other direction" })).toBeNull();
+  });
+});
+
+const HEADWAY = {
+  rows: [{ route_code: "42", ewt_sec: 120, cov: 0.5, long_gap_rate: 0.1, samples: 80 }],
+  ctx: CTX,
+  scope_applied: {},
+};
+
+describe("SnapshotPage, a Routes table's side panels", () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    await i18n.changeLanguage("en");
+  });
+
+  function withPanels(): Snapshot {
+    return snapshot({
+      payloads: {
+        ...snapshot().payloads,
+        headway: HEADWAY,
+        standards: { ja: routePage("ja").standards, en: routePage("en").standards },
+      } as Snapshot["payloads"],
+    });
+  }
+
+  it("draws the stored panels beside the table and asks no live endpoint for them", async () => {
+    const fetchMock = stubFetch(200, withPanels());
+    renderPage();
+    expect(await screen.findByText("A simulation, as stored")).toBeInTheDocument();
+    const headway = screen.getByText("Headway quality").closest("div")!;
+    expect(within(headway).getByText("+2 min")).toBeInTheDocument();
+    // The gap count is a statistic, shown on request as on the live screen.
+    expect(within(headway).queryByText("80")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
+    expect(within(headway).getByText("80")).toBeInTheDocument();
+    expect(screen.getByText("Minimum performance standard")).toBeInTheDocument();
+    expect(screen.queryByText(/before they were stored/)).toBeNull();
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+  });
+
+  it("follows the reader's language with the language's own stored targets", async () => {
+    await i18n.changeLanguage("ja");
+    stubFetch(200, withPanels());
+    renderPage();
+    expect(await screen.findByText("試算です（保存時）")).toBeInTheDocument(); // i18n-ignore: fixture prose
+  });
+
+  it("renders an older snapshot without the panels, saying they were not stored", async () => {
+    const fetchMock = stubFetch(200, snapshot());
+    renderPage();
+    expect(await screen.findByText(/before they were stored/)).toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.queryByText("Headway quality")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

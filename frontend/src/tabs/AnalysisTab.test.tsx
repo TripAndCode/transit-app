@@ -1,14 +1,19 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { decl, ruleBody } from "../test/cssRules";
+import * as client from "../api/client";
+import { ApiError } from "../api/client";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
-import { AnalysisTab } from "./AnalysisTab";
+import * as config from "../api/config";
+import * as snapshots from "../api/snapshots";
+import { AnalysisTab, SingleReportScreen } from "./AnalysisTab";
+import { PrintFootProvider, PrintFrame } from "../components/PrintFrame";
 import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
 
@@ -22,15 +27,25 @@ beforeEach(() => {
   const loading = { data: undefined, isLoading: true, error: null, refetch: vi.fn() } as never;
   vi.spyOn(hooks, "useWeatherDelay").mockReturnValue(loading);
   vi.spyOn(hooks, "useHeadwayQuality").mockReturnValue(loading);
+  // Weather is flag-gated and the probe wording is admin-only; the tests below
+  // read the full-featured screen unless one says otherwise.
+  vi.spyOn(config, "useFeatureOn").mockReturnValue(true);
+  vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
 });
 
 const DEFINITION: DefinitionMeta = {
   preset: "legacy_60s",
   early_tolerance_sec: null,
   late_tolerance_sec: 60,
+  early_departure_sec: null,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0", source: "aggregates",
+  built_at: null,
+  value_basis: "feed_prediction",
+  timetable_versions: null,
+  source_mix: null,
 };
 
 function reportMeta(reportType: ReportType): ReportMeta {
@@ -45,8 +60,9 @@ function reportResponse(reportType: ReportType): ReportResponse {
 }
 
 function mockSupportHooks() {
+  // The agency catalogue answered without a tier for this agency, unless a test set one.
+  if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
-  vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
 }
 
 function renderAnalysis(
@@ -61,6 +77,15 @@ function renderAnalysis(
         element: <AnalysisTab reportTypes={reportTypes} defaultReport={defaultReport} />,
       },
     ],
+    { initialEntries: [initialPath] },
+  );
+  renderWithProviders(<RouterProvider router={router} />);
+  return { router };
+}
+
+function renderSingleReport(initialPath: string, reportType: string) {
+  const router = createMemoryRouter(
+    [{ path: "/agencies/:agencyId/analysis/:lens", element: <SingleReportScreen reportType={reportType} /> }],
     { initialEntries: [initialPath] },
   );
   renderWithProviders(<RouterProvider router={router} />);
@@ -106,7 +131,22 @@ describe("AnalysisTab", () => {
     expect(useReport.mock.calls.at(-1)?.[1]).toBe(opened);
   });
 
-  it("greys the scope conditions the open report did not use", () => {
+  it("marks a thin route on a day-type report by the ranking floor, the report naming none", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekend")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekend"), rows: [["R1", null, "土日祝", 4.2, 40]] }, // i18n-ignore: query contract
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=dow_weekend", ["dow_weekend"]);
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).not.toBeChecked();
+    expect(screen.queryByRole("columnheader", { name: "Observations" })).toBeNull();
+    expect(screen.getByText("few data")).toHaveClass("caveat-badge");
+  });
+
+  it("hides the scope conditions the open report did not use", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({
@@ -116,43 +156,12 @@ describe("AnalysisTab", () => {
       refetch: vi.fn(),
     } as never);
     renderAnalysis("/agencies/1/analysis/when?report=dow_weekday&dow=weekday&routes=R1", ["dow_weekday"]);
-    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--off");
-    expect(screen.getByRole("button", { name: /R1/ })).not.toHaveClass("scope-token--off");
+    const bar = within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar.queryByRole("button", { name: /^Days/ })).toBeNull();
+    expect(bar.getByRole("button", { name: /^Routes/ })).toBeInTheDocument();
   });
 
-  it("greys by the forecast's own scope on the route forecast, not the last report's", () => {
-    mockSupportHooks();
-    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "useReport").mockReturnValue({
-      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, time_band: true } },
-      isFetching: false,
-      error: null,
-      refetch: vi.fn(),
-    } as never);
-    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
-      data: {
-        grid: [],
-        worst: null,
-        routes: [],
-        forecast_days: [],
-        history_from: null,
-        history_to: null,
-        recent_from: null,
-        recent_to: null,
-        disclaimer: "",
-        scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false },
-      },
-      isPending: false,
-      error: null,
-      refetch: vi.fn(),
-    } as never);
-    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
-    renderAnalysis("/agencies/1/analysis/when?report=route_forecast&time_band=morning", ["dow_weekday", "route_forecast"]);
-    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
-  });
-
-  it("counts a chosen route as used on the route forecast, whose route view honours it", () => {
+  it("shows no scope bar on the route forecast, whose route picker is its own control", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
@@ -187,20 +196,64 @@ describe("AnalysisTab", () => {
       refetch: vi.fn(),
     } as never);
     renderAnalysis("/agencies/1/analysis/when?report=route_forecast&routes=44242", ["route_forecast"]);
-    expect(screen.getByText(/Not used on this screen/)).not.toHaveTextContent("Routes");
+    expect(document.querySelector(".scope-bar")).toBeNull();
+    expect(screen.queryByRole("region", { name: "What you're viewing" })).toBeNull();
   });
 
-  it("greys nothing while a different report's response is still on screen", () => {
+  it("keeps the previous report's hidden conditions while a new report's response is still on screen, then follows the new report once it answers", async () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("trend"), reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "useReport").mockReturnValue({
-      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false } },
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, service: false } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const { router } = renderAnalysis("/agencies/1/analysis/when?report=dow_weekday&dow=weekday", ["trend", "dow_weekday"]);
+    const bar = () => within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar().queryByRole("button", { name: /^Days/ })).toBeNull();
+
+    // Switching to "trend" leaves its own answer still in flight: react-query
+    // keeps the previous report's data on screen (`detail.data.report_type`
+    // not yet "trend"), so this component's own `scopeApplied` goes `undefined`
+    // for this render. The bar is not told anything changed, so it keeps
+    // showing what it last knew rather than flashing every condition back on.
+    useReport.mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, service: false } },
       isFetching: true,
       error: null,
       refetch: vi.fn(),
     } as never);
-    renderAnalysis("/agencies/1/analysis/when?report=trend&dow=weekday", ["trend", "dow_weekday"]);
-    expect(screen.getByRole("button", { name: "weekdays" })).not.toHaveClass("scope-token--off");
+    await act(() => router.navigate("/agencies/1/analysis/when?report=trend"));
+    expect(bar().queryByRole("button", { name: /^Days/ })).toBeNull();
+
+    // Once "trend" answers for itself, the bar follows its own scope_applied.
+    useReport.mockReturnValue({
+      data: { ...reportResponse("trend"), scope_applied: { from: true, to: true, dow: true, service: true } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    await act(() => router.navigate("/agencies/1/analysis/when?report=trend&v=2"));
+    expect(bar().getByRole("button", { name: /^Days/ })).toBeInTheDocument();
+  });
+
+  it("shows every condition once a new report fails, instead of the previous report's", async () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("trend"), reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, service: false } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const { router } = renderAnalysis("/agencies/1/analysis/when?report=dow_weekday&dow=weekday", ["trend", "dow_weekday"]);
+    const bar = () => within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar().queryByRole("button", { name: /^Days/ })).toBeNull();
+
+    useReport.mockReturnValue({ data: undefined, isFetching: false, error: new Error("boom"), refetch: vi.fn() } as never);
+    await act(() => router.navigate("/agencies/1/analysis/when?report=trend"));
+    expect(bar().getByRole("button", { name: /^Days/ })).toBeInTheDocument();
   });
 
   it("lists only the report types it is given", () => {
@@ -222,15 +275,15 @@ describe("AnalysisTab", () => {
   it("falls back to its first report when the report param belongs to another screen", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({
-      data: [reportMeta("trend"), reportMeta("dwell_run")],
+      data: [reportMeta("dow_weekday"), reportMeta("dow_weekend")],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as never);
     const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
-    renderAnalysis("/agencies/1/analysis/why?report=trend", ["dwell_run"]);
-    expect(screen.getByRole("button", { name: /^Dwell\/running time/ })).toHaveAttribute("aria-pressed", "true");
-    expect(useReport.mock.calls.at(-1)?.[1]).toBe("dwell_run");
+    renderAnalysis("/agencies/1/analysis/when?report=dwell_run", ["dow_weekday", "dow_weekend"]);
+    expect(screen.getByRole("button", { name: /^Routes on weekdays/ })).toHaveAttribute("aria-pressed", "true");
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe("dow_weekday");
   });
 
   it("selecting a report sets the report param, keeps the filters, and adds a history entry", async () => {
@@ -340,9 +393,15 @@ function emptyReport(reportType: string): ReportResponse {
       preset: null,
       early_tolerance_sec: null,
       late_tolerance_sec: null,
+      early_departure_sec: null,
       exclusion_threshold_sec: 0,
       measurement_point: "departure",
       dedup_rule: "",
+      method_version: "2026.11.0", source: "aggregates",
+      built_at: null,
+      value_basis: "feed_prediction",
+      timetable_versions: null,
+      source_mix: null,
     },
   } as ReportResponse;
 }
@@ -379,8 +438,15 @@ describe("AnalysisTab empty state recoveries", () => {
     renderRecoveryTab("/agencies/8/analysis/rider?report=ranking&from=2020-01-01&to=2020-01-07&routes=A05");
     expect(screen.getByRole("button", { name: "Clear the route filter" })).toBeInTheDocument();
   });
+});
 
-  it("offers the dwell_run recovery only for the no-routes case, not the not_available/unsupported states", () => {
+
+describe("Why screen empty state recovery", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("offers the recovery only for the no-routes case, not the not_available/unsupported states", () => {
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null } as never);
     vi.spyOn(hooks, "useAgencies").mockReturnValue({
       data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
@@ -396,7 +462,7 @@ describe("AnalysisTab empty state recoveries", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07&routes=A05"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<SingleReportScreen reportType="dwell_run" />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -404,7 +470,7 @@ describe("AnalysisTab empty state recoveries", () => {
   });
 });
 
-describe("AnalysisTab dwell_run route cap", () => {
+describe("Why screen route cap", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -447,7 +513,7 @@ describe("AnalysisTab dwell_run route cap", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07&service=平日"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<SingleReportScreen reportType="dwell_run" />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -497,7 +563,7 @@ describe("AnalysisTab dwell_run route cap", () => {
       <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07"]}>
         <SwitchAgency />
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<SingleReportScreen reportType="dwell_run" />} />
         </Routes>
       </MemoryRouter>
     );
@@ -658,7 +724,7 @@ describe("AnalysisTab route list coverage", () => {
   });
 });
 
-describe("AnalysisTab Why without arrival times", () => {
+describe("Why screen without arrival times", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -684,7 +750,7 @@ describe("AnalysisTab Why without arrival times", () => {
       error: null,
       refetch: vi.fn(),
     } as never);
-    return renderAnalysis("/agencies/1/analysis/why?report=dwell_run&from=2026-09-01&to=2026-09-07", ["dwell_run"]);
+    return renderSingleReport("/agencies/1/analysis/why?report=dwell_run&from=2026-09-01&to=2026-09-07", "dwell_run");
   }
 
   it("says why the split can't be shown and where to look instead", async () => {
@@ -704,7 +770,7 @@ describe("AnalysisTab Why without arrival times", () => {
     const { router } = showUnavailableDwellRun();
     await userEvent.click(screen.getByRole("button", { name: "Compare weekdays with weekends and holidays" }));
     expect(router.state.location.pathname).toBe("/agencies/1/compare");
-    expect(new URLSearchParams(router.state.location.search).get("report")).toBe("compare_ranking");
+    expect(new URLSearchParams(router.state.location.search).has("report")).toBe(false);
   });
 
   it("offers no CSV of a split it can't make", () => {
@@ -727,7 +793,8 @@ describe("AnalysisTab council report", () => {
     vi.spyOn(hooks, "useReport").mockReturnValue({
       data: {
         ...reportResponse("council_summary"),
-        rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6]],
+        rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6, 4.2]],
+        definition: { ...DEFINITION, early_departure_sec: 60 },
         text: "Aomori, 9/1 – 9/28\nOn time 22.6%, average delay 2.5 min.\n* On time means within 1 min.",
         ctx: { from: "2026-09-01", to: "2026-09-28", dow: "all", time_band: "all", service: "all", routes },
         scope_applied: ALL_SIX,
@@ -743,6 +810,25 @@ describe("AnalysisTab council report", () => {
     } as never);
     return renderAnalysis("/agencies/1/analysis/reports?report=council_summary", ["council_summary"]);
   }
+
+  it("lets an admin freeze the council report it shows, and no one else", async () => {
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    showCouncil();
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    showCouncil();
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect(screen.queryByRole("menuitem", { name: /print/i })).toBeNull();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    const [, , scope, options] = vi.mocked(hooks.useReport).mock.calls.at(-1)!;
+    expect(create).toHaveBeenCalledWith({
+      screen: "council_report",
+      agencyId: 1,
+      query: hooks.reportQueryString(scope, options),
+    });
+  });
 
   it("lays the council report out as figures and prose, not a one-row table", () => {
     showCouncil();
@@ -769,7 +855,16 @@ describe("AnalysisTab council report", () => {
     return within(list).getByText(label).closest("li")!;
   }
 
-  it("names the observation count as stop-level readings, not departures", () => {
+  it("shows the early-departure rate beside the on-time rate, naming its threshold", () => {
+    showCouncil();
+    const labels = [...screen.getByRole("list", { name: "Headline figures" }).querySelectorAll(".council-report__label")].map(
+      (l) => l.textContent,
+    );
+    expect(labels.slice(0, 2)).toEqual(["On time", "Early departures (more than 1 min early)"]);
+    expect(figure("Early departures (more than 1 min early)")).toHaveTextContent("4.2%");
+  });
+
+  it("names the observation count as stop-level observations, not departures", () => {
     showCouncil();
     expect(figure("Observations (stop level)")).toHaveTextContent("540,357");
     expect(screen.queryByText("Departures observed")).toBeNull();
@@ -798,6 +893,92 @@ describe("AnalysisTab council report", () => {
     expect(figure("Planned trips")).toHaveTextContent("2,130");
   });
 
+  const COMPARABLE = {
+    comparable: true,
+    reason: null,
+    coverage_pct: 90.0,
+    observed_trips: 900,
+    coverage_planned_trips: 1000,
+    ci_low: 87.8,
+    ci_high: 91.8,
+    clamp_pct: 0.2,
+    planned_trips: 1000,
+    delivered_missing: null,
+    thresholds: { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 },
+  };
+  const COMPARISON = "Comparison with other operators";
+
+  function value(label: string) {
+    return figure(label).querySelector(".council-report__value")?.textContent;
+  }
+
+  it("says the agency can be compared with other operators when the agencies board would rank it", () => {
+    showCouncil([], { comparability: COMPARABLE });
+    expect(value(COMPARISON)).toBe("Comparable");
+    expect(figure(COMPARISON).querySelector(".council-report__note")).toBeNull();
+  });
+
+  it("says why an agency can't be compared, in the agencies board's words", () => {
+    showCouncil([], { comparability: { ...COMPARABLE, comparable: false, reason: "coverage_low", coverage_pct: 41.0 } });
+    expect(value(COMPARISON)).toBe("Not comparable");
+    expect(figure(COMPARISON)).toHaveTextContent("Observation coverage 41.0% (below 70%)");
+    cleanup();
+    showCouncil([], { comparability: { ...COMPARABLE, comparable: false, reason: "ci_wide", ci_low: 80.0, ci_high: 86.1 } });
+    expect(figure(COMPARISON)).toHaveTextContent("On-time % interval ±3.1 points (wider than ±3)");
+    cleanup();
+    const unmatched = {
+      ...COMPARABLE,
+      comparable: false,
+      reason: "coverage_unknown",
+      coverage_pct: null,
+      observed_trips: null,
+      coverage_planned_trips: null,
+      ci_low: null,
+      ci_high: null,
+      delivered_missing: "feed_cannot_report",
+    };
+    // The verdict's reason reads only the verdict's own plan figures, the
+    // board's: the report's own fresh ones here say the plan was unreadable.
+    showCouncil([], { comparability: unmatched, rows: [[22.6, 2.5, 540357, 0, null, null]], delivered_missing: "unreadable" });
+    expect(value(COMPARISON)).toBe("Not comparable");
+    expect(figure(COMPARISON)).toHaveTextContent("Observation coverage can't be measured: this feed's trips can't be matched to the timetable");
+  });
+
+  it("states a basic-tier agency's tier for the delivered rate and the comparison, not a pipeline reason", () => {
+    const basic = { agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "basic" };
+    const unmatched = {
+      ...COMPARABLE,
+      comparable: false,
+      reason: "coverage_unknown",
+      coverage_pct: null,
+      observed_trips: null,
+      coverage_planned_trips: null,
+      ci_low: null,
+      ci_high: null,
+      delivered_missing: "feed_cannot_report",
+    };
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [basic] } as never);
+    showCouncil([], { comparability: unmatched, rows: [[22.6, 2.5, 540357, 2130, null, null]], delivered_missing: "feed_cannot_report" });
+    expect(figure("Service delivered %")).toHaveTextContent("not part of basic data");
+    expect(figure("Service delivered %")).not.toHaveTextContent("cancellations");
+    expect(figure(COMPARISON)).toHaveTextContent("Basic data: on-time only, so observation coverage can't be measured");
+    expect(figure(COMPARISON)).not.toHaveTextContent("can't be matched to the timetable");
+  });
+
+  it("labels the comparison as the whole agency's when a filter narrows the on-time figures", () => {
+    showCouncil(["R1"], { comparability: COMPARABLE });
+    expect(value(`${COMPARISON} (whole agency)`)).toBe("Comparable");
+  });
+
+  it("shows no comparison tile for a response that carries no verdict", () => {
+    showCouncil();
+    expect(within(screen.getByRole("list", { name: "Headline figures" })).queryByText(COMPARISON)).toBeNull();
+    cleanup();
+    // The board could not be built, or does not list the agency yet.
+    showCouncil([], { comparability: null });
+    expect(within(screen.getByRole("list", { name: "Headline figures" })).queryByText(COMPARISON)).toBeNull();
+  });
+
   it("keeps each figure on one line in a tile wide enough to hold it, so a phone never breaks a number in two", () => {
     const css = readFileSync(resolve(__dirname, "../components/analysis/CouncilSummaryBlock.css"), "utf8");
     expect(decl(ruleBody(css, ".council-report__value"), "white-space")).toBe("nowrap");
@@ -816,6 +997,254 @@ describe("AnalysisTab council report", () => {
   });
 });
 
+describe("AnalysisTab council report print", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The create an admin's print sends for this scope, shared with the
+   *  backend test that reads the stored snapshot back (tests/api/test_snapshots.py). */
+  const PRINT_FLOW: { search: string; body: { screen: string; query: Record<string, string> } } = JSON.parse(
+    readFileSync(resolve(__dirname, "../../../tests/fixtures/council_print_snapshot.json"), "utf8"),
+  );
+  const ID = "AbCdEfGhIjKlMnOpQrStUv";
+  const CREATED = {
+    snapshot_id: ID,
+    path: `/s/${ID}`,
+    created_at: "2026-11-10T03:00:05Z",
+    screen: "council_report",
+    agency_id: 1,
+    method_version: "2026.11.0",
+  };
+  const LINE = `Snapshot: ${window.location.origin}/s/${ID} (method 2026.11.0)`;
+
+  function councilReport(onTime = 22.6): ReportResponse {
+    return {
+      ...reportResponse("council_summary"),
+      rows: [[onTime, 2.5, 540357, 2130, 2100, 98.6, 4.2]],
+      definition: { ...DEFINITION, early_departure_sec: 60 },
+      text: `Aomori, 5/14\nOn time ${onTime}%, average delay 2.5 min.`,
+      ctx: { from: "2026-05-14", to: "2026-05-14", dow: "all", time_band: "all", service: "all", routes: [] },
+      scope_applied: { from: true, to: true },
+      delivered_scope_applied: { from: true, to: true },
+      covered_days: 1,
+      window_days: 1,
+      delivered_missing: null,
+    } as ReportResponse;
+  }
+
+  /** The stored snapshot as its read hands it back: the response served a
+   *  moment after the one on the page, its keys in another order. */
+  function storedSnapshot(report: ReportResponse) {
+    const later = Object.fromEntries(Object.entries({ ...report, rendered_at: "2026-11-10T03:00:04Z" }).reverse());
+    return { snapshot_id: ID, payloads: { report: { ja: later, en: later } }, method_version: "2026.11.0" };
+  }
+
+  /** The council report on an agency page, with the print frame the app shell
+   *  draws around it. */
+  function showPrintable({ admin = true, report = councilReport(), placeholder = false } = {}) {
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(admin);
+    mockSupportHooks();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "http://example.com/feed.pb" }],
+    } as never);
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("council_summary")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const answer = (data: ReportResponse, isPlaceholderData = false) =>
+      ({ data, isPlaceholderData, isFetching: false, error: null, refetch: vi.fn() }) as never;
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue(answer(report, placeholder));
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/agencies/:agencyId/analysis/:lens",
+          element: (
+            <PrintFootProvider>
+              <PrintFrame />
+              <AnalysisTab reportTypes={["council_summary"]} />
+            </PrintFootProvider>
+          ),
+        },
+      ],
+      { initialEntries: [`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}`] },
+    );
+    renderWithProviders(<RouterProvider router={router} />);
+    return { router, answerWith: (data: ReportResponse) => useReport.mockReturnValue(answer(data)) };
+  }
+
+  /** window.print, recording what the printed footer said when it was called. */
+  function printer() {
+    const footers: string[] = [];
+    const print = vi.spyOn(window, "print").mockImplementation(() => {
+      footers.push(screen.getByTestId("print-frame-footer").textContent ?? "");
+    });
+    return { print, footers };
+  }
+
+  function answerSnapshotReads(snapshot: unknown) {
+    return vi
+      .spyOn(client, "apiGet")
+      .mockImplementation((path: string) => (path.startsWith("/api/snapshots/") ? Promise.resolve(snapshot) : new Promise(() => {})) as never);
+  }
+
+  const printButton = () => screen.getByRole("button", { name: "Print / Save as PDF" });
+
+  it("stores an admin's printed figures first, then prints the snapshot's link and method in the footer", async () => {
+    const post = vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    const get = answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print, footers } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith("/api/admin/snapshots", { ...PRINT_FLOW.body, agency_id: 1 }, expect.anything());
+    expect(get).toHaveBeenCalledWith(`/api/snapshots/${ID}`, expect.anything());
+    expect(footers[0]).toContain(LINE);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("The printed page carries this snapshot's link at its foot");
+    expect(within(status).getByRole("link")).toHaveAttribute("href", `${window.location.origin}/s/${ID}`);
+  });
+
+  it("prints anyway, without a link, when the snapshot can't be taken, and says so calmly", async () => {
+    vi.spyOn(client, "apiPost").mockRejectedValue(new ApiError(409, "the aggregates changed"));
+    const { print, footers } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(footers[0]).not.toContain("Snapshot:");
+    expect(screen.getByRole("status")).toHaveTextContent("Printed without a snapshot link, as one couldn't be prepared.");
+  });
+
+  it("prints without a link when the stored figures are not the ones on the page", async () => {
+    vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    answerSnapshotReads(storedSnapshot(councilReport(30.1)));
+    const { print, footers } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(footers[0]).not.toContain("Snapshot:");
+    expect(screen.getByRole("status")).toHaveTextContent("the figures were updated after this page opened");
+  });
+
+  it("leaves a reader's print as it is: no snapshot and no note", async () => {
+    const post = vi.spyOn(client, "apiPost");
+    const { print, footers } = printer();
+    showPrintable({ admin: false });
+    await userEvent.click(printButton());
+    expect(print).toHaveBeenCalledOnce();
+    expect(post).not.toHaveBeenCalled();
+    expect(footers[0]).not.toContain("Snapshot:");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("prints figures still held over from another scope without a snapshot of either", async () => {
+    const post = vi.spyOn(client, "apiPost");
+    const { print } = printer();
+    showPrintable({ placeholder: true });
+    await userEvent.click(printButton());
+    expect(print).toHaveBeenCalledOnce();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("takes one snapshot per print, never another for a second click or a repaint", async () => {
+    const post = vi.spyOn(client, "apiPost").mockReturnValue(new Promise(() => {}));
+    const { print } = printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    expect(screen.getByRole("status")).toHaveTextContent("Creating a snapshot for the printed page");
+    expect(printButton()).toBeDisabled();
+    await userEvent.click(printButton());
+    await act(() => router.navigate(`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}&raw=1`));
+    expect(post).toHaveBeenCalledOnce();
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it("keeps the link in the footer only while the page shows the figures it was printed with", async () => {
+    vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    const shown = councilReport();
+    answerSnapshotReads(storedSnapshot(shown));
+    const { print } = printer();
+    const { router, answerWith } = showPrintable({ report: shown });
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    const footer = () => screen.getByTestId("print-frame-footer");
+
+    // A repaint over the same response keeps the line.
+    await act(() => router.navigate(`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}&raw=1`));
+    expect(footer()).toHaveTextContent(LINE);
+
+    // A new response, even one reading the same, is not what was stored.
+    answerWith({ ...shown, rendered_at: "2026-11-10T04:00:00Z" });
+    await act(() => router.navigate(`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}`));
+    expect(footer()).not.toHaveTextContent("Snapshot:");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("drops the link once the scope on screen is another", async () => {
+    vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print } = printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("print-frame-footer")).toHaveTextContent(LINE);
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-01&to=2026-05-14"));
+    expect(screen.getByTestId("print-frame-footer")).not.toHaveTextContent("Snapshot:");
+  });
+
+  it("prints nothing once the report has left the screen while its snapshot was taken", async () => {
+    let answer: (created: typeof CREATED) => void = () => {};
+    vi.spyOn(client, "apiPost").mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    cleanup();
+    await act(async () => answer(CREATED));
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it("cancels a print whose scope changes while its snapshot is taken, and says so instead of printing", async () => {
+    let answer: (created: typeof CREATED) => void = () => {};
+    vi.spyOn(client, "apiPost").mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print } = printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-01&to=2026-05-14"));
+    await act(async () => answer(CREATED));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Printing was cancelled because the view changed."));
+    expect(print).not.toHaveBeenCalled();
+    expect(printButton()).toBeEnabled();
+    expect(screen.getByTestId("print-frame-footer")).not.toHaveTextContent("Snapshot:");
+  });
+
+  it("says a print was called off only beside the view it was called off for", async () => {
+    let answer: (created: typeof CREATED) => void = () => {};
+    vi.spyOn(client, "apiPost").mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-01&to=2026-05-14"));
+    await act(async () => answer(CREATED));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Printing was cancelled because the view changed."));
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-02&to=2026-05-15"));
+    expect(screen.queryByText("Printing was cancelled because the view changed.")).not.toBeInTheDocument();
+  });
+
+  it("leaves room below the content for the foot's snapshot line, even wrapped, when the page carries one", () => {
+    const shell = ruleBody(readFileSync(resolve(__dirname, "../styles/global.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(shell, ".print-frame__footer"), "line-height")).toBe("1.3");
+    expect(decl(ruleBody(shell, ".app-shell:has(.print-frame__snapshot:not(:empty)) main"), "padding-bottom")).toBe("20mm");
+  });
+
+  it("shows the link on paper and keeps the on-screen notes and the button off it", () => {
+    const shell = ruleBody(readFileSync(resolve(__dirname, "../styles/global.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(shell, ".print-frame__snapshot"), "display")).toBe("block");
+    const own = ruleBody(readFileSync(resolve(__dirname, "../components/analysis/CouncilSummaryBlock.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(own, ".council-report__print, .council-report__print-note"), "display")).toBe("none");
+  });
+});
+
 describe("AnalysisTab delay record", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -829,7 +1258,7 @@ describe("AnalysisTab delay record", () => {
 
   const ROW = ["Aomori City Bus", "W54", "weekday", "2026-09-02", "14:45:00", "14:50:55", 355, "Aomori Station", true];
 
-  function showCertificate(types: ReportType[] = ["delay_certificate"]) {
+  function showCertificate(types: ReportType[] = ["delay_certificate"], text = "1 departure left more than 300 s late.") {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: types.map(reportMeta), isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockImplementation(
@@ -840,7 +1269,7 @@ describe("AnalysisTab delay record", () => {
               data: {
                 ...reportResponse("delay_certificate"),
                 rows: [ROW],
-                text: "1 departure left more than 300 s late.",
+                text,
                 ctx: { from: "2026-09-02", to: "2026-09-02" },
               },
               isFetching: false,
@@ -867,6 +1296,16 @@ describe("AnalysisTab delay record", () => {
     expect(staff).toContainElement(screen.getByRole("table"));
     expect(staff).toContainElement(screen.getByRole("link", { name: /CSV/ }));
     expect(staff).toHaveTextContent("1 departure left more than 300 s late.");
+  });
+
+  it("sets the summary's footnotes, the method version among them, apart from the count", async () => {
+    const stamp = "* Method version: 2026.11.0, aggregates built: not applicable (live scan)";
+    showCertificate(["delay_certificate"], `1 departure left more than 300 s late.\n${stamp}`);
+    await userEvent.click(screen.getByText(STAFF_LIST));
+    const footnote = screen.getByText(stamp);
+    expect(footnote).toHaveClass("report-footnote");
+    expect(footnote.closest(".cert-staff__summary")).toBeNull();
+    expect(screen.getByText(/1 departure left more than 300 s late\./)).not.toHaveTextContent("Method version");
   });
 
   it("counts the late departures only once staff open them, and only for the lookup's day", async () => {
@@ -900,11 +1339,11 @@ describe("AnalysisTab delay record", () => {
     expect(screen.getByText(STAFF_LIST).closest("details")).not.toHaveAttribute("open");
   });
 
-  it("leaves the screen's period sentence off the record, whose own day and route are its scope", async () => {
+  it("leaves the screen's period bar off the record, whose own day and route are its scope", async () => {
     const { router } = showCertificate(["council_summary", "delay_certificate"]);
-    expect(document.querySelector(".scope-sentence")).toBeNull();
+    expect(document.querySelector(".scope-bar")).toBeNull();
     await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary"));
-    expect(document.querySelector(".scope-sentence")).not.toBeNull();
+    expect(document.querySelector(".scope-bar")).not.toBeNull();
   });
 
   it("labels the late departures by the day their rows are for, not a day still loading", async () => {
@@ -959,10 +1398,9 @@ describe("AnalysisTab delay record", () => {
     expect(summary.closest("details")).toContainElement(screen.getByRole("alert"));
   });
 
-  it("prints a report without the list, the insights or the staff list", () => {
+  it("prints a report without the list or the staff list", () => {
     const print = ruleBody(readFileSync(resolve(__dirname, "./analysisTab.css"), "utf8"), "@media print");
     expect(decl(ruleBody(print, ".analysis-report-list"), "display")).toBe("none !important");
-    expect(decl(ruleBody(print, ".analysis-insights"), "display")).toBe("none !important");
     expect(decl(ruleBody(print, ".cert-staff"), "display")).toBe("none");
   });
 });
@@ -984,5 +1422,54 @@ describe("AnalysisTab slow reports", () => {
     fireEvent.click(screen.getByRole("button", { name: "Narrow to the last 7 days of the period" }));
     const params = new URLSearchParams(router.state.location.search);
     expect([params.get("from"), params.get("to")]).toEqual(["2026-09-24", "2026-09-30"]);
+  });
+});
+
+describe("SingleReportScreen", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function setup(path: string, reportType: ReportType) {
+    mockSupportHooks();
+    const useReports = vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta(reportType)], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: reportResponse(reportType), isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderSingleReport(path, reportType);
+    return { useReports, useReport };
+  }
+
+  it.each([
+    ["dwell_run", "/agencies/1/analysis/why"],
+    ["compare_ranking", "/agencies/1/analysis/compare"],
+  ] as const)("renders %s as the page itself, with no report list beside it", (reportType, path) => {
+    const { useReports, useReport } = setup(path, reportType);
+    expect(document.querySelector(".analysis-report-list")).toBeNull();
+    expect(screen.queryByText("Reports")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Dwell\/running time|Weekday and weekend\/holiday gap)/ })).toBeNull();
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe(reportType);
+    expect(useReports).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["dwell_run", "report=dwell_run"],
+    ["compare_ranking", "report=compare_ranking"],
+    ["dwell_run", "report=trend"],
+  ] as const)("opens %s for the link ?%s", (reportType, query) => {
+    const { useReport } = setup(`/agencies/1/analysis/x?${query}`, reportType);
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe(reportType);
+  });
+
+  it("keeps the report's heading, export and statistics toggle", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...emptyReport("dwell_run"), rows: [{ available: true, time_band_supported: true, routes: [{ route_code: "R1", service_type: null, dwell_samples: 1, dwell_avg_sec: 20, dwell_p50_sec: 18, dwell_p90_sec: 40, run_samples: 1, run_avg_sec: 90, run_p50_sec: 85, run_p90_sec: 130 }] }] },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderSingleReport("/agencies/1/analysis/why", "dwell_run");
+    expect(screen.getByRole("heading", { level: 2, name: "Dwell/running time" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /CSV/ })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeInTheDocument();
   });
 });

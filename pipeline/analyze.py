@@ -11,6 +11,10 @@ re-running is idempotent and a crash mid-run rolls back to the prior snapshot.
 The ledger's blind spot (see `_dates_needing_rebuild`) is recovered only by a
 deliberate full rebuild (`analyze --full`).
 
+No run, full or incremental, purges or rebuilds a date before the agency's
+retention floor (`pipeline.retention.retention_floor`, which says why).
+`_above_floor` is the one place that enforces it, on every scope a run builds.
+
 The tables in `pipeline.ch_aggregates.COPIED_TABLES` are computed and stored in
 ClickHouse: the date-keyed ones rebuilt in whole months, the whole-history ones
 finalized from ClickHouse-only internal tables. Each run copies what it rebuilt into
@@ -28,20 +32,30 @@ Aggregation tables produced:
 - agg_route_daily_dist — per-day delay distribution (powers range-scoped reports
   and today/route-summary's same-day-type baseline)
 - agg_hour_daily       — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
+- agg_route_band_daily — per-route, per-day, per-time-band delay (a time-band Overview)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
-- agg_feed_health      — per-day row counts (every row, and those with a delay) and implausible-delay
-  count; doubles as the incremental ledger
-- agg_service_delivered_daily — per-day non-executed trip count (executed-vs-planned rate; static_join agencies only)
+- agg_stop_hour_daily  — per-stop, per-day, per-service-day-hour departures and on-time counts
+  (the supply map's stop panel)
+- agg_stop_departures_daily — per-stop, per-day departures in time order with their delays
+  (the supply map's stop panel's waits)
+- agg_feed_health      — per-day row counts (every row, those with a delay, and every row by ingest
+  source) and implausible-delay count; doubles as the incremental ledger
+- agg_service_delivered_daily — per-day, per-route non-executed trip count (executed-vs-planned rate;
+  static_join agencies only)
 - agg_route_headway    — scheduled-headway median + high-frequency classification + scheduled mean-wait
   per route (static GTFS only)
 - agg_route_headway_daily — per-day reconstructed ACTUAL headway median + sufficient statistics for
   excess-wait/CoV/long-gap pooling (static_join agencies only)
 - agg_route_daily_dwell_run — per-day dwell/running-time distribution (decomposition view; static_join agencies only)
+- agg_route_segment_runtime — per-day running time per timetable segment and time band (static_join agencies only)
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
+- agg_stop_supply_days / agg_stop_supply_hourly — per timetable version in force, the typical day of each
+  day type and each stop's planned departures per hour on it (pipeline/stop_supply.py)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
   section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
+- feed_quality_monthly — per-month feed-quality scorecard (pipeline/feed_quality.py)
 - agg_meta             — last analyze() time per agency (forensic)
 - agg_table_state      — each table's fingerprint, which decides when the next run rebuilds it in full
 
@@ -64,11 +78,11 @@ divide SUM(sum_delay_sec) / SUM(samples) once, at the end, rather than
 re-weighting the already-rounded avg_min/avg_delay_sec (SUM(avg_min *
 samples) / SUM(samples)) — the latter pools a mean of ROUNDED per-row
 values, which is not the same as the true pooled mean over the underlying
-raw observations. The same rule covers these six tables and
-agg_route_daily_dist, which carries `sum_delay_sec` with no rounded mean
-beside it.
+raw observations. The same rule covers these six tables,
+agg_route_daily_dist, agg_route_band_daily and agg_stop_hour_daily, which carry
+`sum_delay_sec` with no rounded mean beside it.
 
-agg_daily_trend additionally carries `sum_late_sec`, the exact
+agg_daily_trend and agg_route_band_daily additionally carry `sum_late_sec`, the exact
 SUM(GREATEST(dep_delay, 0)) behind each row — a clamped TOTAL, not a mean, so
 a reader pooling multiple rows sums it directly (no division). A route's
 total lateness contribution must be computed by summing this per-observation
@@ -81,21 +95,33 @@ lateness contribution instead of counting it.
 import io
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import NamedTuple
 
 import psycopg2.extras
 
-from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
-from pipeline.agg_registry import ArchivedInput, Timetable
+from pipeline import (
+    agg_registry,
+    agg_sql,
+    ch_aggregates,
+    feed_quality,
+    rebuild_headline,
+    refiled,
+    retention,
+    static_archive,
+    static_headways,
+    stop_supply,
+)
+from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
-from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
+from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, schedules, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import filed_dates_reached, service_date_ch, service_day_start_utc
+from pipeline.static_archive import Stamp
 from pipeline.static_content import static_parts as _static_parts
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
 
@@ -142,9 +168,10 @@ _SERVICE_DATE = service_date_ch()
 
 
 # The stop visits of the dates being rebuilt are materialised into a Postgres
-# TEMP TABLE, _analyze_visits (see analyze()), for agg_route_daily_dwell_run, the
-# Postgres builder that pairs RT arrivals and departures with each visit's
-# own archived timetable, and only for an agency that builder runs for. The visits are resolved in ClickHouse
+# TEMP TABLE, _analyze_visits (see analyze()), for agg_route_daily_dwell_run and
+# agg_route_segment_runtime, the Postgres builders that pair RT arrivals and
+# departures with each visit's own archived timetable, and only for an agency
+# they run for. The visits are resolved in ClickHouse
 # (build_stop_visits_ch_sql, the `updates` fact table's home) and streamed into
 # the temp table, so no builder here reads `updates` row by row. They carry
 # arrival-only visits, so they are not the departure dedup: the departure-derived
@@ -166,17 +193,34 @@ _AGG_TABLES_ORDERED = (
     "agg_route_daily",
     "agg_route_daily_dist",
     "agg_hour_daily",
+    "agg_route_band_daily",
     "agg_stop_daily",
     "agg_stop_routes",
     "agg_route_stop_daily",
+    "agg_stop_hour_daily",
+    "agg_stop_departures_daily",
     "agg_feed_health",
     "agg_service_delivered_daily",
     "agg_route_headway",
     "agg_route_headway_daily",
     "agg_route_daily_dwell_run",
+    "agg_route_segment_runtime",
     "agg_schedule_revision_daily",
+    stop_supply.DAYS_TABLE,
+    stop_supply.TABLE,
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
+
+# The tables built from _analyze_visits.
+_VISITS_TABLES = ("agg_route_daily_dwell_run", "agg_route_segment_runtime")
+# _analyze_visits' columns, in the order build_stop_visits_ch_sql(join_schedule=True) selects them.
+VISITS_COLUMNS = (
+    "route_code text, service_type text, scheduled_time time, "
+    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
+    "dep_observed boolean, sched_arrival_time text, sched_departure_time text, "
+    "sched_stop_id text, sched_prev_stop_sequence int, sched_prev_stop_id text, "
+    "sched_prev_departure_time text, sched_is_last boolean"
+)
 
 # Aggregates rebuilt only for the dates whose source rows changed: a listed
 # table's purge and build are both date-restricted, so the staleness signal must
@@ -190,14 +234,18 @@ _INCREMENTAL_AGG_TABLES = frozenset(
         "agg_daily_trend",
         "agg_feed_health",
         "agg_hour_daily",
+        "agg_route_band_daily",
         "agg_route_daily",
         "agg_route_daily_dist",
         "agg_route_daily_dwell_run",
         "agg_route_headway_daily",
+        "agg_route_segment_runtime",
         "agg_route_stop_daily",
         "agg_schedule_revision_daily",
         "agg_service_delivered_daily",
         "agg_stop_daily",
+        "agg_stop_departures_daily",
+        "agg_stop_hour_daily",
     }
 )
 # agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed
@@ -205,15 +253,19 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # survives `static_loader.load_static()` overwriting the raw static_* tables
 # on the next reload (db/migrations/0037_agg_static_version_summary.up.sql).
 
-# Aggregates built from the static schedule alone. Every column they read is
-# in pipeline.static_content.STATIC_DEPENDENCY_COLUMNS, plus constants their registry version covers
-# (e.g. agg_route_headway's HIGH_FREQUENCY_HEADWAY_SEC threshold) -- so while
-# their fingerprint matches, a rebuild would produce what already stands.
-_STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
+# Aggregates built from the static schedule alone. agg_route_headway reads
+# only columns in pipeline.static_content.STATIC_DEPENDENCY_COLUMNS, plus
+# constants its registry version covers (e.g. its HIGH_FREQUENCY_HEADWAY_SEC
+# threshold) -- so while its fingerprint matches, a rebuild would produce what
+# already stands. The stop supply tables keep rows per archived version, and
+# stop_supply.rebuild adds and drops versions on a run that leaves them standing.
+_STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway", stop_supply.DAYS_TABLE, stop_supply.TABLE})
 
 # What a table whose scope is [] may leave standing: a date-scoped table with
 # no date of its own to rebuild, or a static-only table whose fingerprint, and
-# so its whole input, is unchanged.
+# so its whole input, is unchanged. The exception is the Timetable.VERSIONS
+# tables, whose builder still runs to add, drop or rebuild versions; only the
+# purge is skipped.
 _NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
 
 # Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
@@ -365,6 +417,35 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn, rebu
     logger.info(f"  {table}: {len(rows)} rows")
 
 
+def _insert_visits_table(
+    builder: Callable[..., str], table: str, col_names: list, p: dict, conn, rebuild_dates: list | None
+) -> None:
+    """Build *table* from `_analyze_visits` as one INSERT ... SELECT, so its rows
+    never leave Postgres: a full rebuild spans the agency's whole history.
+
+    *builder* reads only *rebuild_dates* (every date for None), which is
+    exactly what the purge deleted: the temp table holds the union of the
+    dates every visits table rebuilds."""
+    if _nothing_to_rebuild(table, rebuild_dates):
+        logger.info(f"  {table}: unchanged, not rebuilt")
+        return
+    if table not in _VALID_AGG_TABLES:
+        raise ValueError(f"Unknown aggregation table: {table!r}")
+    params = p if rebuild_dates is None else {**p, "rebuild_dates": rebuild_dates}
+    with _step(f"{table}: build+insert"), conn.cursor() as cur:
+        cur.execute(f"INSERT INTO {table} ({', '.join(col_names)}) {builder(scoped=rebuild_dates is not None)}", params)
+        inserted = cur.rowcount
+    logger.info(f"  {table}: {inserted} rows")
+
+
+def _visits_scope(scopes: list[list | None]) -> list | None:
+    """The dates `_analyze_visits` loads for tables with these scopes: every
+    date when any rebuilds in full, else the union of theirs."""
+    if any(scope is None for scope in scopes):
+        return None
+    return sorted({day for scope in scopes for day in scope or ()})
+
+
 def _legacy_fingerprint(ingest_strategy: str | None, static_parts: list[str]) -> str:
     """The agency-wide fingerprint the retired scheme recorded in agg_meta."""
     return "|".join(
@@ -450,21 +531,28 @@ def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_pa
     }
 
 
-# A row that joins the loaded timetable: its version name, NULL read as '', is
-# none of {stems}, the names the archive maps (static_archive.JOIN_CONTENT_SQL).
-_FOLLOWS_THE_LOADED_TIMETABLE = "NOT has({stems:Array(String)}, ifNull(static_version_id, ''))"
+# A row that joins the loaded timetable: the version name it is filed under
+# (static_archive.IN_FORCE_STEM_SQL, '' for none) is none of {stems}, the names
+# the archive maps (static_archive.JOIN_CONTENT_SQL). A version in force is
+# always a mapped name, so only a row of a date with none in force can.
+_FOLLOWS_THE_LOADED_TIMETABLE = "NOT has({stems:Array(String)}, " + static_archive.IN_FORCE_STEM_SQL + ")"
+# The service date each row is filed under, which the dates these plan
+# queries return are dates of, as the aggregates they scope are.
+_FILED_DATE_U = static_archive.FILED_DATE_SQL
 
 
-def _dates_following_the_loaded_timetable(agency_id: int, ch_client, stems: list[str]) -> list:
-    """The service dates holding any of the agency's rows whose version name is
-    none of *stems*, the names the archive maps: those rows join the loaded
-    timetable (static_archive.JOIN_CONTENT_SQL)."""
+def _dates_following_the_loaded_timetable(
+    agency_id: int, ch_client, stems: list[str], join: static_archive.ScheduleJoin
+) -> list:
+    """The service dates holding any of the agency's rows filed under a version
+    name none of *stems*, the names the archive maps: those rows join the
+    loaded timetable (static_archive.JOIN_CONTENT_SQL)."""
     result = _ch_query(
         "plan: dates following the loaded timetable",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " ORDER BY date",
-        {"agency_id": agency_id, "stems": stems},
+        {"agency_id": agency_id, "stems": stems, **join.force_params()},
     )
     return [row[0] for row in result.result_rows]
 
@@ -480,17 +568,19 @@ def _loaded_content_of(fingerprint: str | None) -> str | None:
     return None if parts == "none" else static_archive.content_hash(parts.split("|"))
 
 
-def _dates_of_changed_trips(agency_id: int, ch_client, stems: list[str], before: str, after: str) -> list:
+def _dates_of_changed_trips(
+    agency_id: int, ch_client, join: static_archive.ScheduleJoin, before: str, after: str
+) -> list:
     """The service dates holding any of the agency's rows that follow the loaded
-    timetable (a version name none of *stems*) on a trip whose archived stop
-    times differ between *before* and *after*."""
+    timetable (filed under a version name the archive does not map) on a trip
+    whose archived stop times differ between *before* and *after*."""
     result = _ch_query(
         "plan: dates of changed trips",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
-        "AND trip_id IN " + static_archive.changed_trips_sql() + " ORDER BY date",
-        {"agency_id": agency_id, "stems": stems, "before": before, "after": after},
+        "AND u.trip_id IN " + static_archive.changed_trips_sql() + " ORDER BY date",
+        {"agency_id": agency_id, "stems": join.stems, "before": before, "after": after, **join.force_params()},
     )
     return [row[0] for row in result.result_rows]
 
@@ -501,27 +591,28 @@ def _dates_of_changed_medians(
     """The service dates holding any of the agency's rows whose long-gap
     threshold can come from the loaded timetable (headways.thresholds: a
     version name mapping to no content with kept medians) on a route whose
-    median differs between *before* and the loaded timetable; every such date
-    when either keeps no medians."""
+    kept headways, the median or the sums its high-frequency test and
+    scheduled wait read, differ between *before* and the loaded timetable;
+    every such date when either keeps no medians."""
     after = join.current
     contents = {*join.hashes, after, *([before] if before else [])} - {""}
-    medians = static_headways.route_medians(conn, agency_id, contents)
+    medians = static_headways.route_headways(conn, agency_id, contents)
     kept = {content for content, _route in medians}
     stems = [stem for stem, content in zip(join.stems, join.hashes, strict=True) if content in kept]
     if before not in kept or after not in kept:
         logger.info("  a timetable keeps no medians: every following date rebuilds its daily headways")
-        return _dates_following_the_loaded_timetable(agency_id, ch_client, stems)
+        return _dates_following_the_loaded_timetable(agency_id, ch_client, stems, join)
     routes = static_headways.changed_routes(medians, before, after)
-    logger.info(f"  {len(routes)} route(s) changed their median")
+    logger.info(f"  {len(routes)} route(s) changed their kept headways")
     if not routes:
         return []
     result = _ch_query(
         "plan: dates of changed medians",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
-        "AND route_code IN {routes:Array(String)} ORDER BY date",
-        {"agency_id": agency_id, "stems": stems, "routes": routes},
+        "AND u.route_code IN {routes:Array(String)} ORDER BY date",
+        {"agency_id": agency_id, "stems": stems, "routes": routes, **join.force_params()},
     )
     return [row[0] for row in result.result_rows]
 
@@ -537,35 +628,31 @@ def _dates_the_move_reaches(
     if before == after:
         return {archived_input: [] for archived_input in ArchivedInput}
     if before is not None and static_archive.is_archived(ch_client, agency_id, before):
-        stop_times = _dates_of_changed_trips(agency_id, ch_client, join.stems, before, after)
+        stop_times = _dates_of_changed_trips(agency_id, ch_client, join, before, after)
     else:
         logger.info("  the timetable last built against is not archived: every following date rebuilds")
-        stop_times = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems)
+        stop_times = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems, join)
     medians = _dates_of_changed_medians(agency_id, conn, ch_client, join, before)
     return {ArchivedInput.STOP_TIMES: stop_times, ArchivedInput.MEDIANS: medians}
 
 
-def _ledger_counts(agency_id: int, ch_client) -> dict:
-    """Each service date's (raw_samples, total_rows) as ClickHouse holds them now."""
+def _ledger_counts(agency_id: int, ch_client, floor: date | None = None) -> dict:
+    """Each service date's (raw_samples, total_rows, live_rows) as ClickHouse
+    holds them now, from *floor* on when given."""
     live = _ch_query(
         "plan: per-date ledger",
         ch_client,
-        """
-        SELECT """
-        + _SERVICE_DATE
-        + """ AS date,
-               countIf(dep_delay IS NOT NULL) AS raw_samples,
-               count() AS total_rows
-        FROM updates
-        WHERE agency_id = {agency_id:UInt16}
-        GROUP BY date
-        """,
-        {"agency_id": agency_id},
+        agg_sql.LEDGER_COUNTS_CH_SQL,
+        {
+            "agency_id": agency_id,
+            "after": agg_sql.EARLIEST_CAPTURE if floor is None else service_day_start_utc(floor),
+            "before": agg_sql.LATEST_CAPTURE,
+        },
     )
-    return {row[0]: (row[1], row[2]) for row in live.result_rows}
+    return {row[0]: (row[1], row[2], row[3]) for row in live.result_rows}
 
 
-def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
+def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None = None) -> list | None:
     """The service dates whose aggregates no longer match their sources.
 
     ``None`` means every date, which is what a first run or a missing ledger
@@ -577,7 +664,10 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     that date held when it was last built. Comparing that ledger against the
     same counts in ClickHouse names exactly the dates that moved, in both
     directions: a date the ledger has and ClickHouse no longer does is listed
-    too, so the caller's purge clears aggregate rows whose source is gone.
+    too, so the caller's purge clears aggregate rows whose source is gone. The
+    ledger counts a row on its capture's service date, so the dates a moved
+    date's rows file a stop event under besides it are listed with it
+    (:func:`_dates_filed_from`).
 
     Deliberately not "the last N days". A collector outage followed by a
     backlog ingest writes rows whose dates are weeks old, and any fixed window
@@ -596,32 +686,97 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     A changed builder or timetable is not the ledger's business: each table's
     own fingerprint covers it (agg_table_state, :func:`table_fingerprints`).
 
+    A date whose rows changed source is listed too, with both its neighbours,
+    which the rows it lost may have filed under, even when its two counts held:
+    archive ingest replacing a promoted day (pipeline.archive_replace) can keep
+    them. A stored ``live_rows`` that is NULL predates the column and is taken
+    to match.
+
     One blind spot survives: the ledger compares per-date row COUNTS, so a
-    date whose rows were replaced by exactly as many different rows reads as
-    unchanged and keeps its stale aggregates, and ``check_aggs``, which
+    date whose rows were replaced by exactly as many different rows from the
+    same source reads as unchanged and keeps its stale aggregates, and
+    ``check_aggs``, which
     compares only each agency's newest day, cannot see it either. Only a
     deliberate full rebuild recovers from that: ``gtfs_pipeline.py analyze
     --full`` / ``analyze_all --full`` (``make analyze-all FULL=1``), which
     calls :func:`mark_for_full_rebuild` first.
+
+    With a retention floor (:func:`pipeline.retention.retention_floor`), only
+    the dates from it on are compared, and none before it is returned. The
+    rows the prune dropped were captured before the floor's filed span, so
+    no date from the floor on was filed from them. The other direction is
+    still open: a change on the floor date itself lends to the day before it
+    (:func:`_dates_filed_from`), a final date, which is why the result is
+    clamped as well, and why _above_floor clamps every scope again.
     """
     # The Postgres read comes first, so a run with no ledger at all never pays
     # for a full-history remote scan to be told so. A first run is exactly the
     # run that can least afford one; _plan skips this call altogether when
     # every table rebuilds in full anyway.
     with conn.cursor() as cur:
-        cur.execute("SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
-        stored = {d: (raw, total) for d, raw, total in cur.fetchall()}
+        cur.execute(
+            "SELECT date, raw_samples, total_rows, live_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,)
+        )
+        ledger = cur.fetchall()
+    stored = {d: (raw, total) for d, raw, total, _live in ledger}
+    stored_live = {d: live for d, _raw, _total, live in ledger}
     if not stored:
         return None
+    if floor is not None:
+        stored = {day: counts for day, counts in stored.items() if day >= floor}
     if any(total is None for _, total in stored.values()):
         logger.info("  incremental: ledger predates total_rows; rebuilding every date")
         return None
 
-    live_counts = _ledger_counts(agency_id, ch_client)
+    held = _ledger_counts(agency_id, ch_client, floor)
+    live_counts = {d: (raw, total) for d, (raw, total, _live) in held.items()}
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
-    return sorted(stale)
+    swapped = {
+        d
+        for d, (_raw, _total, live) in held.items()
+        if d in stored and d not in stale and stored_live.get(d) is not None and stored_live[d] != live
+    }
+    changed = stale | swapped | {d + timedelta(days=step) for d in swapped for step in (-1, 1)}
+    changed |= _dates_filed_from(agency_id, ch_client, stale, stored, live_counts)
+    return sorted(day for day in changed if floor is None or day >= floor)
+
+
+def _dates_filed_from(agency_id: int, ch_client, stale: set, stored: dict, live_counts: dict) -> set:
+    """The service dates besides *stale* that a stop event of rows captured on
+    a stale date can be filed under (static_archive.FILED_DATE_SQL).
+
+    The ledger counts rows by their capture's service date, while a stop event
+    near the cutover is filed under its trip's, the day before or after. A date
+    whose rows grew lends to the dates its rows are filed under now. One that
+    lost rows may have lent the rows it lost, which are gone, so it lends to
+    both neighbours.
+    """
+    shrunk = {
+        day
+        for day in stale
+        if day not in live_counts
+        or (day in stored and any(now < before for now, before in zip(live_counts[day], stored[day], strict=True)))
+    }
+    lent = {day + timedelta(days=step) for day in shrunk for step in (-1, 1)}
+    grown = sorted(stale - shrunk)
+    if grown:
+        clauses: list[str] = []
+        params: dict = {"agency_id": agency_id}
+        for i, day in enumerate(grown):
+            clauses.append(f"(u.captured_at >= {{from_{i}:DateTime64}} AND u.captured_at < {{to_{i}:DateTime64}})")
+            params[f"from_{i}"] = service_day_start_utc(day)
+            params[f"to_{i}"] = service_day_start_utc(day + timedelta(days=1))
+        result = _ch_query(
+            "plan: dates filed from changed dates",
+            ch_client,
+            "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
+            f"AND ({' OR '.join(clauses)}) AND {_FILED_DATE_U} != {service_date_ch('u.captured_at')}",
+            params,
+        )
+        lent |= {row[0] for row in result.result_rows}
+    return lent - stale
 
 
 def mark_for_full_rebuild(conn, agency_ids: list[int]) -> None:
@@ -663,15 +818,22 @@ def _stored_fingerprints(conn, agency_id: int, legacy: str, seed: dict[str, str]
     return {}
 
 
-def _record_fingerprints(conn, agency_id: int, current: dict[str, str]) -> None:
+def _record_fingerprints(conn, agency_id: int, current: dict[str, str], rebuilt: set[str]) -> None:
+    """Record each table's fingerprint, and as its built_at the time this run
+    rewrote it: a table in *rebuilt*, or one new to the agency. A table the run
+    left standing keeps its built_at, which is therefore when its rows last
+    changed. A report stamps that time beside rows it may have cached
+    (pipeline.reports.definition.stamp_build), so a run that changes nothing
+    must not move it."""
     rows = sorted(current.items())
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES "
             + ", ".join(["(%s, %s, %s)"] * len(rows))
-            + " ON CONFLICT (agency_id, table_name) DO UPDATE SET "
-            "fingerprint = EXCLUDED.fingerprint, built_at = clock_timestamp()",
-            [value for name, fingerprint in rows for value in (agency_id, name, fingerprint)],
+            + " ON CONFLICT (agency_id, table_name) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, "
+            "built_at = CASE WHEN agg_table_state.table_name = ANY(%s) THEN clock_timestamp() "
+            "ELSE agg_table_state.built_at END",
+            [value for name, fingerprint in rows for value in (agency_id, name, fingerprint)] + [sorted(rebuilt)],
         )
 
 
@@ -679,6 +841,56 @@ class Plan(NamedTuple):
     current: dict[str, str]
     scopes: dict[str, list | None]
     content_key: str | None  # the loaded timetable's archive key, None with none loaded
+    # The version map, with the versions in force for an agency whose ingest
+    # stamps each row's version (VERSION_STAMPING_STRATEGIES).
+    join: static_archive.ScheduleJoin
+    # Why each table rebuilt in full is (agg_registry.table_scopes).
+    reasons: dict[str, str]
+    floor: date | None  # the agency's retention floor (pipeline.retention.retention_floor)
+
+
+# The versions in force each run built against (db/migrations/0090).
+IN_FORCE_TABLE = "agg_timetable_in_force"
+
+
+def _span(scope: list | None) -> tuple | None:
+    """The first and last of *scope*'s dates, which bound the versions in force
+    its reads bind (ScheduleJoin.force_params); None for every date."""
+    return (min(scope), max(scope)) if scope else None
+
+
+def _in_force_at(segments: list[tuple], day) -> tuple[str, str] | None:
+    return next(((stem, content) for first, last, stem, content in segments if first <= day <= last), None)
+
+
+def _dates_in_force_moved(agency_id: int, conn, join: static_archive.ScheduleJoin) -> list:
+    """The service dates already built whose version in force, or its content,
+    is not the one the last run recorded (IN_FORCE_TABLE): a timetable loaded
+    after days it covers, or a span recorded for one, refiles them."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT first_day, last_day, static_version_id, content_hash FROM {IN_FORCE_TABLE} WHERE agency_id = %s",
+            (agency_id,),
+        )
+        built = cur.fetchall()
+        cur.execute("SELECT date FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
+        dates = [row[0] for row in cur.fetchall()]
+    now = join.in_force()
+    return sorted(day for day in dates if _in_force_at(built, day) != _in_force_at(now, day))
+
+
+def _record_in_force(conn, agency_id: int, join: static_archive.ScheduleJoin) -> None:
+    """Record the versions in force this run built against, in its transaction."""
+    with conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {IN_FORCE_TABLE} WHERE agency_id = %s", (agency_id,))
+        segments = join.in_force()
+        if segments:
+            psycopg2.extras.execute_values(
+                cur,
+                f"INSERT INTO {IN_FORCE_TABLE} (agency_id, first_day, last_day, static_version_id, content_hash) "
+                "VALUES %s",
+                [(agency_id, *segment) for segment in segments],
+            )
 
 
 def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: str | None) -> Plan:
@@ -694,7 +906,17 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     rebuild the tables that read it, the safe direction.
     """
     static_parts = _static_parts(agency_id, conn, has_static)
+    # Both stores are checked before anything is built: the run records the
+    # versions in force only at its end, after a rebuild that can take hours.
     static_archive.require_tables(ch_client)
+    refiled.require_tables(ch_client)
+    with conn.cursor() as cur:
+        for required in (IN_FORCE_TABLE, retention.PRUNED_TABLE):
+            cur.execute("SELECT to_regclass(%s)", (required,))
+            if cur.fetchone()[0] is None:
+                raise RuntimeError(f"Postgres has no {required}; run `make migrate`")
+    floor = retention.retention_floor(conn, agency_id)
+    static_archive.require_mirror(conn)
     content_key = None
     if has_static:
         # A backstop for a timetable loaded before the archive existed:
@@ -725,16 +947,18 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     # With no table's fingerprint matching, every table goes in full whatever
     # the ledger says, so its full-history scan is skipped.
     if any(stored.get(name) == fingerprint for name, fingerprint in current.items()):
-        ledger = _dates_needing_rebuild(agency_id, conn, ch_client)
+        ledger = _dates_needing_rebuild(agency_id, conn, ch_client, floor)
     else:
         ledger = []
-    extra = None
+    stamped = ingest_strategy in VERSION_STAMPING_STRATEGIES
+    join = static_archive.schedule_join(ch_client, agency_id, content_key, by_service_date=stamped)
+    extra: dict[str, list] = {}
     loaded = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.LOADED]
     archived = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
     loaded_moved = any(stored.get(name) != current[name] for name in loaded)
     if (
         ledger is not None
-        and ingest_strategy in VERSION_STAMPING_STRATEGIES
+        and stamped
         and loaded_moved
         # One rebuilt in full takes every date anyway.
         and any(stored.get(name) == current[name] for name in archived)
@@ -744,7 +968,6 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         # replaced before the archive kept it) joins the loaded timetable, as
         # does, for the daily headways' threshold, a row whose content keeps no
         # medians; a new one rebuilds its date where what the row reads changed.
-        join = static_archive.schedule_join(ch_client, agency_id, content_key)
         before = _loaded_content_of(next((stored[name] for name in loaded if name in stored), None))
         reached = _dates_the_move_reaches(agency_id, conn, ch_client, join, before)
         for archived_input, dates in reached.items():
@@ -758,6 +981,15 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
             for name, table in agg_registry.TABLES.items()
             if table.archived_input is not None
         }
+    if ledger is not None and stamped:
+        moved = _dates_in_force_moved(agency_id, conn, join)
+        if moved:
+            logger.info(f"  {len(moved)} date(s) moved to another version in force")
+            for name, table in agg_registry.TABLES.items():
+                if table.in_force:
+                    extra[name] = sorted({*extra.get(name, []), *moved})
+    if floor is not None:
+        extra = {name: [day for day in dates if day >= floor] for name, dates in extra.items()}
     scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]
@@ -768,33 +1000,30 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         else:
             described = f"{len(scope)} date(s)"
         logger.info(f"  scope {name}: {described}")
-    return Plan(current, scopes, content_key)
+    return Plan(current, scopes, content_key, join, reasons, floor)
 
 
-def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
-    """A ClickHouse predicate restricting a builder to *rebuild_dates*.
+def _date_filter(rebuild_dates: list | None, agency_id: int, *, filed: bool = True) -> tuple[str, dict]:
+    """A WHERE suffix restricting a builder to *rebuild_dates*, with the
+    parameters it needs.
 
-    ``None`` yields an empty string, so a full rebuild runs the query these
-    builders always ran. The predicate names the raw ``captured_at`` column
-    rather than a date alias: ClickHouse substitutes a SELECT-list alias into
-    WHERE, which turns a filter over an aliased aggregate into an illegal one
-    (see ``build_dedup_ch_sql``'s docstring, which hit this). *column* exists
-    for the callers whose own query qualifies it with a table alias, for the
-    same reason.
+    *filed* selects the rows of the stop events filed under those dates
+    (ch_aggregates.days_where, on `u.` columns), for a builder keyed on the
+    stop event's day; otherwise the rows captured on them, for one counting
+    readings. ``None`` yields an empty suffix, so a full rebuild runs the query
+    these builders always ran. The predicates name raw columns rather than a
+    date alias: ClickHouse substitutes a SELECT-list alias into WHERE, which
+    turns a filter over an aliased aggregate into an illegal one (see
+    ``build_dedup_ch_sql``'s docstring, which hit this).
     """
-    if rebuild_dates is None:
-        return ""
-    return f"{service_date_ch(column)} IN {{rebuild_dates:Array(Date)}}"
-
-
-def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]:
-    """:func:`_date_predicate` as a WHERE suffix, with the parameters it needs."""
     params: dict = {"agency_id": agency_id}
-    predicate = _date_predicate(rebuild_dates)
-    if not predicate:
+    if rebuild_dates is None:
         return "", params
+    if filed:
+        where, scoped = ch_aggregates.days_where(rebuild_dates)
+        return f" AND ({where})", {**params, **scoped}
     params["rebuild_dates"] = rebuild_dates
-    return f" AND {predicate}", params
+    return f" AND {service_date_ch('captured_at')} IN {{rebuild_dates:Array(Date)}}", params
 
 
 def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
@@ -807,7 +1036,9 @@ def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
 
     Membership in :data:`_NOOP_SKIPPABLE_AGG_TABLES` is what makes the answer
     safe, and it binds the purge as well as the build: a table whose build is
-    skipped must not have its rows deleted, or the run empties it.
+    skipped must not have its rows deleted, or the run empties it. The
+    Timetable.VERSIONS tables are skipped by the purge only: stop_supply.rebuild
+    runs on every run and changes only the versions that moved.
     """
     return rebuild_dates == [] and table in _NOOP_SKIPPABLE_AGG_TABLES
 
@@ -862,21 +1093,21 @@ def _load_temp_table(
     *,
     table: str,
     columns: str,
-    ch_sql: str,
-    parameters: dict,
+    reads: list[tuple[str, dict]],
     label: str,
     load: bool = True,
 ) -> None:
-    """Materialise a deduped ClickHouse slice into a Postgres TEMP TABLE.
+    """Materialise a deduped ClickHouse slice into a Postgres TEMP TABLE, from
+    each of *reads* (its SQL and parameters) in turn.
 
     ON COMMIT DROP ties the table's lifetime to the caller's transaction,
     which is safe for the per-agency analyze loop on one connection; ANALYZE
     gives the planner stats for the downstream GROUP BYs, which it otherwise
     sizes at a few thousand rows however many the table actually holds.
 
-    *columns* must list the table's columns in the order *ch_sql*'s SELECT list
-    projects them; the SQL builder's docstring states the order it guarantees
-    and which optional columns land where.
+    *columns* must list the table's columns in the order each read's SELECT
+    list projects them; the SQL builder's docstring states the order it
+    guarantees and which optional columns land where.
 
     ``load=False`` creates the table and skips the scan, for the caller whose
     filter it already knows selects nothing — the table still has to exist,
@@ -884,7 +1115,7 @@ def _load_temp_table(
     """
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TEMP TABLE {table} ({columns}) ON COMMIT DROP")
-    if load:
+    for ch_sql, parameters in reads if load else []:
         _stream_copy(
             cur,
             ch_client,
@@ -937,7 +1168,9 @@ def _ch_build_and_insert(
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-def _ch_agg_scopes(agency_id: int, conn, ch_client, scopes: dict[str, list | None]) -> dict[str, list | None]:
+def _ch_agg_scopes(
+    agency_id: int, conn, ch_client, scopes: dict[str, list | None], floor: date | None = None
+) -> dict[str, list | None]:
     """The dates each ClickHouse-computed table recomputes: its own scope
     (:func:`agg_registry.table_scopes`), or None for all of them.
 
@@ -949,6 +1182,11 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, scopes: dict[str, list | Non
     forces a full rebuild of the agency. Comparing the two stores, rather than
     asking whether ClickHouse holds any row, keeps an agency whose data yields no
     rows for a table from rebuilding it on every run.
+
+    With a retention *floor*, a dated table's stores are compared from the
+    floor on, the months a rebuild repairs: below it, a disagreement is
+    final, and a table moved to ClickHouse keeps its history before the
+    floor in Postgres alone.
 
     An internal table has no Postgres copy, so its figure is compared with its
     ch_aggregates.REFERENCES table's instead. A whole-history table is rebuilt whole
@@ -966,36 +1204,98 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, scopes: dict[str, list | Non
         if scopes[table] is None:
             result[table] = None
             continue
-        with _step(f"{table}: compare stores"):
-            agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
+        agree = _stores_agree(table, agency_id, conn, ch_client, floor)
         if not agree:
             logger.info(f"  {table}: ClickHouse and Postgres disagree; rebuilding every month")
         result[table] = scopes[table] if agree else None
-    for internal, (reference, _, pg_expression) in ch_aggregates.REFERENCES.items():
+    for internal in ch_aggregates.REFERENCES:
         if scopes[internal] is None:
             result[internal] = None
             continue
-        with _step(f"{internal}: compare stores"):
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT coalesce({pg_expression}, 0)::bigint FROM {reference} WHERE agency_id = %s", (agency_id,)
-                )
-                expected = int(cur.fetchone()[0])
-            agree = ch_aggregates.reference_figure(ch_client, internal, agency_id) == expected
+        agree = _reference_agrees(internal, agency_id, conn, ch_client)
         if not agree:
-            logger.info(f"  {internal}: figures differ from {reference}; recounting every month")
+            logger.info(
+                f"  {internal}: figures differ from {ch_aggregates.REFERENCES[internal][0]}; recounting every month"
+            )
         result[internal] = scopes[internal] if agree else None
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
         if scopes[table] is None or result[ch_aggregates.whole_history_source(table)] != []:
             result[table] = None
             continue
-        with _step(f"{table}: compare stores"):
-            agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
-        result[table] = [] if agree else None
+        result[table] = [] if _stores_agree(table, agency_id, conn, ch_client, floor) else None
     return result
 
 
-def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
+def _stores_agree(table: str, agency_id: int, conn, ch_client, floor: date | None) -> bool:
+    """Whether *table*'s ClickHouse rows add up to its Postgres copy: a dated
+    table's from *floor* on when given, a whole-history table's whole."""
+    since = floor if table in ch_aggregates.TABLES else None
+    with _step(f"{table}: compare stores"):
+        return ch_aggregates.totals(ch_client, table, agency_id, None, since=since) == _pg_totals(
+            conn, table, agency_id, None, since=since
+        )
+
+
+def _reference_agrees(internal: str, agency_id: int, conn, ch_client) -> bool:
+    """Whether *internal*'s figure matches its REFERENCES table's, over the
+    agency's whole history. A retention floor needs no narrower comparison:
+    no run rebuilds or drops a month of an internal table before the floor
+    (`swap` touches only the months a run rebuilds), and the prune holds an
+    agency whose figures disagree (store_disagreements), so a difference found
+    here lies from the floor on, where recounting from the floor repairs it."""
+    reference, _, pg_expression = ch_aggregates.REFERENCES[internal]
+    with _step(f"{internal}: compare stores"):
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT coalesce({pg_expression}, 0)::bigint FROM {reference} WHERE agency_id = %s", (agency_id,)
+            )
+            expected = int(cur.fetchone()[0])
+        return ch_aggregates.reference_figure(ch_client, internal, agency_id) == expected
+
+
+def store_disagreements(agency_id: int, conn, ch_client, floor: date | None) -> list[str]:
+    """The ClickHouse aggregates of the agency whose figures a run's store
+    check (:func:`_ch_agg_scopes`) finds off, compared as it compares them."""
+    tables = [
+        table
+        for table in (*ch_aggregates.TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES)
+        if not _stores_agree(table, agency_id, conn, ch_client, floor)
+    ]
+    return tables + [
+        internal for internal in ch_aggregates.REFERENCES if not _reference_agrees(internal, agency_id, conn, ch_client)
+    ]
+
+
+class Unapplied(NamedTuple):
+    """What a run of analyze would still apply to the agency's built dates."""
+
+    tables: list[str]  # those whose recorded fingerprint is not the one a run would build under now
+    moved: list  # the built dates whose version in force moved since (_dates_in_force_moved)
+
+
+def unapplied(agency_id: int, conn, ch_client) -> Unapplied:
+    """The timetable and builder changes the agency's aggregates do not
+    reflect yet, read as _plan reads them, without archiving anything."""
+    has_static = _static_loaded(conn, agency_id)
+    with conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        row = cur.fetchone()
+        ingest_strategy = row[0] if row else None
+        cur.execute("SELECT table_name, fingerprint FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        stored = dict(cur.fetchall())
+    current = table_fingerprints(ingest_strategy, has_static, _static_parts(agency_id, conn, has_static))
+    tables = sorted(name for name, fingerprint in current.items() if stored.get(name) != fingerprint)
+    moved: list = []
+    if ingest_strategy in VERSION_STAMPING_STRATEGIES:
+        # The versions in force do not depend on the loaded timetable's key.
+        join = static_archive.schedule_join(ch_client, agency_id, None, by_service_date=True)
+        moved = _dates_in_force_moved(agency_id, conn, join)
+    return Unapplied(tables, moved)
+
+
+def _pg_totals(
+    conn, table: str, agency_id: int, months: list[int] | None, since: date | None = None
+) -> tuple[int, int, int]:
     """`ch_aggregates.totals` for the Postgres copy. *months* is None or non-empty."""
     where = "agency_id = %s"
     params: list = [agency_id]
@@ -1003,6 +1303,9 @@ def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tu
         bounds = [ch_aggregates.month_bounds(month) for month in months]
         where += " AND (" + " OR ".join(["(date >= %s AND date < %s)"] * len(bounds)) + ")"
         params += [day for pair in bounds for day in pair]
+    if since is not None:
+        where += " AND date >= %s"
+        params.append(since)
     (_, first), (_, second) = ch_aggregates.store_figures(table)
     with conn.cursor() as cur:
         cur.execute(
@@ -1016,6 +1319,10 @@ def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tu
 def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn, ch_client) -> None:
     """Replace the agency's Postgres rows of *table* with ClickHouse's, over the
     months in *scope*, or every row of the agency when it is None.
+
+    With a retention floor, *scope* starts at or after it, and the floor is a
+    month's first day (pipeline.retention.retention_floor), so the purge never
+    reaches a final row.
 
     A full rebuild purges the whole agency rather than the months ClickHouse
     holds, so a Postgres row in a month ClickHouse never had goes too. The copy is
@@ -1056,7 +1363,12 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
 
 
 def _rebuild_ch_aggregates(
-    agency_id: int, conn, ch_client, scopes: dict[str, list | None], join: static_archive.ScheduleJoin | None
+    agency_id: int,
+    conn,
+    ch_client,
+    scopes: dict[str, list | None],
+    join: static_archive.ScheduleJoin,
+    refit: set | None = None,
 ) -> None:
     """Rebuild the ClickHouse-computed tables, then copy them into Postgres.
 
@@ -1073,9 +1385,10 @@ def _rebuild_ch_aggregates(
     monthly build and before any swap, so they read the months just rebuilt from
     those tables' work tables; an internal table itself is never copied.
 
-    *join* is the run's schedule join, which the static-joined tables need: set
-    whenever one of them is rebuilt (and also when only the stop visits needed
-    it), None only when nothing in the run joins the archive.
+    *join* is the run's schedule join, which the static-joined tables need, and
+    with it the versions in force the tables file their rows under; *refit*
+    is the dates whose rows read their schedule from the archive
+    (ch_aggregates.stamp_for).
     """
     monthly = {t: c for t, c in scopes.items() if t in ch_aggregates.MONTHLY_TABLES and c != []}
     whole = [t for t in ch_aggregates.WHOLE_HISTORY_TABLES if t in scopes and scopes[t] != []]
@@ -1096,6 +1409,7 @@ def _rebuild_ch_aggregates(
                 {table: ch_aggregates.Rebuild(months[table], changed) for table, changed in monthly.items()},
                 _step,
                 join,
+                refit,
             )
         if whole:
             recounted = {t: months[t] for t in ch_aggregates.INTERNAL_TABLES if t in months}
@@ -1118,7 +1432,149 @@ def _rebuild_ch_aggregates(
         _copy_ch_aggregate(table, agency_id, None, conn, ch_client)
 
 
-def analyze(agency_id: int, conn, ch_client) -> None:
+def _refile(
+    agency_id: int, ch_client, join: static_archive.ScheduleJoin, scopes: dict[str, list | None]
+) -> tuple[static_archive.ScheduleJoin, set]:
+    """The refiled dates the run reads (_refit_dates), with *join* naming
+    their rows as written (pipeline.refiled.refresh): a date whose latest
+    write still serves a read keeps it, and every other is written now, so
+    every read of them takes those rows and only a write joins the archive.
+    The run's other dates whose rows were written are written off: none of
+    their rows is refiled any more."""
+    if not join.force:
+        return join, set()
+    considered, refit = _refit_dates(agency_id, ch_client, join, scopes)
+    with _step("refiled rows: write"):
+        join = refiled.refresh(ch_client, agency_id, join, refit)
+        refiled.write_off(ch_client, agency_id, considered, keep=refit)
+    return join, refit
+
+
+def _refit_dates(
+    agency_id: int, ch_client, join: static_archive.ScheduleJoin, scopes: dict[str, list | None]
+) -> tuple[list | None, set]:
+    """The dates the run rebuilds of the tables filed under the version in
+    force (None for every date), and those of them that hold a row whose
+    schedule comes from the archive (static_archive.refit_dates): a read of
+    none of them files its rows without the archive join."""
+    filed = [
+        scope
+        for name, scope in scopes.items()
+        if agg_registry.TABLES[name].in_force and agg_registry.TABLES[name].kind is Kind.DATED
+    ]
+    where: str = "1"
+    params: dict = {}
+    between = None
+    days: list | None = None
+    if all(scope is not None for scope in filed):
+        days = sorted({day for scope in filed for day in scope or ()})
+        if not days:
+            return days, set()
+        where, params = ch_aggregates.days_where(days)
+        between = (days[0], days[-1])
+    with _step("plan: dates read from the schedule archive"):
+        dates = static_archive.refit_dates(ch_client, agency_id, where, params, join, between)
+    if dates:
+        logger.info(f"  {len(dates)} date(s) hold rows ingested against another timetable than the one in force")
+    return days, dates
+
+
+class _Read(NamedTuple):
+    """One read of a scan that reads `updates` in a single query per read."""
+
+    where: str  # a predicate on `u.` columns
+    params: dict
+    stamp: Stamp  # how it files its rows (ch_aggregates.stamp_for)
+    between: tuple | None  # the dates it reaches, which bound its versions in force
+
+
+def _reads(agency_id: int, ch_client, join: static_archive.ScheduleJoin, refit: set, scope: list | None) -> list:
+    """The reads a scan of *scope*'s dates (None for every date) is made of.
+
+    With versions in force, one per month of service date, as
+    ch_aggregates.build reads, so each binds only the versions in force over
+    its own dates (ScheduleJoin.force_params) and a REFIT read loads only their
+    schedules; a scan of the agency's whole history would otherwise load every
+    version's at once. Without, one read of the whole scope. The predicates
+    range on captured_at, which prunes on the sort key.
+    """
+    if not join.force:
+        where, params = ch_aggregates.days_where(scope) if scope is not None else ("1", {})
+        return [_Read(where, params, Stamp.INGESTED, None)]
+    months = ch_aggregates.source_months(ch_client, agency_id) if scope is None else ch_aggregates.months_of(scope)
+    reads = []
+    for month in months:
+        days = None if scope is None else [day for day in scope if day.year * 100 + day.month == month]
+        where, params = ch_aggregates.month_where(month) if days is None else ch_aggregates.days_where(days)
+        first, last = ch_aggregates.month_span(month, days)
+        dates = days or [first + timedelta(days=i) for i in range((last - first).days + 1)]
+        reads.append(_Read(where, params, ch_aggregates.stamp_for(join, refit, dates), (first, last)))
+    return reads
+
+
+def _newest_date(agency_id: int, conn, ch_client) -> date | None:
+    """The newest date a full rebuild of the agency could purge or build:
+    the newest any of its dated tables stores, in either store, or the latest
+    its newest `updates` row can be filed under."""
+    newest: list[date | None] = []
+    with conn.cursor() as cur:
+        for table in _INCREMENTAL_AGG_TABLES:
+            cur.execute(f"SELECT max(date) FROM {table} WHERE agency_id = %s", (agency_id,))
+            newest.append(cur.fetchone()[0])
+    for table in ch_aggregates.MONTHLY_TABLES:
+        rows = ch_client.query(
+            f"SELECT maxOrNull(date) FROM {table} WHERE agency_id = {{agency_id:Int32}}",
+            parameters={"agency_id": agency_id},
+        ).result_rows
+        newest.append(rows[0][0])
+    captured = ch_max_captured_at(ch_client, agency_id)
+    if captured is not None:
+        newest.append(filed_dates_reached(captured, captured + timedelta(microseconds=1))[1])
+    return max((day for day in newest if day is not None), default=None)
+
+
+def _above_floor(
+    agency_id: int,
+    conn,
+    ch_client,
+    floor: date,
+    scopes: dict[str, list | None],
+    ch_scopes: dict[str, list | None],
+) -> tuple[dict[str, list | None], dict[str, list | None]]:
+    """*scopes* and *ch_scopes* with no date before *floor* in any dated
+    table's scope, the internal tables' included. A dated table rebuilt in full
+    (None) takes every date from the floor to the newest the agency holds
+    instead, so its purge and build both stop at the floor. Every scope a run
+    builds passes through here, so this, not where a scope's dates came from,
+    keeps the dates before the floor final. The whole-history tables keep their
+    scopes: they are finalized from the internal tables, whose months before
+    the floor stand. The scorecard applies the floor to its own months
+    (feed_quality.rebuild)."""
+
+    def dated(name: str) -> bool:
+        return agg_registry.TABLES[name].kind is Kind.DATED and name != feed_quality.TABLE
+
+    every: list[date] = []
+    if any(scope is None and dated(name) for name, scope in {**scopes, **ch_scopes}.items()):
+        newest = _newest_date(agency_id, conn, ch_client)
+        if newest is not None and newest >= floor:
+            every = [floor + timedelta(days=i) for i in range((newest - floor).days + 1)]
+
+    def floored(name: str, scope: list | None) -> list | None:
+        if not dated(name):
+            return scope
+        if scope is None:
+            return list(every)
+        return [day for day in scope if day >= floor]
+
+    logger.info(f"  retention floor {floor.isoformat()}: earlier dates are final (pipeline.retention.retention_floor)")
+    return (
+        {name: floored(name, scope) for name, scope in scopes.items()},
+        {name: floored(name, scope) for name, scope in ch_scopes.items()},
+    )
+
+
+def analyze(agency_id: int, conn, ch_client, *, db_url: str | None = None) -> dict | None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
     Holds this agency's `updates` lock for the whole run. That is load-bearing,
@@ -1136,13 +1592,18 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     rather than with the run's transaction, which spans the whole rebuild.
     Today is left to the loaded timetable until it is over. A failed capture
     is logged and the run goes on.
+
+    With *db_url*, the database *conn* is connected to, a run that rebuilds
+    history because a method version or fingerprint moved returns the
+    agency's headline before and after it (:mod:`pipeline.rebuild_headline`),
+    for its pipeline_runs row. Every other run returns None.
     """
     capture_planned_trips(conn, agency_id)
     with agency_ingest_lock(conn, agency_id):
-        _analyze_locked(agency_id, conn, ch_client)
+        return _analyze_locked(agency_id, conn, ch_client, db_url)
 
 
-def _analyze_locked(agency_id: int, conn, ch_client) -> None:
+def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict | None:
     """Purges and rebuilds this agency's agg_* rows for the dates the ledger
     marks as changed (everything, on a full rebuild), skipping whole-history
     tables when nothing changed, all in one transaction. A crash mid-run rolls
@@ -1173,7 +1634,20 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
     ingest_strategy = strategy_row[0] if strategy_row else None
     plan = _plan(agency_id, conn, ch_client, has_static, ingest_strategy)
     scopes = plan.scopes
-    ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, scopes)
+    floor = plan.floor
+    ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, scopes, floor)
+    # A whole rebuild of either copy the scorecard reads, which _ch_agg_scopes
+    # can decide beyond the plan, reaches every month of it. Decided before
+    # _above_floor, which turns those Nones into date lists; the scorecard
+    # applies the floor to its months itself.
+    quality_scope = scopes[feed_quality.TABLE]
+    if any(ch_scopes.get(name, quality_scope) is None for name in ("agg_route_daily", "agg_route_daily_dist")):
+        quality_scope = None
+    if floor is not None:
+        scopes, ch_scopes = _above_floor(agency_id, conn, ch_client, floor, scopes, ch_scopes)
+    before = None
+    if db_url is not None and rebuild_headline.is_rebuild(plan.reasons):
+        before = rebuild_headline.read_before(db_url, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
         # Scoped for the incremental tables, whole for the rest, skipped for
@@ -1196,54 +1670,30 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
 
         # ── Materialise the stop visits ──────────────────────────────────
         # Every column, NULL-service rows included, for only the dates being rebuilt.
-        # agg_route_daily_dwell_run is the only reader, so an agency it is not
-        # built for gets the empty table without the scan.
-        builds_dwell_run = has_static and ingest_strategy in RT_INGEST_STRATEGIES
-        dwell_scope = scopes["agg_route_daily_dwell_run"]
-        _, dwell_params = _date_filter(dwell_scope, agency_id)
-        scans_visits = builds_dwell_run and dwell_scope != []
-        scans_headways = ingest_strategy in RT_INGEST_STRATEGIES and not _nothing_to_rebuild(
-            "agg_route_headway_daily", scopes["agg_route_headway_daily"]
-        )
-        # The version map, read once and only when something reads it: the
-        # visits scan, the daily headways, or a monthly static-joined ClickHouse
-        # table. A run that rebuilds none reads nothing of the archive beyond
-        # the plan's probes.
-        joins_schedule = (
-            scans_visits
-            or scans_headways
-            or any(
-                table in ch_aggregates.MONTHLY_TABLES and table in ch_aggregates.STATIC_JOINED_TABLES and scope != []
-                for table, scope in ch_scopes.items()
+        # _VISITS_TABLES are the only readers, so an agency they are not built
+        # for gets the empty table without the scan.
+        builds_visit_tables = has_static and ingest_strategy in RT_INGEST_STRATEGIES
+        visits_scope = _visits_scope([scopes[name] for name in _VISITS_TABLES])
+        scans_visits = builds_visit_tables and visits_scope != []
+        join, refit = _refile(agency_id, ch_client, plan.join, {**scopes, **ch_scopes})
+        visit_reads = []
+        for read in _reads(agency_id, ch_client, join, refit, visits_scope) if scans_visits else []:
+            stems = ch_aggregates.version_names(
+                ch_client, agency_id, read.where, read.params, join, read.stamp, read.between
             )
-        )
-        join = static_archive.schedule_join(ch_client, agency_id, plan.content_key) if joins_schedule else None
-        visits_params = dwell_params
-        if scans_visits and join is not None:
-            # A range on captured_at, which prunes on the sort key; the visits
-            # scan's own service-date test selects the same rows.
-            where, params = ch_aggregates.days_where(dwell_scope) if dwell_scope is not None else ("1", {})
-            stems = ch_aggregates.version_names(ch_client, agency_id, where, params)
-            visits_params = {**dwell_params, **join.params(stems)}
+            visit_reads.append(
+                (
+                    build_stop_visits_ch_sql(extra_where=read.where, join_schedule=True, stamp=read.stamp),
+                    {"agency_id": agency_id, **read.params, **join.params(stems, read.between)},
+                )
+            )
         with conn.cursor() as cur:
             _load_temp_table(
                 cur,
                 ch_client,
-                # Column order must match build_stop_visits_ch_sql's SELECT list exactly:
-                # route_code, service_type, scheduled_time, trip_id, date,
-                # stop_sequence, dep_delay, arr_delay, dep_observed,
-                # sched_arrival_time, sched_departure_time.
                 table="_analyze_visits",
-                columns=(
-                    "route_code text, service_type text, scheduled_time time, "
-                    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
-                    "dep_observed boolean, sched_arrival_time text, sched_departure_time text"
-                ),
-                ch_sql=build_stop_visits_ch_sql(
-                    extra_where=_date_predicate(dwell_scope, "u.captured_at"),
-                    join_schedule=True,
-                ),
-                parameters=visits_params,
+                columns=VISITS_COLUMNS,
+                reads=visit_reads,
                 # An empty rebuild list selects no rows at all, so the scan is
                 # skipped rather than asked to prove it — the run where nothing
                 # changed is the common one.
@@ -1263,15 +1713,21 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # all lack a dep_delay therefore has a row here with raw_samples = 0;
         # every reader that divides by raw_samples treats zero as "nothing
         # measurable" (see pipeline/health.py, api/agency_diagnostics.py).
+        # archive_rows and live_rows split total_rows by ingest source, for the
+        # definition stamp's per-day source
+        # (pipeline.reports.definition.stamp_build); _dates_needing_rebuild
+        # reads live_rows to see a day whose rows changed source.
         # Agency-wide — does NOT require static data, so it runs outside the
         # has_static block. Pure aggregation (no static-table JOIN), so it
         # queries ClickHouse directly and bulk-loads the small per-day result
-        # into Postgres. The service date (pipeline.service_day), the same day
-        # every other aggregate is filed under — never a bare toDate().
-        where, params = _date_filter(scopes["agg_feed_health"], agency_id)
+        # into Postgres. Each reading counts on its own capture's service date
+        # (pipeline.service_day), never a bare toDate(), unlike the stop-event
+        # aggregates, which file a stop event under its trip's day; the rebuild
+        # ledger reads these counts keyed by capture (_dates_needing_rebuild).
+        where, params = _date_filter(scopes["agg_feed_health"], agency_id, filed=False)
         _ch_build_and_insert(
             "agg_feed_health",
-            "(agency_id, date, raw_samples, clamp_count, total_rows)",
+            "(agency_id, date, raw_samples, clamp_count, total_rows, archive_rows, live_rows)",
             agency_id,
             ch_client,
             agg_sql.feed_health_ch_sql(where),
@@ -1311,19 +1767,19 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     "scheduled_headway_median_sec",
                     "scheduled_samples",
                     "is_high_frequency",
-                    "scheduled_wait_mean_sec",
                 ],
                 p,
                 conn,
                 scopes["agg_route_headway"],
             )
 
-        # ── agg_service_delivered_daily (per-day non-executed trip count) ──
-        # Powers pipeline.reports.service_delivered's executed/planned ratio
-        # without a live per-request ClickHouse scan over `updates`. Agency-wide
-        # and independent of has_static above (a static schedule loaded only
-        # matters to the READ side's planned_trips count) -- pure aggregation
-        # queried directly against ClickHouse, same shape as agg_feed_health.
+        # ── agg_service_delivered_daily (per-day, per-route non-executed trip count) ──
+        # Powers pipeline.reports.service_delivered's executed/planned ratio,
+        # for an agency and for each of its routes, without a live per-request
+        # ClickHouse scan over `updates`. Independent of has_static above (a
+        # static schedule loaded only matters to the READ side's planned_trips
+        # count) -- pure aggregation queried directly against ClickHouse, same
+        # shape as agg_feed_health.
         #
         # Only feeds confirmed to send schedule_relationship_trip/_stop
         # populate this table (today: the static_join ingest strategy;
@@ -1336,7 +1792,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # nothing.
         # Materialization here is gated on ingest_strategy alone, not on the
         # per-agency probe verdicts in rt_field_coverage_probes (see
-        # pipeline.strategies.static_join.rt_field_coverage_confirmed)
+        # pipeline.strategies.static_join.rt_field_coverage_gap)
         # -- sharing an ingest strategy does not by itself prove a given agency's
         # feed actually populates these fields. Today this is safe because every
         # reader of this table (pipeline.reports.service_delivered) re-applies
@@ -1347,7 +1803,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             where, params = _date_filter(scopes["agg_service_delivered_daily"], agency_id)
             _ch_build_and_insert(
                 "agg_service_delivered_daily",
-                "(agency_id, date, non_executed_trips)",
+                "(agency_id, date, route_code, non_executed_trips)",
                 agency_id,
                 ch_client,
                 agg_sql.service_delivered_ch_sql(where),
@@ -1376,8 +1832,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             "(agency_id, date, static_version_id)",
             agency_id,
             ch_client,
-            agg_sql.schedule_revision_ch_sql(where),
-            params,
+            agg_sql.schedule_revision_ch_sql(where, Stamp.IN_FORCE if join.force else Stamp.INGESTED),
+            {**params, **join.params(between=_span(scopes["agg_schedule_revision_daily"]))},
             conn,
             scopes["agg_schedule_revision_daily"],
         )
@@ -1394,9 +1850,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # coverage, so pipeline.reports.dwell_run's reader additionally
         # requires a live rt_field_coverage_probes verdict before trusting
         # these rows.
-        if builds_dwell_run:
-            _build_and_insert(
-                agg_sql.dwell_run_sql(),
+        if builds_visit_tables:
+            _insert_visits_table(
+                agg_sql.dwell_run_sql,
                 "agg_route_daily_dwell_run",
                 [
                     "agency_id",
@@ -1412,10 +1868,41 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ],
                 p,
                 conn,
-                dwell_scope,
+                scopes["agg_route_daily_dwell_run"],
             )
         else:
             logger.info("  agg_route_daily_dwell_run: 0 rows (needs static schedule + ingest_strategy=static_join)")
+
+        # ── agg_route_segment_runtime (running time per timetable segment) ──
+        # Built for every agency with a static schedule and an ingest strategy
+        # in RT_INGEST_STRATEGIES; its reader (pipeline.reports.segment_runtime)
+        # also requires the agency's live rt_field_coverage_probes verdict.
+        if builds_visit_tables:
+            _insert_visits_table(
+                agg_sql.segment_runtime_sql,
+                "agg_route_segment_runtime",
+                [
+                    "agency_id",
+                    "date",
+                    "route_code",
+                    "from_stop_id",
+                    "to_stop_id",
+                    "time_band",
+                    "to_stop_sequence",
+                    "run_sec",
+                    "scheduled_samples",
+                    "scheduled_sum_sec",
+                    "hold_eligible",
+                    "holds",
+                    "terminal_arrivals",
+                    "terminal_early",
+                ],
+                p,
+                conn,
+                scopes["agg_route_segment_runtime"],
+            )
+        else:
+            logger.info("  agg_route_segment_runtime: 0 rows (needs static schedule + ingest_strategy=static_join)")
 
         # ── agg_route_headway_daily (per-day reconstructed ACTUAL headway) ──
         # Supports a later excess-wait-time computation (actual vs. scheduled
@@ -1441,43 +1928,50 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # Cardinality is bounded by routes × stops × days, not by raw
             # observation count, so the scan is fetched as one block
             # (ch_client.query(), not the streaming reader _analyze_visits needs).
-            where, params = _date_filter(headway_scope, agency_id)
-            ch_headway = _ch_query(
-                "agg_route_headway_daily: ClickHouse scan",
-                ch_client,
-                agg_sql.route_headway_daily_ch_sql(where),
-                {
-                    **params,
-                    "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
-                    "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
-                },
-            )
+            headway_events: list = []
+            for read in _reads(agency_id, ch_client, join, refit, headway_scope):
+                result = _ch_query(
+                    "agg_route_headway_daily: ClickHouse scan",
+                    ch_client,
+                    agg_sql.route_headway_daily_ch_sql(f" AND ({read.where})", read.stamp),
+                    {
+                        "agency_id": agency_id,
+                        **read.params,
+                        **join.params(between=read.between),
+                    },
+                )
+                # Each row is one (route, stop, service date), which no read splits.
+                headway_events.extend(result.result_rows)
             # Timed apart from the ClickHouse scan above: this is the one
             # aggregate whose build is partly Python, so moving it would mean
             # expressing reconstruct_headways in SQL, not just relocating a
             # GROUP BY. Knowing how much of its cost is here decides that.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                pooled = pool_daily_gaps(ch_headway.result_rows)
-            # Each (route, date) is measured against the scheduled median of its
-            # dominant timetable (the one most of its events were ingested
-            # against), kept per archived timetable by pipeline.static_headways.
-            # A timetable with no kept medians falls back to the loaded one's;
-            # a route with no median counts no long gaps (count_long_gaps).
-            assert join is not None  # scans_headways put the map in joins_schedule
+                pooled = pool_daily_gaps(headway_events)
+            # Each (route, date) is judged by the scheduled headways of its
+            # dominant timetable (the one most of its events were filed
+            # under), kept per archived timetable by pipeline.static_headways:
+            # its long gaps against that median, its high-frequency test and
+            # scheduled wait by the same timetable. A timetable with no kept
+            # headways measures long gaps against the loaded one's median but
+            # judges nothing else (headways.schedules).
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                dominant = dominant_contents(ch_headway.result_rows, join.content_of())
-            medians = static_headways.route_medians(conn, agency_id, {*dominant.values(), join.current})
-            fell_back = sum(1 for content in dominant.values() if content not in {c for c, _route in medians})
-            if fell_back:
+                dominant = dominant_contents(headway_events, join.content_of())
+            kept = static_headways.route_headways(conn, agency_id, {*dominant.values(), join.current})
+            kept_contents = {content for content, _route in kept}
+            not_kept = sum(1 for content in dominant.values() if content not in kept_contents)
+            if not_kept:
                 logger.info(
-                    f"  agg_route_headway_daily: {fell_back} route-day(s) measured against the loaded timetable's "
-                    "medians, their own timetable having none kept"
+                    f"  agg_route_headway_daily: {not_kept} route-day(s) not judged, their own timetable keeping "
+                    "no scheduled headways; their long gaps are measured against the loaded timetable's medians"
                 )
 
             # Same label as the pooling above — `_step` accumulates, so the
             # summary reports one figure for this aggregate's Python build.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                headway_rows = daily_headway_rows(agency_id, pooled, thresholds(dominant, medians, join.current))
+                headway_rows = daily_headway_rows(
+                    agency_id, pooled, thresholds(dominant, kept, join.current), schedules(dominant, kept)
+                )
             _insert_agg(
                 "agg_route_headway_daily",
                 [
@@ -1489,6 +1983,12 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     "actual_headway_sum_sec",
                     "actual_headway_sumsq_sec2",
                     "long_gap_count",
+                    "scheduled_headway_median_sec",
+                    "is_high_frequency",
+                    "scheduled_headway_sum_sec",
+                    "scheduled_headway_sumsq_sec2",
+                    "bunched_count",
+                    "bunching_judged",
                 ],
                 headway_rows,
                 conn,
@@ -1548,10 +2048,26 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         else:
             logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
 
+        # ── agg_stop_supply_days / agg_stop_supply_hourly ──
+        # From the archive alone, whatever is loaded now or ingested: every
+        # version in force keeps its rows, and a version new since the last run
+        # is added on a run that otherwise leaves the tables standing.
+        with _step(f"{stop_supply.TABLE}: build"):
+            supply_full = scopes[stop_supply.TABLE] is None or scopes[stop_supply.DAYS_TABLE] is None
+            supply_rewritten = stop_supply.rebuild(conn, ch_client, agency_id, full=supply_full)
+
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
-        # Last, so a Postgres builder that fails above leaves ClickHouse
-        # untouched too.
-        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join)
+        # After every Postgres builder but the scorecard, which reads their
+        # copy, so one that fails above leaves ClickHouse untouched too.
+        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join, refit)
+
+        # ── feed_quality_monthly (per-month feed-quality scorecard) ──
+        # After the ClickHouse tables, whose agg_route_daily and
+        # agg_route_daily_dist copies it reads, and agg_feed_health above.
+        with _step(f"{feed_quality.TABLE}: build"):
+            quality_rewritten = feed_quality.rebuild(
+                agency_id, ingest_strategy, quality_scope, feed_quality.last_closed_day(), conn, ch_client, floor
+            )
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
@@ -1571,7 +2087,18 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         with _step("agg_meta: max_captured_at"):
             max_cap = ch_max_captured_at(ch_client, agency_id)
         with _step("agg_meta: upsert"), conn.cursor() as cur:
-            _record_fingerprints(conn, agency_id, plan.current)
+            # ch_scopes is what the ClickHouse tables actually rebuilt, which
+            # can be more than the plan's scope when their two stores disagree.
+            rewritten = {name for name, scope in {**scopes, **ch_scopes}.items() if scope != []}
+            # Its months are built as their windows grow, not only for a changed date.
+            if quality_rewritten:
+                rewritten.add(feed_quality.TABLE)
+            else:
+                rewritten.discard(feed_quality.TABLE)
+            if supply_rewritten:
+                rewritten |= {stop_supply.DAYS_TABLE, stop_supply.TABLE}
+            _record_fingerprints(conn, agency_id, plan.current, rewritten)
+            _record_in_force(conn, agency_id, join)
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at, static_fingerprint) "
                 "VALUES (%s, clock_timestamp(), %s, %s) "
@@ -1594,3 +2121,4 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # knowing which step that was matters most.
         _log_step_summary(agency_id, (time.perf_counter() - wall_t0) * 1000)
         raise
+    return None if before is None else rebuild_headline.read_after(before)

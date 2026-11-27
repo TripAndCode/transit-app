@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 import type { LiveTrip, LiveTripProgressResponse } from "../../api/types";
 import { OperationsTripPanel } from "./OperationsTripPanel";
 
-const t = ((key: string, values?: Record<string, unknown>) => values ? `${key}:${JSON.stringify(values)}` : key) as TFunction;
+const t = ((key: string, values?: Record<string, unknown>) => values ? `${key}:${JSON.stringify(values)}` : key) as unknown as TFunction;
 
 const trip = (id: string, time: string, delay: number): LiveTrip => ({
   trip_id: id, route_code: "B1", service_type: null, scheduled_time: time,

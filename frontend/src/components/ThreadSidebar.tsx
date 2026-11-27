@@ -18,7 +18,7 @@ import { relativeTime } from "../utils/relativeTime";
 import { isToday, isYesterday } from "../utils/threadDateBuckets";
 import { Z_INDEX } from "../styles/zIndex";
 import { FILTER_SEPARATOR } from "../utils/format";
-import { dowValueLabel } from "../utils/filterValueLabels";
+import { dowValueLabel, type LabelT } from "../utils/filterValueLabels";
 import { menuItems, nextMenuItem } from "./menuKeys";
 import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
 import { searchKey } from "../utils/searchText";
@@ -34,14 +34,14 @@ function isThisWeek(iso: string): boolean {
 
 function conversationScopeParts(
   conv: Conversation,
-  t: (key: string, opts?: Record<string, unknown>) => string,
+  t: LabelT,
   formatRoute: (code: string) => string,
   anchorDay: string,
 ): string[] {
   return [...(conv.filter_ctx.routes ?? []).map(formatRoute), filterSummary(conv.filter_ctx, t, anchorDay)];
 }
 
-function filterSummary(fc: FilterCtx, t: (key: string, opts?: Record<string, unknown>) => string, anchorDay: string): string {
+function filterSummary(fc: FilterCtx, t: LabelT, anchorDay: string): string {
   const parts: string[] = [];
 
   // Date range

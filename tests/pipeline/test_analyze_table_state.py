@@ -7,7 +7,7 @@ import pytest
 
 from pipeline import agg_registry
 from pipeline.agg_registry import Timetable
-from pipeline.analyze import analyze
+from pipeline.analyze import _SEED_VERSIONS, analyze
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from tests.pipeline.test_analyze import _analyze, _seed_for_stop_agg, _seed_route_headway_schedule
 
@@ -37,6 +37,16 @@ def _states(pg_conn, agency_id) -> dict[str, str]:
         return dict(cur.fetchall())
 
 
+def _built_at(pg_conn, agency_id) -> dict:
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT table_name, built_at FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        return dict(cur.fetchall())
+
+
+def _moved(before: dict, after: dict) -> set[str]:
+    return {name for name in after if after[name] != before.get(name)}
+
+
 def _count(pg_conn, table, agency_id) -> int:
     with pg_conn.cursor() as cur:
         cur.execute(f"SELECT count(*) FROM {table} WHERE agency_id = %s", (agency_id,))
@@ -56,6 +66,81 @@ def test_a_run_with_nothing_new_rebuilds_nothing(pg_conn, agency_id, ch_client, 
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+
+
+def test_a_run_with_nothing_new_keeps_every_build_time(pg_conn, agency_id, ch_client):
+    """built_at says when a table's rows last changed, which a run that
+    rebuilds nothing does not, so a report's stamp and its cached rows hold."""
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _built_at(pg_conn, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _built_at(pg_conn, agency_id) == before
+
+
+def test_a_run_moves_the_build_time_of_what_it_rebuilt_and_only_that(pg_conn, agency_id, ch_client, monkeypatch):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _built_at(pg_conn, agency_id)
+    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=9)
+    monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _moved(before, _built_at(pg_conn, agency_id)) == {"agg_hour_daily"}
+
+
+def test_a_run_over_changed_dates_moves_the_build_time_of_the_tables_it_rebuilt(pg_conn, agency_id, ch_client, caplog):
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    before = _built_at(pg_conn, agency_id)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        # Mirroring the seed again adds rows to its dates, so the ledger reports them.
+        _analyze(agency_id, pg_conn, ch_client)
+    rebuilt = {name for name, scope in _scopes_logged(caplog).items() if scope != "unchanged"}
+    assert rebuilt and rebuilt != set(agg_registry.TABLES)
+    assert _moved(before, _built_at(pg_conn, agency_id)) == rebuilt
+
+
+def _first_row(table: str) -> str:
+    return f"ctid = (SELECT ctid FROM {table} WHERE agency_id = %s LIMIT 1)"
+
+
+@pytest.mark.parametrize(
+    ("disagreement", "rebuilt"),
+    [
+        # The feed-quality scorecard counts agg_route_daily's trips, so it follows.
+        (
+            f"DELETE FROM agg_route_daily WHERE {_first_row('agg_route_daily')}",
+            {"agg_route_daily", "feed_quality_monthly"},
+        ),
+        (f"DELETE FROM agg_route_hour WHERE {_first_row('agg_route_hour')}", {"agg_route_hour"}),
+        # agg_route_stats is the figure route_delay_counts is checked against,
+        # and every whole-history table built from route_delay_counts follows it.
+        (
+            f"UPDATE agg_route_stats SET samples = samples + 1 WHERE {_first_row('agg_route_stats')}",
+            {"route_delay_counts", "agg_route_stats", "agg_route_hour", "agg_route_hour_dow"},
+        ),
+    ],
+    ids=["copied monthly", "whole history", "internal"],
+)
+def test_a_table_rebuilt_because_its_stores_disagree_moves_its_build_time(
+    pg_conn, agency_id, ch_client, caplog, disagreement, rebuilt
+):
+    """A ClickHouse-computed table whose Postgres side no longer adds up is
+    rebuilt whole (pipeline.analyze._ch_agg_scopes) though the plan, which
+    reads fingerprints and the ledger, left it unchanged."""
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(disagreement, (agency_id,))
+        assert cur.rowcount == 1
+    pg_conn.commit()
+    before = _built_at(pg_conn, agency_id)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+    assert _moved(before, _built_at(pg_conn, agency_id)) == rebuilt
 
 
 def _as_if_last_built_before_table_state(pg_conn, agency_id):
@@ -102,7 +187,11 @@ def test_deploy_seeds_the_states_without_a_rebuild(pg_conn, agency_id, ch_client
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     assert any("seeded" in r.getMessage() for r in caplog.records)
-    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+    # The seed vouches for the versions of the switch: a table bumped since
+    # rebuilds, with the tables computed from it, and every other one stands.
+    bumped = {n for n, t in agg_registry.TABLES.items() if t.version != _SEED_VERSIONS.get(n)}
+    rebuilt = {n for n, s in _scopes_logged(caplog).items() if s != "unchanged"}
+    assert rebuilt == bumped | {n for n, t in agg_registry.TABLES.items() if set(t.depends_on) & bumped}
     assert set(_states(pg_conn, agency_id)) == set(agg_registry.TABLES)
 
 
@@ -131,7 +220,9 @@ def test_a_changed_timetable_rebuilds_only_the_tables_that_read_it(pg_conn, agen
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     logged = _scopes_logged(caplog)
-    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable is not Timetable.NONE}
+    # A table kept per archived version adds the new content's rows itself,
+    # with no scope of its own to rebuild.
+    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable not in (Timetable.NONE, Timetable.VERSIONS)}
     assert {n for n, s in logged.items() if s != "unchanged"} == readers
 
 
@@ -162,7 +253,9 @@ def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id
     _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
     stats_before = _count(pg_conn, "agg_route_stats", agency_id)
-    bumped = dataclasses.replace(agg_registry.TABLES["route_delay_counts"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["route_delay_counts"], version=agg_registry.TABLES["route_delay_counts"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "route_delay_counts", bumped)
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
@@ -176,7 +269,9 @@ def test_a_version_bump_rebuilds_the_table_and_its_dependents(pg_conn, agency_id
 def test_a_bump_and_changed_dates_rebuild_side_by_side(pg_conn, agency_id, ch_client, caplog, monkeypatch):
     _seed_for_stop_agg(pg_conn, agency_id)
     _analyze(agency_id, pg_conn, ch_client)
-    bumped = dataclasses.replace(agg_registry.TABLES["route_delay_counts"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["route_delay_counts"], version=agg_registry.TABLES["route_delay_counts"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "route_delay_counts", bumped)
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):

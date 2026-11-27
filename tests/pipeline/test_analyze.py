@@ -498,9 +498,30 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "(%s, '2099-01-01', 11, 99.9, 100)",
         ),
         (
+            "agg_route_band_daily",
+            "(agency_id, date, route_code, time_band, samples, sum_delay_sec, sum_late_sec)",
+            "(%s, '2099-01-01', 'GHOST', 'morning', 100, 999, 999)",
+        ),
+        (
+            "agg_route_segment_runtime",
+            "(agency_id, date, route_code, from_stop_id, to_stop_id, time_band, to_stop_sequence, run_sec, "
+            "scheduled_samples, scheduled_sum_sec, hold_eligible, holds, terminal_arrivals, terminal_early)",
+            "(%s, '2099-01-01', 'GHOST', 'A', 'B', 'morning', 2, '{60}', 1, 60, 0, 0, 0, 0)",
+        ),
+        (
             "agg_stop_daily",
             "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples)",
             "(%s, 'GHOST_STOP', '2099-01-01', '平日', 'morning', 999, 100)",
+        ),
+        (
+            "agg_stop_hour_daily",
+            "(agency_id, stop_id, date, hour, samples, sum_delay_sec, on_time_count, late5_count, early_count)",
+            "(%s, 'GHOST_STOP', '2099-01-01', 8, 100, 999, 1, 1, 1)",
+        ),
+        (
+            "agg_stop_departures_daily",
+            "(agency_id, stop_id, date, scheduled_secs, dep_delays)",
+            "(%s, 'GHOST_STOP', '2099-01-01', '{1}', '{0}')",
         ),
         (
             "agg_stop_routes",
@@ -517,7 +538,7 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
 
     # Tables keyed by route_code use GHOST; stop tables use GHOST_STOP;
     # agg_hour_daily has neither, so its ghost is the 2099 date.
-    _stop_ghost_tables = {"agg_stop_daily", "agg_stop_routes"}
+    _stop_ghost_tables = {"agg_stop_daily", "agg_stop_hour_daily", "agg_stop_departures_daily", "agg_stop_routes"}
     _date_ghost_tables = {"agg_hour_daily"}
     with pg_conn.cursor() as cur:
         for table, _cols, _values in ghosts:
@@ -881,6 +902,37 @@ def test_agg_feed_health_counts_delayless_rows_in_total_rows_only(pg_conn, agenc
     assert by_date == {"2026-06-09": (1, 0, 2), "2026-06-10": (0, 0, 1)}
 
 
+def test_agg_feed_health_counts_each_days_rows_by_ingest_source(pg_conn, agency_id, ch_client):
+    """Archive ingest names a row after its archive file; the collector's push
+    and ingest_live name theirs in their own namespaces, which promotion keeps.
+    A day can hold either or both, and the two counts add up to total_rows."""
+
+    def at(day):
+        return datetime(2026, 6, day, 2, 0, tzinfo=timezone.utc)
+
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            ("20260609/a.pb", at(9), "T1", "平日", "11:00:00", "R1", 1, 60),
+            ("20260609/b.pb", at(9), "T2", "平日", "11:00:00", "R1", 1, None),
+            ("oracle/20260610/a.pb", at(10), "T3", "平日", "11:00:00", "R1", 1, 60),
+            ("live_20260610T020000", at(10), "T4", "平日", "11:00:00", "R1", 1, 60),
+            ("20260611/a.pb", at(11), "T5", "平日", "11:00:00", "R1", 1, 60),
+            ("oracle/20260611/a.pb", at(11), "T6", "平日", "11:00:00", "R1", 1, 60),
+            ("live_20260611T020000", at(11), "T7", "平日", "11:00:00", "R1", 1, 60),
+        ],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, archive_rows, live_rows, total_rows FROM agg_feed_health WHERE agency_id=%s ORDER BY date",
+            (agency_id,),
+        )
+        by_date = {str(d): (archive, live, total) for d, archive, live, total in cur.fetchall()}
+    assert by_date == {"2026-06-09": (2, 0, 2), "2026-06-10": (0, 2, 2), "2026-06-11": (1, 2, 3)}
+
+
 def _set_ingest_strategy(pg_conn, agency_id, strategy):
     with pg_conn.cursor() as cur:
         cur.execute("UPDATE agencies SET ingest_strategy = %s WHERE agency_id = %s", (strategy, agency_id))
@@ -895,6 +947,8 @@ def _ch_service_delivered_row(
     stop_sequence=1,
     schedule_relationship_trip=None,
     schedule_relationship_stop=None,
+    dep_delay=60,
+    route_code="R1",
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields this builder reads populated."""
@@ -904,9 +958,9 @@ def _ch_service_delivered_row(
         trip_id,
         "平日",
         "11:00:00",
-        "R1",
+        route_code,
         stop_sequence,
-        60,
+        dep_delay,
         None,  # stop_id
         None,  # arr_delay
         schedule_relationship_trip,
@@ -936,9 +990,366 @@ def test_analyze_builds_agg_service_delivered_daily_for_static_join_agency(pg_co
             (agency_id,),
         )
         by_date = {str(d): n for d, n in cur.fetchall()}
-    # T2 (CANCELED) + T3 (stop SKIPPED) = 2 on day1; day2's T4 has no
-    # cancellation/skip -> the source query emits no row for that day at all.
+    # T2 (CANCELED) + T3 (its one reported stop SKIPPED) = 2 on day1; day2's
+    # T4 has no cancellation/skip -> the source query emits no row for that day at all.
     assert by_date == {"2026-04-01": 2}
+
+
+def test_analyze_counts_a_trip_not_run_when_cancelled_or_every_stop_it_reports_skipped(pg_conn, agency_id, ch_client):
+    """A trip is not run when its latest status is CANCELED, as the one row a
+    cancellation listing no stop stores says, or when the latest status of
+    every stop it reports is SKIPPED. A trip that skipped only some of its
+    stops ran."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    early = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 1, 2, 5, tzinfo=timezone.utc)
+
+    def stop(trip_id, at, seq, status, file_name="a.pb"):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name=file_name,
+            stop_sequence=seq,
+            schedule_relationship_trip=0,
+            schedule_relationship_stop=status,
+        )
+
+    served, skipped = 0, 1
+    rows = [
+        stop("partial", early, 1, served),
+        stop("partial", early, 2, skipped),
+        stop("every_stop_skipped", early, 1, skipped),
+        stop("every_stop_skipped", early, 2, skipped),
+        stop("skipped_then_served", early, 1, skipped),
+        stop("skipped_then_served", early, 2, skipped),
+        stop("skipped_then_served", later, 1, served, file_name="b.pb"),
+        _ch_service_delivered_row(
+            "cancelled_without_stops",
+            early,
+            file_name="a.pb",
+            stop_sequence=TRIP_LEVEL_STOP_SEQUENCE,
+            schedule_relationship_trip=3,
+            dep_delay=None,
+        ),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 2}
+
+
+def test_analyze_reads_the_same_latest_report_for_service_delivered_as_for_departures(pg_conn, agency_id, ch_client):
+    """A report that carries neither a delay nor a CANCELED or SKIPPED status
+    says nothing about whether the trip ran, so it leaves the withdrawal
+    before it standing: T1, predicted and then cancelled, T2, skipped at its
+    one stop, and T4, cancelled without listing a stop, each followed by such
+    a report, have no departure and are not run. T3's prediction after its
+    skip restores it."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    first, second, third = (datetime(2026, 4, 1, 2, m, tzinfo=timezone.utc) for m in (0, 5, 10))
+    no_data, skipped, canceled = 2, 1, 3
+
+    def row(trip_id, at, file_name, *, trip_status=0, stop_status=0, dep_delay=None, stop_sequence=1):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name=file_name,
+            stop_sequence=stop_sequence,
+            schedule_relationship_trip=trip_status,
+            schedule_relationship_stop=stop_status,
+            dep_delay=dep_delay,
+        )
+
+    rows = [
+        row("T1", first, "a.pb", dep_delay=60),
+        row("T1", second, "b.pb", trip_status=canceled, stop_status=no_data),
+        row("T1", third, "c.pb", stop_status=no_data),
+        row("T2", first, "a.pb", stop_status=skipped),
+        row("T2", second, "b.pb", stop_status=no_data),
+        row("T3", first, "a.pb", stop_status=skipped),
+        row("T3", second, "b.pb", dep_delay=30),
+        row("T3", third, "c.pb", stop_status=no_data),
+        row("T4", first, "a.pb", trip_status=canceled, stop_status=None, stop_sequence=TRIP_LEVEL_STOP_SEQUENCE),
+        row("T4", second, "b.pb", stop_status=no_data),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 3}
+        cur.execute("SELECT trips_observed, samples FROM agg_route_daily WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(1, 1)]
+
+
+def test_analyze_counts_a_stop_reported_with_neither_a_delay_nor_a_status_neither_way(pg_conn, agency_id, ch_client):
+    """A trip is not run when every stop it reports with a delay or a status
+    is SKIPPED; a stop it only ever reports with neither counts neither way.
+    So a trip skipping one stop and reporting the other without either is not
+    run, and the same trip with a third stop departing ran."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    at = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    skipped, no_data = 1, 2
+
+    def stop(trip_id, seq, status, dep_delay=None):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name="a.pb",
+            stop_sequence=seq,
+            schedule_relationship_trip=0,
+            schedule_relationship_stop=status,
+            dep_delay=dep_delay,
+        )
+
+    rows = [
+        stop("skipped_and_silent", 1, skipped),
+        stop("skipped_and_silent", 2, no_data),
+        stop("skipped_silent_and_served", 1, skipped),
+        stop("skipped_silent_and_served", 2, no_data),
+        stop("skipped_silent_and_served", 3, 0, dep_delay=45),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
+
+
+def test_analyze_ignores_a_cancellation_listing_no_stop_that_arrives_long_after_the_trip_ran(
+    pg_conn, agency_id, ch_client
+):
+    """A cancellation listing no stop, the trip-level row ingest stores for it,
+    counts only when captured by the trip's last scheduled departure that day
+    plus 130 minutes, the bound every reading of its stops has. Four trips
+    leave stops scheduled at 08:00 and 08:10 JST, each predicted at 07:55:
+    one cancelled at 10:20:00, on the bound, is not run, and those cancelled
+    at 10:20:01 and at 11:20, after it, ran. A trip no stop of which is
+    reported, cancelled at 11:20, is not run however late that is."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    jst = timezone(timedelta(hours=9))
+    predicted = datetime(2026, 4, 1, 7, 55, tzinfo=jst)
+
+    def stop(trip_id, seq, scheduled):
+        clock = time.fromisoformat(scheduled)
+        sec = clock.hour * 3600 + clock.minute * 60
+        return ("p.pb", predicted, trip_id, "平日", scheduled, "R1", seq, 0, None, None, 0, 0, None, sec)
+
+    def cancelled(trip_id, at):
+        at = datetime.fromisoformat(f"2026-04-01T{at}+09:00")
+        file_name = f"c{at:%H%M%S}.pb"
+        return (file_name, at, trip_id, "平日", None, "R1", TRIP_LEVEL_STOP_SEQUENCE, None, None, None, 3, None, None)
+
+    rows = []
+    for trip_id, at in (("on_bound", "10:20:00"), ("past_bound", "10:20:01"), ("hours_later", "11:20:00")):
+        rows += [stop(trip_id, 1, "08:00:00"), stop(trip_id, 2, "08:10:00"), cancelled(trip_id, at)]
+    rows.append(cancelled("never_ran", "11:20:00"))
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 2}
+        cur.execute("SELECT trips_observed, samples FROM agg_route_daily WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(3, 6)]
+
+
+def test_analyze_bounds_a_cancellation_listing_no_stop_by_a_last_stop_reported_only_as_its_arrival(
+    pg_conn, agency_id, ch_client
+):
+    """A feed that reports arrivals reports a trip's last stop as its arrival
+    alone. The trip's last scheduled departure is still that stop's, 08:40
+    JST here after departures at 08:00 and 08:10, so a cancellation listing no
+    stop counts until 10:50:00: one at 10:40, past 08:10's bound, is not run,
+    and one at 10:50:01 ran."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    jst = timezone(timedelta(hours=9))
+    predicted = datetime(2026, 4, 1, 7, 55, tzinfo=jst)
+
+    def stop(trip_id, seq, scheduled, *, dep_delay=0, arr_delay=None):
+        clock = time.fromisoformat(scheduled)
+        sec = clock.hour * 3600 + clock.minute * 60
+        return ("p.pb", predicted, trip_id, "平日", scheduled, "R1", seq, dep_delay, None, arr_delay, 0, 0, None, sec)
+
+    def cancelled(trip_id, at):
+        at = datetime.fromisoformat(f"2026-04-01T{at}+09:00")
+        file_name = f"c{at:%H%M%S}.pb"
+        return (file_name, at, trip_id, "平日", None, "R1", TRIP_LEVEL_STOP_SEQUENCE, None, None, None, 3, None, None)
+
+    rows = []
+    for trip_id, at in (("inside_last_stop", "10:40:00"), ("past_last_stop", "10:50:01")):
+        rows += [
+            stop(trip_id, 1, "08:00:00"),
+            stop(trip_id, 2, "08:10:00"),
+            stop(trip_id, 3, "08:40:00", dep_delay=None, arr_delay=30),
+            cancelled(trip_id, at),
+        ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
+
+
+def test_analyze_counts_each_trip_not_run_under_the_one_route_its_latest_report_names(pg_conn, agency_id, ch_client):
+    """Each trip-day not run lands under one route, so an agency's day is the
+    sum of its routes: the route its latest report naming one names, and ''
+    where no report names one. A trip both cancelled and skipped at every
+    stop counts once."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    early = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 1, 2, 5, tzinfo=timezone.utc)
+    next_day = datetime(2026, 4, 2, 2, 0, tzinfo=timezone.utc)
+    canceled, skipped = 3, 1
+
+    def row(trip_id, at, route_code, *, trip_status=0, stop_status=None, stop_sequence=1, file_name="a.pb"):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name=file_name,
+            stop_sequence=stop_sequence,
+            schedule_relationship_trip=trip_status,
+            schedule_relationship_stop=stop_status,
+            route_code=route_code,
+        )
+
+    rows = [
+        row("A1", early, "RA", trip_status=canceled),
+        row("A2", early, "RA", stop_status=skipped),
+        # Cancelled and skipped at its one stop: one trip not run, not two.
+        row("A3", early, "RA", trip_status=canceled, stop_status=skipped),
+        row("B1", early, "RB", trip_status=canceled),
+        # The later report names no route, so the earlier one's stands.
+        row("B2", early, "RB", stop_status=skipped),
+        row("B2", later, None, stop_status=skipped, file_name="b.pb"),
+        # Renamed mid-day: the latest report's route.
+        row("C1", early, "RA", trip_status=canceled),
+        row("C1", later, "RC", trip_status=canceled, file_name="b.pb"),
+        row(
+            "N1",
+            early,
+            None,
+            trip_status=canceled,
+            stop_sequence=TRIP_LEVEL_STOP_SEQUENCE,
+        ),
+        row("RAN", early, "RA"),
+        row("A1", next_day, "RA", trip_status=canceled, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, route_code, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        by_route = {(str(d), code): n for d, code, n in cur.fetchall()}
+    assert by_route == {
+        ("2026-04-01", "RA"): 3,
+        ("2026-04-01", "RB"): 2,
+        ("2026-04-01", "RC"): 1,
+        ("2026-04-01", ""): 1,
+        ("2026-04-02", "RA"): 1,
+    }
+
+
+def test_analyze_leaves_no_departure_for_a_trip_predicted_and_then_cancelled_without_listing_a_stop(
+    pg_conn, agency_id, ch_client, tmp_path
+):
+    """Archive ingest stores a cancellation that lists no stop as a
+    withdrawal of each stop its trip has not left yet. T1, cancelled before
+    it set off, leaves no departure and is not observed. T3, cancelled after
+    its first stop, keeps that departure. T4, cancelled after its last stop,
+    keeps both. A trip whose last status is CANCELED is not run, so T1, T3 and
+    T4 all count as not run, and only T2 ran. The predictions name the route
+    and the cancellations name none, so each withdrawal takes the route from
+    the timetable, which is the one the predictions named."""
+    from pipeline.ingest import ingest
+    from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Stop 1')", (agency_id,)
+        )
+        for trip_id, departures in (
+            ("T1", ("11:00:00", "11:05:00")),
+            ("T2", ("11:30:00", "11:35:00")),
+            ("T3", ("10:57:00", "11:10:00")),
+            ("T4", ("10:50:00", "10:56:00")),
+        ):
+            cur.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id, static_version_id) "
+                "VALUES (%s, %s, 'R1', '平日', 'gtfs_static_20260401')",
+                (agency_id, trip_id),
+            )
+            for seq, departure in enumerate(departures, start=1):
+                cur.execute(
+                    "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                    "VALUES (%s, %s, %s, 'S1', %s)",
+                    (agency_id, trip_id, seq, departure),
+                )
+    pg_conn.commit()
+    predicted_at = int(datetime(2026, 4, 1, 1, 55, tzinfo=timezone.utc).timestamp())
+
+    def predicted(trip_id):
+        return trip_update(
+            trip_id, stop_time_update(1, departure_delay=60), stop_time_update(2, departure_delay=60), route_id="R1"
+        )
+
+    (tmp_path / "20260401").mkdir()
+    (tmp_path / "20260401" / "TripUpdate_015500.pb").write_bytes(
+        trip_update_feed(*(predicted(trip_id) for trip_id in ("T1", "T2", "T3", "T4")), timestamp=predicted_at)
+    )
+    (tmp_path / "20260401" / "TripUpdate_015800.pb").write_bytes(
+        trip_update_feed(
+            *(trip_update(trip_id, schedule_relationship=3) for trip_id in ("T1", "T3", "T4")),
+            predicted("T2"),
+            timestamp=predicted_at + 180,
+        )
+    )
+    # The cancelling poll: T1's two stops, T3's second, T4's trip-level row, T2's two predictions.
+    assert ingest(str(tmp_path), agency_id, pg_conn, ch_client) == 8 + 6
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT samples, trips_observed FROM agg_route_daily WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(5, 3)]
+        cur.execute(
+            "SELECT date, route_code, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        # Under the route the withdrawals take from the timetable.
+        assert {(str(d), code): n for d, code, n in cur.fetchall()} == {("2026-04-01", "R1"): 3}
 
 
 def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):
@@ -1066,6 +1477,18 @@ def _seed_route_headway_schedule(pg_conn, agency_id, route_id, service_id, stop_
     pg_conn.commit()
 
 
+def _kept_wait(pg_conn, agency_id, route_code):
+    """The scheduled mean wait the loaded timetable's kept sums give *route_code*
+    (agg_sql.route_headway_sql(all_routes=True), what pipeline.static_headways keeps)."""
+    from pipeline import agg_sql
+    from pipeline.headways import mean_wait_from_sums
+
+    with pg_conn.cursor() as cur:
+        cur.execute(agg_sql.route_headway_sql(all_routes=True), {"agency_id": agency_id})
+        kept = {route: (total, squares) for route, _median, total, squares in cur.fetchall()}
+    return mean_wait_from_sums(*kept[route_code])
+
+
 def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, agency_id, ch_client):
     """An ~8-minute scheduled-headway route is classified high-frequency; a
     30-minute one is not. Purely static-schedule-derived -- no RT `updates`
@@ -1091,17 +1514,17 @@ def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, a
 
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT route_code, scheduled_headway_median_sec, is_high_frequency, scheduled_wait_mean_sec "
+            "SELECT route_code, scheduled_headway_median_sec, is_high_frequency "
             "FROM agg_route_headway WHERE agency_id = %s ORDER BY route_code",
             (agency_id,),
         )
-        by_route = {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
+        by_route = {r[0]: (r[1], r[2], _kept_wait(pg_conn, agency_id, r[0])) for r in cur.fetchall()}
 
     freq_median, freq_hf, freq_wait = by_route["R_FREQ"]
     assert abs(freq_median - 480) < 1  # hand-computed: 480s (8 min) between every pair
     assert freq_hf is True
     # Perfectly regular headway -> mean wait reduces to headway/2 (the
-    # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_moments).
+    # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_sums).
     assert abs(freq_wait - 240) < 1
 
     slow_median, slow_hf, slow_wait = by_route["R_SLOW"]
@@ -1158,26 +1581,42 @@ def test_agg_route_headway_counts_whitespace_padded_departure_times(pg_conn, age
     assert median == 600
 
 
+def test_agg_route_headway_takes_the_mean_of_the_two_middle_gaps_of_an_even_count(pg_conn, agency_id, ch_client):
+    """Gaps of 8 and 20 minutes have a 14-minute median, the mean of the two
+    middles, as the actual side's statistics.median takes it, so the route is
+    not high-frequency. The lower middle alone would read 8 minutes."""
+    _seed_route_headway_schedule(pg_conn, agency_id, "R_EVEN", "WD", "s1", ["08:00:00", "08:08:00", "08:28:00"])
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT scheduled_samples, scheduled_headway_median_sec, is_high_frequency FROM agg_route_headway "
+            "WHERE agency_id = %s AND route_code = 'R_EVEN'",
+            (agency_id,),
+        )
+        assert cur.fetchone() == (2, 840, False)
+
+
 @pytest.mark.parametrize("after_midnight", ["00:10:00", "24:10:00"])
 def test_agg_route_headway_places_an_after_midnight_departure_on_its_service_day(
     pg_conn, agency_id, ch_client, after_midnight
 ):
     """23:30, 23:50 and an after-midnight departure written either as GTFS's
     extended 24:10 or as a plain clock 00:10: both are 20 minutes after 23:50,
-    never a departure before the evening's first. The median alone cannot tell
-    (it is the smaller gap either way); the mean wait sees the false 23:30 gap."""
+    never a departure before the evening's first, which would add a false gap
+    of 23 h 20 min that both the median of the two gaps and the mean wait take in."""
     _seed_route_headway_schedule(pg_conn, agency_id, "R_NIGHT", "WD", "s1", ["23:30:00", "23:50:00", after_midnight])
     _analyze(agency_id, pg_conn, ch_client)
 
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT scheduled_samples, scheduled_headway_median_sec, scheduled_wait_mean_sec FROM agg_route_headway "
+            "SELECT scheduled_samples, scheduled_headway_median_sec FROM agg_route_headway "
             "WHERE agency_id = %s AND route_code = 'R_NIGHT'",
             (agency_id,),
         )
-        samples, median, wait_mean = cur.fetchone()
+        samples, median = cur.fetchone()
     assert (samples, median) == (2, 1200)
-    assert wait_mean == pytest.approx(600)
+    assert _kept_wait(pg_conn, agency_id, "R_NIGHT") == pytest.approx(600)
 
 
 def _ch_headway_row(
@@ -1191,6 +1630,7 @@ def _ch_headway_row(
     file_name="f.pb",
     route_code="R1",
     stop_sequence=1,
+    schedule_relationship_trip=None,
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields agg_route_headway_daily reads
@@ -1209,7 +1649,7 @@ def _ch_headway_row(
         dep_delay,
         stop_id,
         None,  # arr_delay
-        None,  # schedule_relationship_trip
+        schedule_relationship_trip,
         None,  # schedule_relationship_stop
         None,  # feed_timestamp
         scheduled_sec,
@@ -1269,7 +1709,7 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     reconstructed median headway must land within a few seconds of the
     hand-computed 480s value."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # a single JST service day
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", dep_delay=0, file_name="b.pb"),
@@ -1298,6 +1738,36 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     # No static schedule seeded for R1 in this fixture -> no scheduled
     # median to compare against -> nothing is countable as "long" yet.
     assert long_gap_count == 0
+
+
+def test_analyze_leaves_a_cancelled_departure_out_of_the_actual_headway(pg_conn, agency_id, ch_client):
+    """T2's departure was predicted and then withdrawn by a later poll
+    cancelling its trip, so the stop saw T1 and T3 alone: one 960 s gap, not
+    two of 480 s."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", dep_delay=0, file_name="b.pb"),
+        _ch_headway_row(
+            "T2",
+            day + timedelta(minutes=5),
+            stop_id="s1",
+            scheduled_time="08:08:00",
+            dep_delay=None,
+            file_name="d.pb",
+            schedule_relationship_trip=3,
+        ),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:16:03", dep_delay=-3, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    row = _actual_headway_row(pg_conn, agency_id)
+    assert row is not None
+    median_sec, samples = row
+    assert samples == 1
+    assert abs(median_sec - 960) <= 3
 
 
 def _actual_headway_row(pg_conn, agency_id):
@@ -1373,7 +1843,7 @@ def test_analyze_reconstructs_actual_headway_keeps_an_event_whose_latest_poll_is
     keeps its last plausible estimate instead of vanishing and merging its two
     neighbouring gaps into one."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
@@ -1397,7 +1867,7 @@ def test_analyze_reconstructs_actual_headway_takes_the_schedule_from_the_latest_
     its polls. The event's time pairs the latest poll's delay with that same
     poll's schedule, never an older one."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
@@ -1424,7 +1894,7 @@ def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_rout
     visits survive as distinct events -- collapsing them via argMax on
     trip_id alone would silently discard one real departure."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # a single JST service day
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         # T1 revisits stop s1 twice within its own trip (stop_sequence 1 and 5),
         # ten minutes apart -- two distinct real events sharing the same trip_id.
@@ -1486,7 +1956,7 @@ def test_analyze_reconstructs_actual_headway_long_gap_count_against_scheduled_me
         "s1",
         ["08:00:00", "08:08:00", "08:16:00", "08:24:00", "08:32:00"],
     )
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:00:30", dep_delay=0, file_name="b.pb"),
@@ -2143,10 +2613,10 @@ def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_clie
     assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []
 
     # The ledger is the only thing consulted, so editing it is the same signal
-    # a newly ingested row would produce.
+    # a newly ingested row would produce: one fewer than ClickHouse holds.
     with pg_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agg_feed_health SET raw_samples = raw_samples + 1 "
+            "UPDATE agg_feed_health SET raw_samples = raw_samples - 1 "
             "WHERE agency_id = %s AND date = (SELECT max(date) FROM agg_feed_health WHERE agency_id = %s) "
             "RETURNING date",
             (agency_id, agency_id),
@@ -2155,6 +2625,18 @@ def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_clie
     pg_conn.commit()
 
     assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [moved]
+
+    # One more than ClickHouse holds is a row lost, which may have been filed
+    # under either neighbouring day, so both are rebuilt with it.
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_feed_health SET raw_samples = raw_samples + 2 WHERE agency_id = %s AND date = %s",
+            (agency_id, moved),
+        )
+    pg_conn.commit()
+
+    day = timedelta(days=1)
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [moved - day, moved, moved + day]
 
 
 class _RecordingCH:
@@ -2208,13 +2690,22 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     # checks' probes: a table's totals, or an internal table's reference figure.
     totals_reads = tuple(f"FROM {t} " for t in (*ch_aggregates.INTERNAL_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES))
     probes = ("SELECT count(), ", *(f"SELECT {e} FROM {t} " for t, (_, e, _) in ch_aggregates.REFERENCES.items()))
-    archive_reads = (f"FROM {static_archive.ARCHIVE} ", f"FROM {static_archive.VERSION_MAP} ")
+    # The archive's stop times and schedules are read for one content, or listed
+    # by content; its version map and spans hold a row per version name, as does
+    # the stop supply's listing of the versions whose calendar is kept.
+    archive_reads = (f"FROM {static_archive.ARCHIVE} ", f"FROM {static_archive.SCHEDULE} ")
+    name_reads = (
+        f"FROM {static_archive.VERSION_MAP} ",
+        f"FROM {static_archive.SPANS} ",
+        f"FROM {static_archive.CALENDAR} ",
+    )
     assert all(
         s.rstrip().endswith("LIMIT 1")
         or (
             any(r in s for r in archive_reads)
-            and ("AND content_hash = {key:String}" in s or "AND static_version_id = {stem:String}" in s)
+            and ("AND content_hash = {key:String}" in s or s.startswith("SELECT DISTINCT content_hash FROM"))
         )
+        or any(r in s for r in name_reads)
         or any(r in s for r in aggregate_reads)
         or (any(r in s for r in totals_reads) and s.startswith(probes))
         for s in others
@@ -2326,8 +2817,9 @@ def test_a_changed_static_schedule_needs_every_date_of_the_tables_that_read_it(p
     pg_conn.commit()
 
     plan = _plan(agency_id, pg_conn, ch_client, _static_loaded(pg_conn, agency_id), strategy)
-    # The agency_id fixture's ingest stamps no version, so every timetable reader rebuilds.
-    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable is not Timetable.NONE}
+    # The agency_id fixture's ingest stamps no version, so every timetable reader
+    # rebuilds but those kept per archived version, which add the new content's rows.
+    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable not in (Timetable.NONE, Timetable.VERSIONS)}
     assert {n for n, scope in plan.scopes.items() if scope is None} == readers
 
 

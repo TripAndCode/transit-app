@@ -22,6 +22,7 @@ from tests.fixtures.synthetic_gtfs import (
     run_pattern,
     uniform_delays,
 )
+from tests.pipeline.ch_agg_helpers import normalized
 
 
 def _assert_numeric(actual, expected, pattern_name: str, label: str, places: int = 2) -> None:
@@ -70,7 +71,7 @@ def _assert_agg_route_hour(pattern: SyntheticPattern, pg_conn, agency_id) -> Non
         row = cur.fetchone()
     assert row is not None, f"{pattern.name}: no agg_route_hour row"
     scheduled_time, avg_min, p50_min, p90_min, samples = row
-    assert str(scheduled_time) == pattern.scheduled_time, pattern.name
+    assert normalized(scheduled_time) == pattern.scheduled_time, pattern.name
     _assert_numeric(avg_min, exp["avg_min"], pattern.name, "avg_min")
     _assert_numeric(p50_min, exp["p50_min"], pattern.name, "p50_min")
     _assert_numeric(p90_min, exp["p90_min"], pattern.name, "p90_min")

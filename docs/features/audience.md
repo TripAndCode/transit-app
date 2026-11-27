@@ -53,11 +53,14 @@ civic tech. It is not SaaS sold to operators.
 - **Desk first.** Print, PDF and definition-stamped CSV come before phone polish and
   animated map styles.
 - **One period everywhere.** The screen a user lands on, its headline figures and the
-  scope sentence above them describe the same period.
+  scope bar above them describe the same period.
 - **Numbers carry their basis.** Each figure states its definition, its period and the
   data behind it. A figure resting on thin data says so rather than ranking anything.
 - **The deliverable is close.** The council report is the persona's output, so it is
   never buried behind analyst screens.
+- **Readers need no account.** They read anonymously; only the deployment's admins
+  sign in. A figure is shared through a snapshot link, which an admin creates, and no
+  reader personal data is held.
 
 ## Screens
 
@@ -70,19 +73,21 @@ question is how the period went.
 | **Routes** (路線) | Which routes account for it? |
 | **Time** (時間) | At which days and hours? |
 | **Why** (要因) | Is it dwell at stops or running between them? |
-| **Compare** (比較) | Weekday against weekend, and operator against operator. |
+| **Day types & agencies** (日種別・事業者の比較) | Weekday against weekend, and operator against operator. |
 | **Live** (ライブ) | What is running today? A check, not a dispatch console. |
 | **Reports** (レポート) | The material: the period summary and the council report, plus the delay record as a reference. |
-| **Ask** (質問) | Ready-made questions answered as tables and charts. |
+| **Notebook** (調査ノート) | Ready-made analyses run as tables and charts, kept as saved threads with exports and per-stop evidence. Not a free-text Q&A; an optional AI follow-up on a result exists where enabled. |
 
 Admins also see the admin pages and **Model evaluation**.
 
 ## Knowing whether it works
 
-The cheapest signal is to count, monthly against production, the distinct users who
-made a signed-in request (by session or by API key) over the last 30 days:
+Readers are anonymous, so signed-in activity (`user_activity_daily`) counts admins,
+not readers. The reader signal is a cookie-free count kept on the server:
+`anonymous_activity_daily` holds requests per route template per day, with no
+address, hash, cookie or caller identity attached. The admin **Usage** page
+(`/admin/usage`, `GET /api/admin/usage`) reads it alongside signed-in traffic.
 
-```sql
-SELECT count(DISTINCT user_id), max(day) FROM user_activity_daily
-WHERE day > (now() AT TIME ZONE 'Asia/Tokyo')::date - interval '30 days';
-```
+The other signal is what readers say. The sidebar's **Send feedback** link opens the
+address the deployment sets in `FEEDBACK_URL` (an https form or a `mailto:` address);
+without one, the link is not shown.

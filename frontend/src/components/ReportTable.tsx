@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import type { TFunction } from "i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
-import { useRouteNames } from "../api/useRouteNames";
+import { useRouteNames, type RouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
 import { PendingNavLink } from "./navPending";
 import { usePendingNavTarget } from "./navPendingContext";
@@ -18,147 +18,18 @@ import { SHARED_TABLE, th, td } from "./tableStyles";
 import { useCappedList } from "../hooks/useCappedList";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { Z_INDEX } from "../styles/zIndex";
-import { fixedTenth, fmtPct, formatDuration, formatNumber, roundTenth } from "../utils/format";
+import { formatDuration, roundTenth } from "../utils/format";
 import "./ReportTable.css";
 import { ServiceNote } from "./ServiceNote";
+import type { RowMark } from "./snapshotCompare";
 import { Tooltip } from "./Tooltip";
+import { isFewData } from "./fewData";
+import { SCHEMAS, type Schema } from "./reportTableSchemas";
 
 const ROWS_CAP = 200;
 // A phone list item is several times a table row's height, so the first
 // screenful is shorter.
 const PHONE_ROWS_CAP = 25;
-
-type Schema = {
-  /** Column index in the row tuple */
-  index: number;
-  /** i18n key for the column header label */
-  labelKey: string;
-  align?: "left" | "right";
-  /** When set, draws an inline bar; a delay bar takes the ramp colour of the
-   *  minutes the cell prints. */
-  bar?: "delay" | "pct" | "raw";
-  /** A delay bar's figure carries an amber marker at or past the severe
-   *  threshold. Left off where most rows pass it, since a mark on every row
-   *  flags nothing. */
-  severeMarker?: true;
-  /** The Routes table sort this column's figure is. The sorted column is the
-   *  one that carries its bar, its weight and, on a phone, each card's
-   *  headline. */
-  sort?: RouteTableSort;
-  /** A minutes column: the header names the unit once, and each cell holds
-   *  the bare figure. */
-  unit?: "min";
-  format?: (v: unknown, t: TFunction) => string;
-  /** The cell holds a service (an agency's calendar name), shown in the
-   *  UI's language where it has copy. */
-  service?: true;
-  /** The cell holds a route_code, shown as the route's label: `compact` on
-   *  one line with the plate and line name, where it runs in the tooltip. */
-  route?: "full" | "compact";
-  /** The row's caveat on this cell's figure, shown as a muted badge after it,
-   *  with what it measures when the badge is hovered or focused. */
-  caveat?: (row: unknown[], t: TFunction) => { mark: string; tip?: string } | undefined;
-  /** The cell is the row's observation count; under the report's floor it
-   *  carries the few-data badge. */
-  samples?: true;
-};
-
-// The route column of every per-route report. Kept in view while a wide table
-// scrolls sideways, which only works for a first column.
-const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left", route: "full" };
-
-// The day-type reports leave out row index 1, their service slot: a row is
-// one route over all its observations, and the slot only repeats the active
-// service filter, which the scope already names. The Routes table's rows
-// carry no such slot.
-
-// dow_weekend + dow_weekday share columns; the API splits the rows by the
-// agency's day type. The day type itself (row index 2) is the report's own
-// title, so it is not repeated as a column.
-const DOW_COLS: Schema[] = [
-  ROUTE_COL,
-  { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", severeMarker: true, unit: "min", format: fmtMinutes },
-  { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
-];
-
-const SCHEMAS: Record<string, Schema[]> = {
-  // (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples,
-  // low_confidence, margin_pp): every figure of a route, sorted by one.
-  route_table: [
-    { ...ROUTE_COL, route: "compact" },
-    { index: 1, labelKey: "reports.col.avg", align: "right", bar: "delay", unit: "min", format: fmtMinutes, sort: "avg" },
-    {
-      index: 2,
-      labelKey: "reports.col.on_time_pct",
-      align: "right",
-      bar: "pct",
-      format: (v, t) => fmtPct(v, t),
-      sort: "on_time",
-      // The 95% Wilson interval is too wide to trust the rate (see
-      // pipeline/stats.py). It narrows toward 0% and 100%, so it says
-      // nothing about the observation count on its own.
-      caveat: (row, t) =>
-        row[6] === true
-          ? { mark: t("reports.wide_margin_mark"), tip: t("reports.wide_margin_tip", { margin: fixedTenth(Number(row[7])) }) }
-          : undefined,
-    },
-    { index: 3, labelKey: "reports.col.over_5min_share", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t), sort: "late5_share" },
-    { index: 4, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t), sort: "late5_count" },
-    { index: 5, labelKey: "reports.col.samples", align: "right", samples: true, format: (v, t) => fmtNum(v, t) },
-  ],
-  compare_ranking: [
-    ROUTE_COL,
-    { index: 1, labelKey: "common.service_value.平日", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
-    { index: 2, labelKey: "common.service_value.土日祝", align: "right", unit: "min", format: fmtMinutes }, // i18n-ignore: query contract
-    { index: 3, labelKey: "reports.col.diff", align: "right", bar: "delay", severeMarker: true, unit: "min", format: fmtMinutes },
-    {
-      index: 4,
-      labelKey: "reports.col.direction",
-      align: "left",
-      format: (v, t) => {
-        const n = Number(v);
-        if (!isFinite(n) || n === 0) return "—";
-        return n > 0 ? t("reports.direction.weekend_higher") : t("reports.direction.weekday_higher");
-      },
-    },
-  ],
-  dow_weekend: DOW_COLS,
-  dow_weekday: DOW_COLS,
-  // (agency_name, route_code, service_type, date, scheduled_time,
-  // actual_time, dep_delay_sec, stop_name, stop_is_first) -- one row per
-  // over-threshold departure observation (see
-  // pipeline.reports.council.compute_delay_certificate). The stop is marked
-  // as the trip's start only where the timetable starts the trip there.
-  delay_certificate: [
-    { index: 0, labelKey: "reports.col.agency_name", align: "left" },
-    { index: 1, labelKey: "common.route", align: "left", route: "full" },
-    { index: 2, labelKey: "reports.col.service", align: "left", service: true },
-    { index: 3, labelKey: "reports.col.date", align: "left" },
-    { index: 4, labelKey: "reports.col.scheduled_time", align: "left" },
-    { index: 5, labelKey: "reports.col.actual_time", align: "left" },
-    { index: 6, labelKey: "reports.col.delay", align: "right", format: (v) => formatDuration(v == null ? null : Number(v)) },
-    {
-      index: 7,
-      labelKey: "reports.col.recorded_stop",
-      align: "left",
-      caveat: (row, t) => (row[8] === true ? { mark: t("reports.col.trip_start") } : undefined),
-    },
-  ],
-};
-
-function fmtMinutes(v: unknown): string {
-  if (v == null) return "—";
-  const n = Number(v);
-  if (!isFinite(n)) return "—";
-  return fixedTenth(n);
-}
-
-function fmtNum(v: unknown, _t: TFunction): string {
-  if (v == null) return "—";
-  const n = Number(v);
-  if (!isFinite(n)) return "—";
-  return formatNumber(n);
-}
 
 // Module-scope pure function rather than an in-render IIFE — see
 // eslint.config.js's manual-memoization ban comment for why this shape is
@@ -204,16 +75,58 @@ type Props = {
   sortBy?: RouteTableSort;
   /** Which way the sorted column runs, for assistive technology. */
   sortDirection?: "ascending" | "descending";
+  /** The threshold an early-departure column counts past, from the
+   *  response's definition; without it that column is left out. */
+  earlyDepartureSec?: number | null;
+  /** Route labels to draw the rows with, in place of the agency's current
+   *  ones: a frozen snapshot keeps the catalogue it was taken with. */
+  names?: RouteNames;
+  /** A snapshot's rows marked against today's figures, one mark per row
+   *  (snapshotCompare.ts): a figure that moved prints today's beside it, and
+   *  a row only one side lists says which. A row only today lists has no
+   *  rank in the snapshot's order. */
+  marks?: readonly RowMark[];
+  /** A caller's own mark after a column's figure, by the column's row index:
+   *  the Routes table's comparison of a route's on-time rate with the
+   *  route's own reference. */
+  cellMarks?: Readonly<Record<number, (row: unknown[]) => Caveat | undefined>>;
+  /** Whether the statistics-only columns show: the reader's setting on a
+   *  screen that offers the toggle. */
+  showStatistics: boolean;
 };
 
-type Caveat = { mark: string; tip?: string };
+/** A mark after a figure: a muted caveat, or with `tone: "reference"` a
+ *  neutral chip comparing the figure with a reference. */
+type Caveat = { mark: string; tip?: string; tone?: "reference" };
 
-export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirection }: Props) {
+export function ReportTable(props: Props) {
+  return props.names ? <Table {...props} names={props.names} /> : <TableWithAgencyNames {...props} />;
+}
+
+/** The open agency's current route labels, read only when no others are
+ *  given, so a snapshot's page asks the API for nothing beyond itself. */
+function TableWithAgencyNames(props: Props) {
+  const names = useRouteNames(useAgencyId());
+  return <Table {...props} names={names} />;
+}
+
+function Table({
+  reportType,
+  rows,
+  minSamples,
+  sortBy,
+  sortDirection,
+  earlyDepartureSec,
+  names,
+  marks,
+  cellMarks,
+  showStatistics,
+}: Props & { names: RouteNames }) {
   const { t } = useTranslation();
   const id = useAgencyId();
-  const names = useRouteNames(id);
   const { search } = useLocation();
-  const schema = SCHEMAS[reportType];
+  const fullSchema = SCHEMAS[reportType]?.filter((c) => !c.early || earlyDepartureSec != null);
+  const schema = fullSchema?.filter((c) => showStatistics || !c.stat);
   // The visible row last clicked to travel; by row, not route, since a route
   // can fill several rows (a delay certificate lists each departure).
   const [travelling, setTravelling] = useState<number | null>(null);
@@ -230,22 +143,40 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
     return null;
   }
 
+  const label = (c: Schema) => (c.early ? t(c.labelKey, { early: formatDuration(earlyDepartureSec) }) : t(c.labelKey));
   const basis = sortBy == null ? undefined : schema.find((c) => c.sort === sortBy);
   const barred = (c: Schema) => c.bar != null && (basis == null || c === basis);
   const serviceNote = schema.some((c) => c.service) && <ServiceNote />;
+  // The few-data badge warns against trusting a row's figures, so it stays
+  // in view with the observation count hidden: on the sorted figure, else
+  // the first figure.
+  const samplesCol = fullSchema?.find((c) => c.samples);
+  const thinHost = schema.find((c) => c.samples) ?? basis ?? schema.find((c) => !c.route);
   const caveatsOf = (c: Schema, row: unknown[]): Caveat[] => {
     const own = c.caveat?.(row, t);
-    const thin = c.samples && minSamples != null && Number(row[c.index]) < minSamples;
-    return [...(own ? [own] : []), ...(thin ? [{ mark: t("reports.confidence_low_mark") }] : [])];
+    const thin = c === thinHost && samplesCol != null && isFewData(row[samplesCol.index], minSamples);
+    const caller = cellMarks?.[c.index]?.(row);
+    return [...(own ? [own] : []), ...(thin ? [{ mark: t("reports.confidence_low_mark") }] : []), ...(caller ? [caller] : [])];
+  };
+  const sideOf = (i: number) => {
+    const side = marks?.[i]?.side;
+    return side === "snapshot" || side === "today" ? side : undefined;
+  };
+  // Today's figure for row i's column c, worded for the cell, where it
+  // prints differently from the row's own.
+  const todayOf = (i: number, c: Schema, format: (c: Schema, raw: unknown, t: TFunction) => string) => {
+    const mark = marks?.[i];
+    if (mark?.side !== "both" || !mark.today.has(c.index)) return undefined;
+    return t("snapshot.compare.today_value", { value: format(c, mark.today.get(c.index), t) });
   };
   const showMore = cappedRows.remaining > 0 && (
-    <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
+    <button type="button" className="btn btn--secondary btn--sm" onClick={cappedRows.showMore}>
       {t("common.show_more", { count: cappedRows.remaining })}
     </button>
   );
 
   if (compact) {
-    // Seven columns can't share a phone's width without characters stacking,
+    // A wide table's columns can't share a phone's width without characters stacking,
     // so each row becomes one item: rank, route and the sorted (else the
     // barred) figure on top, every other column on a wrapping line beneath.
     // A report without a route column has no title.
@@ -257,17 +188,18 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
           {cappedRows.visible.map((row, i) => (
             <li key={i} className="report-cards__item">
               <div className="report-cards__head">
-                <span className="report-cards__rank">{i + 1}</span>
+                <span className="report-cards__rank">{sideOf(i) === "today" ? "" : i + 1}</span>
                 {titleCol && (
                   <span className="report-cards__route">
                     <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} compact={titleCol.route === "compact"} search={search} travels={travelling === i} onTravel={() => setTravelling(i)} />
+                    <RowSide side={sideOf(i)} />
                   </span>
                 )}
                 {headline && (
                   <span className="report-cards__headline">
-                    <span className="report-cards__label">{t(headline.labelKey)}</span>{" "}
+                    <span className="report-cards__label">{label(headline)}</span>{" "}
                     {headline.severeMarker && isSevere(row[headline.index]) && <DelayMarker />}
-                    <CellValue column={headline} raw={row[headline.index]} text={cardValue(headline, row[headline.index], t)} caveats={caveatsOf(headline, row)} />
+                    <CellValue column={headline} raw={row[headline.index]} text={cardValue(headline, row[headline.index], t)} caveats={caveatsOf(headline, row)} today={todayOf(i, headline, cardValue)} />
                   </span>
                 )}
               </div>
@@ -283,10 +215,10 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                       <span key={c.labelKey} className="report-cards__field">
                         {!c.service && (
                           <>
-                            <span className="report-cards__label">{t(c.labelKey)}</span>{" "}
+                            <span className="report-cards__label">{label(c)}</span>{" "}
                           </>
                         )}
-                        <CellValue column={c} raw={row[c.index]} text={text} caveats={caveatsOf(c, row)} />
+                        <CellValue column={c} raw={row[c.index]} text={text} caveats={caveatsOf(c, row)} today={todayOf(i, c, cardValue)} />
                       </span>
                     );
                   })}
@@ -300,7 +232,9 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
     );
   }
 
-  const maxes = computeColumnMaxes(schema, rows);
+  // Scaled to the snapshot's own rows, so a route only today lists leaves
+  // the stored rows' bars as they were.
+  const maxes = computeColumnMaxes(schema, marks ? rows.filter((_, i) => marks[i]?.side !== "today") : rows);
   return (
     <div className="table-scroll" style={{ width: "100%", overflowX: "auto" }}>
       <table style={SHARED_TABLE}>
@@ -310,6 +244,9 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
             {schema.map((c) => (
               <th
                 key={c.labelKey}
+                // Names the column independently of its position and language,
+                // which shift with the reader's settings and the report.
+                data-col={c.labelKey}
                 className={c === basis ? "report-col--basis" : undefined}
                 aria-sort={c === basis ? sortDirection : undefined}
                 // A header names its column on one line; a wrapped one
@@ -323,7 +260,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                   ...(c === schema[0] && c.route ? STICKY_HEAD : null),
                 }}
               >
-                {c.unit ? t("reports.col.with_unit", { label: t(c.labelKey), unit: t("common.unit_min") }) : t(c.labelKey)}
+                {c.unit ? t("reports.col.with_unit", { label: label(c), unit: t("common.unit_min") }) : label(c)}
               </th>
             ))}
           </tr>
@@ -335,7 +272,7 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
               className={schema.some((c) => c.route) ? "report-row--link" : undefined}
               style={{ borderTop: "1px solid var(--border-soft)" }}
             >
-              <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
+              <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{sideOf(i) === "today" ? "" : i + 1}</td>
               {schema.map((c) => {
                 if (c.route) {
                   return (
@@ -354,11 +291,12 @@ export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirectio
                       }}
                     >
                       <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} compact={c.route === "compact"} search={search} travels={travelling === i} onTravel={() => setTravelling(i)} />
+                      <RowSide side={sideOf(i)} />
                     </td>
                   );
                 }
                 const raw = row[c.index];
-                const value = <CellValue column={c} raw={raw} text={cellText(c, raw, t)} caveats={caveatsOf(c, row)} />;
+                const value = <CellValue column={c} raw={raw} text={cellText(c, raw, t)} caveats={caveatsOf(c, row)} today={todayOf(i, c, cellText)} />;
                 const className = c === basis ? "report-cell--basis" : undefined;
                 if (barred(c)) {
                   // A delay bar is drawn from the minutes the cell prints, so
@@ -457,38 +395,59 @@ function cardValue(c: Schema, raw: unknown, t: TFunction): string {
 
 /** A plain cell: a service in the UI's language where it has copy, anything
  *  else as its formatted text, followed by the row's caveats on it as muted
- *  badges. A badge with a tip takes keyboard focus, so the tip is reachable
+ *  badges, then, on a snapshot compared with today, today's figure where it
+ *  moved. A badge with a tip takes keyboard focus, so the tip is reachable
  *  without a pointer. */
 function CellValue({
   column,
   raw,
   text,
   caveats,
+  today,
 }: {
   column: Schema;
   raw: unknown;
   text: string;
   caveats: Caveat[];
+  today?: string;
 }) {
   if (column.service && raw != null) return <ServiceName value={String(raw)} />;
   return (
     <>
       {text}
-      {caveats.map(({ mark, tip }) => (
+      {caveats.map(({ mark, tip, tone }) => (
         <span key={mark}>
           {" "}
           {tip ? (
             <Tooltip label={tip}>
-              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so the margin it stands for is reachable */}
-              <span className="caveat-badge" tabIndex={0}>
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so what it stands for is reachable */}
+              <span className={tone === "reference" ? "reference-chip" : "caveat-badge"} tabIndex={0}>
                 {mark}
               </span>
             </Tooltip>
           ) : (
-            <span className="caveat-badge">{mark}</span>
+            <span className={tone === "reference" ? "reference-chip" : "caveat-badge"}>{mark}</span>
           )}
         </span>
       ))}
+      {today != null && (
+        <>
+          {" "}
+          <span className="figure-today">{today}</span>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Which side alone lists a row, on a snapshot compared with today. */
+function RowSide({ side }: { side: "snapshot" | "today" | undefined }) {
+  const { t } = useTranslation();
+  if (side == null) return null;
+  return (
+    <>
+      {" "}
+      <span className="caveat-badge">{t(side === "snapshot" ? "snapshot.compare.only_snapshot" : "snapshot.compare.only_today")}</span>
     </>
   );
 }

@@ -230,6 +230,10 @@ type OpsHealth = {
   // False only when the agencies sub-check itself failed — distinguishes
   // "checked, zero agencies" from "check failed" (both give an empty array).
   agencies_ok: boolean;
+  // The newest release `schema-up` recorded. Null with deploys_ok true means
+  // none recorded yet; deploys_ok false means the lookup itself failed.
+  last_deploy: { deployed_at: string; git_sha: string | null; migrations_applied: string[] } | null;
+  deploys_ok: boolean;
 };
 
 export function useAdminOps() {
@@ -299,6 +303,8 @@ export type BoardFreshnessDay = {
 type BoardFreshnessRow = {
   agency_id: number;
   agency_name: string;
+  /** The realtime feed's host; rows arrive grouped by it, an unknown host last. */
+  upstream_host: string | null;
   days: BoardFreshnessDay[];
 };
 
@@ -316,14 +322,14 @@ export type BoardAlert = {
   acked: boolean;
 };
 
-/** One `pipeline_runs` row: an ingest, promote, analyze, weather, static or
- *  RT field-coverage probe job, from the CLI or the cron path, including the
- *  ones the advisory lock displaced. */
+/** One `pipeline_runs` row: an ingest, promote, analyze, weather, static,
+ *  RT field-coverage probe or retention-prune job, from the CLI or the cron
+ *  path, including the ones the advisory lock displaced. */
 export type PipelineRun = {
   run_id: number;
   /** `update` is the agencies page's chained update: its steps are rows of
    *  the other kinds. */
-  kind: "ingest" | "promote" | "analyze" | "weather" | "static" | "update" | "probe";
+  kind: "ingest" | "promote" | "analyze" | "weather" | "static" | "update" | "probe" | "retention";
   /** Null for a fleet-wide job, and for one displaced before it resolved
    *  which agency it was for. */
   agency_id: number | null;
@@ -340,6 +346,29 @@ export type PipelineRun = {
   lock_probe_ms: number | null;
   error: string | null;
   requested_by: number | null;
+  /** An analyze run's headline before and after a rebuild that a method
+   *  version or fingerprint change forced; null on every other run. */
+  rebuild_headline: RebuildHeadline | null;
+};
+
+/** One side of a rebuild's headline. A figure is null when no departure
+ *  counted towards it. */
+type HeadlineFigures = {
+  on_time_pct: number | null;
+  avg_delay_min: number | null;
+  samples: number;
+};
+
+/** The agency's headline over the service dates it had built when the
+ *  rebuild began (`first_day`–`last_day`), under the default on-time
+ *  definition (`preset`), before and after the rebuild. */
+export type RebuildHeadline = {
+  first_day: string;
+  last_day: string;
+  preset: string | null;
+  method_version: string;
+  before: HeadlineFigures;
+  after: HeadlineFigures;
 };
 
 export type AdminBoard = {
@@ -423,6 +452,105 @@ export type AgencyStandard = {
 /** A `route_code` of null is the agency's default weight row. */
 export type AgencyWeight = { route_code: string | null; weight: number };
 
+/** Why a scorecard figure is null (pipeline/feed_quality.py's `Missing`). */
+export type FeedQualityMissing =
+  | "coverage_unknown"
+  | "no_plan_observed"
+  | "no_plan"
+  | "no_stop_plan"
+  | "no_data"
+  | "archive_stamped"
+  | "no_header"
+  | "feed_cannot_report"
+  | "not_recorded"
+  | "not_validated"
+  | "undated_polls"
+  | "no_service_hours"
+  | "live_sampled"
+  | "no_poll_interval"
+  | "no_peer";
+
+/** One GTFS-RT validator rule's counts over a month's validated days. */
+type ValidatorRule = {
+  severity: string;
+  title: string;
+  occurrences: number;
+  files_with_rule: number;
+  days: number;
+};
+
+/** A criterion of the month's grade (pipeline/feed_quality_grade.py's `CRITERIA`). */
+type FeedQualityCriterion = "rt_completeness" | "stale_polls" | "clamp" | "field_coverage";
+
+/** A field the RT field-coverage probe judges (pipeline/strategies/static_join.py's `RT_COVERAGE_FIELDS`). */
+type RtCoverageField = "stop_id" | "arr_delay" | "schedule_relationship_trip" | "schedule_relationship_stop";
+
+/** One month of an agency's feed-quality scorecard. Each figure is null
+ *  exactly when its `*_missing` reason is set. The grade is null exactly
+ *  when `grade_missing` names a criterion whose figure the month lacks. The
+ *  validator and poll figures are all null, reasons included, for a month
+ *  built before they existed, and never enter the grade. */
+export type AgencyFeedQualityMonth = {
+  month: string;
+  through_date: string;
+  covered_days: number;
+  window_days: number;
+  observed_trips: number | null;
+  planned_trips: number | null;
+  rt_completeness_pct: number | null;
+  rt_completeness_missing: FeedQualityMissing | null;
+  observed_stop_events: number | null;
+  planned_stop_events: number | null;
+  stop_plan_days: number;
+  stop_completeness_pct: number | null;
+  stop_completeness_missing: FeedQualityMissing | null;
+  message_age_polls: number;
+  message_age_undated_polls: number;
+  message_age_stale_polls: number | null;
+  message_age_stale_pct: number | null;
+  message_age_p50_sec: number | null;
+  message_age_p95_sec: number | null;
+  message_age_missing: FeedQualityMissing | null;
+  raw_samples: number;
+  clamp_count: number;
+  clamp_pct: number | null;
+  clamp_missing: FeedQualityMissing | null;
+  stop_time_updates: number;
+  stop_id_pct: number | null;
+  arr_delay_pct: number | null;
+  schedule_relationship_trip_pct: number | null;
+  schedule_relationship_stop_pct: number | null;
+  field_coverage_missing: FeedQualityMissing | null;
+  vehicle_positions_available: boolean | null;
+  vehicle_positions_missing: FeedQualityMissing | null;
+  validator_ok_days: number | null;
+  validator_failed_days: number | null;
+  validator_files_validated: number | null;
+  validator_rules: Record<string, ValidatorRule> | null;
+  validator_missing: FeedQualityMissing | null;
+  validator_ingested_at: string | null;
+  poll_days: number | null;
+  in_service_min: number | null;
+  poll_interval_sec: number | null;
+  polls_in_service: number | null;
+  polls_expected: number | null;
+  poll_success_pct: number | null;
+  /** Outage minutes inside service the feed is answerable for. */
+  feed_outage_min: number | null;
+  feed_outage_longest_min: number | null;
+  /** Outage minutes no agency was polled in for more than 5 minutes: the collector's, not the feed's. */
+  collector_outage_min: number | null;
+  collector_outage_longest_min: number | null;
+  polls_missing: FeedQualityMissing | null;
+  outage_missing: FeedQualityMissing | null;
+  peer_rows: number | null;
+  grade: "A" | "B" | "C" | "D" | "F" | null;
+  grade_failing: FeedQualityCriterion[];
+  grade_missing: { criterion: FeedQualityCriterion; reason: FeedQualityMissing }[];
+  /** The fields `field_coverage` fails on, when it fails on any. */
+  grade_failing_fields: RtCoverageField[];
+};
+
 type AgencyDiagnostics = {
   agency_id: number;
   agency_name: string;
@@ -442,6 +570,8 @@ type AgencyDiagnostics = {
   standards_count: number;
   weights: AgencyWeight[];
   weights_coverage: { routes_with_weights: number; routes_total: number };
+  /** Newest month first, up to six. */
+  feed_quality: AgencyFeedQualityMonth[];
 };
 
 /** One step of an operator's run, as the server reads it from the step rows
@@ -648,6 +778,35 @@ export function useUserActivity(uid: number) {
   });
 }
 
+export type AdminUsageRoute = {
+  route: string;
+  method: string;
+  signed_out: number;
+  signed_in: number;
+  errors: number;
+};
+
+export type AdminUsageDay = { day: string; signed_out: number; signed_in: number };
+
+export type AdminUsage = {
+  from: string;
+  to: string;
+  routes: AdminUsageRoute[];
+  days: AdminUsageDay[];
+};
+
+/** Requests per route template, split signed-out/signed-in, over the
+ *  trailing window -- the cookie-free reader signal, since readers never
+ *  sign in and the server keeps no visitor identity to count by. */
+export function useAdminUsage(params: { days: number; agencyId?: number }) {
+  const qs = new URLSearchParams({ days: String(params.days) });
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  return useQuery({
+    queryKey: ["adminUsage", params],
+    queryFn: ({ signal }) => apiGet<AdminUsage>(`/api/admin/usage?${qs}`, { signal }),
+  });
+}
+
 /** Mutation: revoke one session by its prefix; refetches the session list
  *  either way, since a failure is usually a 404 for a session that already
  *  ended (expired, signed out, or ended by a suspend). */
@@ -656,74 +815,6 @@ export function useRevokeSession(uid: number) {
   return useMutation({
     mutationFn: (sidPrefix: string) => apiDelete(`/api/admin/users/${uid}/sessions/${sidPrefix}`),
     onSettled: () => qc.invalidateQueries({ queryKey: ["adminUserSessions", uid] }),
-  });
-}
-
-// ── User drawer: API keys ─────────────────────────────────────────────────
-
-type AdminApiKey = {
-  id: number;
-  owner_user_id: number | null;
-  tier: string;
-  label: string | null;
-  created_at: string;
-  expires_at: string | null;
-  revoked_at: string | null;
-};
-
-export type AdminApiKeyIssued = AdminApiKey & { key: string };
-
-/** `truncated` is true when more admin-issued keys exist than the backend's
- * per-request cap returned -- see MAX_API_KEYS_LISTED in api/routers/admin.py. */
-export type AdminApiKeyList = { keys: AdminApiKey[]; truncated: boolean };
-
-/** API keys issued (via the admin drawer) for one user. */
-export function useApiKeys(ownerUserId: number) {
-  return useQuery({
-    queryKey: ["adminApiKeys", ownerUserId],
-    queryFn: ({ signal }) =>
-      apiGet<AdminApiKeyList>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
-  });
-}
-
-/** Mutation: issue a new API key for a user. The raw key is returned only
- * in this response -- callers must show it once and never refetch it. */
-export function useIssueApiKey(ownerUserId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { tier?: string; label?: string | null }) =>
-      apiPost<AdminApiKeyIssued>("/api/admin/api-keys", { owner_user_id: ownerUserId, ...body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
-  });
-}
-
-/** Mutation: revoke an API key by id; refetches the owner's key list. */
-export function useRevokeApiKey(ownerUserId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => apiDelete(`/api/admin/api-keys/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
-  });
-}
-
-// ── Invites ────────────────────────────────────────────────────────────────
-
-type InviteCreateBody = { email: string; role: "user" | "admin"; llm_approved: boolean };
-
-type AdminInvite = {
-  invite_id: number;
-  email: string;
-  role: "user" | "admin";
-  llm_approved: boolean;
-  created_at: string;
-  expires_at: string;
-};
-
-/** Mutation: pre-approve a role (+ optional LLM access) for an email that
- * hasn't signed in yet; the OAuth callback honors it on first login. */
-export function useCreateInvite() {
-  return useMutation({
-    mutationFn: (body: InviteCreateBody) => apiPost<AdminInvite>("/api/admin/invites", body),
   });
 }
 
@@ -826,6 +917,7 @@ export function usePatchFeatureFlag() {
       apiPatch<FeatureFlag>(`/api/admin/flags/${key}`, { value, reason }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminFlags"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
 }
@@ -839,6 +931,7 @@ export function useClearFeatureFlag() {
     mutationFn: ({ key }: { key: string }) => apiDelete<FeatureFlag>(`/api/admin/flags/${key}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminFlags"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
 }
@@ -867,17 +960,18 @@ export function useTriggerRun() {
   });
 }
 
-// ── Ask ops (query log, route funnel, promote-to-intent-cache, eval) ─────
+// ── Ask ops (query log, route funnel) ─────────────────────────────────────
 //
 // "route" here is the Ask pipeline stage that answered a question (rules ->
-// nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
-// AGENTS.md's architecture naming, not a transit route/line. `no_history` is
+// nn (retired embedding stage; historic rows only) -> rag (LLM)), not a
+// transit route/line. `no_history` is
 // the router's own early-exit case (a follow-up with nothing to continue).
+// The card routes and `followup` are the notebook paths that skip the router.
 // There is no "user" field and `providers` below is always null because
-// ask_query_log carries neither identity nor a per-query provider/latency
-// column (api.routers.admin_ask).
+// ask_query_log carries neither identity nor a per-query provider column
+// (api.routers.admin_ask).
 
-export type AskRoute = "rules" | "nn" | "rag" | "no_history";
+export type AskRoute = "rules" | "nn" | "rag" | "no_history" | "card_signed_in" | "card_signed_out" | "followup";
 type AskStatus = "ok" | "error";
 
 export type AskQueryLogRow = {
@@ -891,7 +985,6 @@ export type AskQueryLogRow = {
   cache_outcome: string | null;
   numeric_guard_triggered: boolean | null;
   created_at: string;
-  promotable: boolean;
 };
 
 type AskQueryLogPage = { rows: AskQueryLogRow[]; next_cursor: string | null };
@@ -918,6 +1011,25 @@ export function useAdminAskQueries(params: {
   });
 }
 
+export type AskToolUsage = {
+  tool: string | null;
+  signed_in: number;
+  signed_out: number;
+  followups: number;
+  failed: number;
+  avg_latency_ms: number | null;
+  avg_followup_latency_ms: number | null;
+};
+
+/** Notebook card runs and follow-ups per tool over the response's window. */
+export function useAdminAskToolUsage() {
+  return useQuery({
+    queryKey: ["adminAskToolUsage"],
+    queryFn: ({ signal }) =>
+      apiGet<{ from_date: string; to_date: string; tools: AskToolUsage[] }>("/api/admin/ask/tools", { signal }),
+  });
+}
+
 type AskFunnelRoute = { route: AskRoute; count: number; success_count: number };
 type AskFunnel = { by_route: AskFunnelRoute[]; total: number; providers: null };
 
@@ -932,28 +1044,63 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
   });
 }
 
-type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
+/** A hub transfer's whole definition, as an admin writes it. Each side names
+ *  its own operator's stop ids; a null direction takes both directions. */
+export type TransferPairInput = {
+  name: string;
+  from_agency_id: number;
+  from_route_code: string;
+  from_direction: 0 | 1 | null;
+  from_stop_ids: string[];
+  to_agency_id: number;
+  to_route_code: string;
+  to_direction: 0 | 1 | null;
+  to_stop_ids: string[];
+  /** Null for a walk left blank, which the server refuses. */
+  walk_sec: number | null;
+  day_types: ("weekday" | "saturday" | "sunday_holiday")[];
+  active: boolean;
+};
 
-/** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
- * Nothing is invalidated: the query-log rows carry no promoted state
- * (`promotable` depends only on the row having a cached intent), so a
- * promote leaves the list unchanged, and a repeat click is answered with
- * `reason: "already_promoted"`. */
-export function usePromoteAskQuery() {
-  return useMutation({
-    mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
+export type AdminTransferPair = Omit<TransferPairInput, "walk_sec"> & {
+  walk_sec: number;
+  id: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Every transfer pair, inactive ones included. */
+export function useAdminTransferPairs() {
+  return useQuery({
+    queryKey: ["adminTransferPairs"],
+    queryFn: ({ signal }) => apiGet<AdminTransferPair[]>("/api/admin/transfer-pairs", { signal }),
   });
 }
 
-type AskEvalResult = { generated_at: string | null; score: number | null } | null;
+/** Mutation: create a pair, or replace one's whole definition when `id` is set. */
+export function useSaveTransferPair() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number | null; body: TransferPairInput }) =>
+      id == null
+        ? apiPost<AdminTransferPair>("/api/admin/transfer-pairs", body)
+        : apiPatch<AdminTransferPair>(`/api/admin/transfer-pairs/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminTransferPairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-pairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-reliability"] });
+    },
+  });
+}
 
-/** Latest local weekly eval result, or null when none has been produced yet
- * (rendered as "not run" rather than an error — see the backend endpoint's
- * docstring for why null is the common case today). */
-export function useAdminAskEval() {
-  return useQuery({
-    queryKey: ["adminAskEval"],
-    queryFn: ({ signal }) => apiGet<AskEvalResult>("/api/admin/ask/eval", { signal }),
-    staleTime: 60_000,
+export function useDeleteTransferPair() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: number }) => apiDelete(`/api/admin/transfer-pairs/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminTransferPairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-pairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-reliability"] });
+    },
   });
 }

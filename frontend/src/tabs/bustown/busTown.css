@@ -1,0 +1,249 @@
+/* frontend/src/tabs/bustown/busTown.css
+   Bus Town: a schematic canvas plus a transport rail and three calm cards.
+   No keyframe animation lives here — the canvas redraws itself via rAF in
+   useBusTownPlayback, which the `playing` gate (not CSS) already stops
+   under reduced motion's default-paused start; every CSS transition below
+   uses global.css's own --dur-* tokens, which that file already zeroes
+   under prefers-reduced-motion. */
+
+.bus-town-page {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  color: var(--text-primary);
+}
+
+.bus-town-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  margin-bottom: 16px;
+}
+.bus-town-back-link:hover { color: var(--text-primary); }
+
+.bus-town-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.bus-town-stage {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 16px;
+}
+
+.bus-town-canvas-frame {
+  position: relative;
+}
+
+.bus-town-canvas {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  display: block;
+  border-radius: var(--radius-lg);
+}
+
+/* Echoes the scrubber's value over the canvas, so it takes no pointer
+   events. The glass matches the Map tab's floating chrome, written out here
+   because this page's chunk never loads the Map tab's CSS. */
+.bus-town-clock {
+  position: absolute;
+  top: 10px;
+  inset-inline-start: 10px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--glass-line);
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  pointer-events: none;
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bus-town-clock { background: var(--bg-surface); }
+}
+
+/* Top-aligned: the scrub column (slider, hour strip, caption) is taller than
+   the play button and speed pills, which belong beside the slider. */
+.bus-town-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.bus-town-play-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out);
+  flex: none;
+}
+.bus-town-play-button:hover { background: var(--bg-soft); }
+.bus-town-play-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The hour strip shares the slider's column, so its bars sit under the rail
+   they summarize. */
+.bus-town-controls .bus-town-scrub {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 160px;
+  min-width: 120px;
+}
+
+/* As tall as the play button, so the thumb sits level with it. At that
+   height the global input border would read as a text field, so the track
+   draws the rail instead. */
+.bus-town-controls .scrub-input { height: 32px; border: 0; }
+.bus-town-controls .scrub-input::-webkit-slider-runnable-track { background: var(--border-subtle); border-radius: 4px; }
+.bus-town-controls .scrub-input::-moz-range-track { background: var(--border-subtle); border-radius: 4px; }
+
+/* Inset by half the range thumb's 4px width (`scrubber.css`), the slack the
+   thumb's travel leaves at each end, so each bar starts where the thumb sits
+   at the start of its hour. */
+.bus-town-hour-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 28px;
+  padding-inline: 2px;
+}
+
+.bus-town-hour-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 0;
+  border-radius: 1px 1px 0 0;
+  background: var(--border-subtle);
+  transition: background var(--dur-1) var(--ease-out);
+}
+/* A quiet hour keeps its slot at zero height; any departures show at least
+   a sliver. */
+.bus-town-hour-bar.has-value { min-height: 3px; }
+.bus-town-hour-bar.is-current { background: var(--accent); }
+
+.bus-town-hour-caption {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.bus-town-speeds {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.bus-town-speed-pill {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.bus-town-speed-pill:hover { background: var(--bg-soft); }
+.bus-town-speed-pill[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-surface);
+}
+.bus-town-speed-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bus-town-day-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  flex: none;
+}
+.bus-town-day-picker select {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  font: inherit;
+}
+
+.bus-town-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.bus-town-legend span + span { margin-left: 4px; }
+
+.bus-town-estimate-note {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.bus-town-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.bus-town-card h2 {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+.bus-town-card p { margin: 0; color: var(--text-primary); }
+
+/* BP.sm. Kept after this file's own base rules, which a `max-width`
+   override must follow to win at equal specificity. The header overrides
+   below reach into ui.css's shared `.ui-page-header*` classes, but win there
+   on specificity (two classes, not one) rather than load order, since a
+   lazy-loaded page chunk's CSS can land before or after the shared one. */
+@media (max-width: 640px) {
+  .bus-town-page { padding: 24px 16px 56px; }
+
+  /* Scoped to this page's own root rather than touching ui.css, since
+     ui-page-header is shared by every page and a lazy chunk's CSS applies
+     app-wide once loaded. */
+  .bus-town-page .ui-page-header { margin-bottom: 12px; }
+  .bus-town-page .ui-page-header__text { gap: 2px; }
+  .bus-town-page .ui-page-header__title { font-size: var(--text-xl); }
+
+  /* The back link and the day picker have no shared wrapper, so the one-row
+     layout comes from making both inline-level: they then share a line box
+     and wrap to a second row on their own, the same way text wraps, once
+     they no longer both fit. */
+  .bus-town-back-link { margin: 0 12px 10px 0; vertical-align: middle; }
+  .bus-town-day-picker { display: inline-flex; margin: 0 0 10px; vertical-align: middle; }
+
+  /* Padding this tight leaves the canvas (nearly) the full content width;
+     the schematic itself grows with the box because fitProjection scales
+     uniformly to whatever width/height the canvas resolves to. */
+  .bus-town-stage { padding: 10px 6px; }
+  .bus-town-canvas { aspect-ratio: 4 / 3; }
+
+  /* 44px is the touch-target floor; the icon inside keeps its own size. */
+  .bus-town-play-button { width: 44px; height: 44px; }
+  .bus-town-controls .scrub-input { height: 44px; }
+  .bus-town-speed-pill { min-width: 44px; min-height: 44px; padding: 4px 12px; }
+}

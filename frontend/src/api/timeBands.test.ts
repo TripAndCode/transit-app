@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import i18n from "../i18n";
-import { BAND_ORDER, TIME_BAND_HOURS, bandHours, bandLabel, bandOf } from "./timeBands";
+import { BAND_ORDER, TIME_BAND_HOURS, bandHours, bandLabel, bandOf, serviceDayHours } from "./timeBands";
 
 const pad = (h: number) => String(h).padStart(2, "0");
 
@@ -22,6 +22,11 @@ describe("TIME_BAND_HOURS", () => {
     expect(BAND_ORDER).toEqual(TIME_BAND_HOURS.map((b) => b.band));
   });
 
+  it("puts an hour past midnight on its service day in its clock hour's band", () => {
+    expect(bandOf(24)).toBe("late_night");
+    expect(bandOf(25)).toBe("late_night");
+  });
+
   it.each(["ja", "en"])("agrees with the hours the %s time-band filter names", (lng) => {
     const t = i18n.getFixedT(lng);
     for (const band of BAND_ORDER) {
@@ -34,5 +39,17 @@ describe("TIME_BAND_HOURS", () => {
   it("names a band with its hours, so a sentence says which hours it means", () => {
     expect(bandLabel(i18n.getFixedT("ja"), "evening")).toBe("夕 17〜20時"); // i18n-ignore: asserting the ja copy
     expect(bandLabel(i18n.getFixedT("en"), "evening")).toBe("Evening 17–20h");
+  });
+});
+
+describe("serviceDayHours", () => {
+  it("spans a day when nothing runs past midnight", () => {
+    expect(serviceDayHours([])).toBe(24);
+    expect(serviceDayHours([0, 7, 23])).toBe(24);
+  });
+
+  it("runs on to the last hour past midnight the data holds", () => {
+    expect(serviceDayHours([7, 24])).toBe(25);
+    expect(serviceDayHours([25, 3])).toBe(26);
   });
 });

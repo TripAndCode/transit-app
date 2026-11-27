@@ -1,0 +1,24 @@
+# Install: sudo cp vp-poller@.service /etc/systemd/system/ && sudo systemctl daemon-reload
+# Enable:  sudo systemctl enable --now vp-poller@8 vp-poller@9 vp-poller@10
+# Stop:    sudo systemctl disable --now vp-poller@8 vp-poller@9 vp-poller@10
+# Each instance needs its row in /home/opc/collector/etc/vehicle_positions.tsv.
+[Unit]
+Description=GTFS-RT VehiclePositions poller agency %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+EnvironmentFile=-/etc/environment
+ExecStart=/home/opc/collector/bin/vp-poller.sh %i
+Restart=always
+RestartSec=10
+# Exit 64 is a configuration error (no row for this id, a bad interval or an
+# empty url), which a restart cannot fix: the unit stays failed where
+# `systemctl status` shows it, instead of retrying every 10 seconds.
+RestartPreventExitStatus=64
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

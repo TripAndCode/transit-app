@@ -7,21 +7,21 @@ are covered against real engines in tests/pipeline/test_analyze.py; nothing here
 restates them.
 """
 
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 
 from pipeline import analyze as analyze_mod
-from pipeline import ch_aggregates, static_archive
+from pipeline import ch_aggregates, feed_quality, static_archive
 from pipeline.analyze import analyze
-from pipeline.service_day import service_date_ch, service_day_start_utc
+from pipeline.service_day import filed_capture_span
 
 AGENCY_ID = 7
 LEDGER_DATE = date(2026, 1, 2)
 LEDGER_SAMPLES = 41
 # Every ClickHouse table analyze needs to find before it runs.
-_STORE_TABLES = (*ch_aggregates.ALL_TABLES, static_archive.ARCHIVE, static_archive.VERSION_MAP)
+_STORE_TABLES = ch_aggregates.STORE_TABLES
 
 
 class _FakeResult:
@@ -56,7 +56,7 @@ class FakeClickHouse:
         # The per-date ledger, not agg_feed_health's own build — the two read
         # the same rows and differ only in what they project.
         if "raw_samples" in sql and "clamp_count" not in sql:
-            return _FakeResult(self._ledger)
+            return _FakeResult([(*row, 0) for row in self._ledger])
         if "FROM system.tables" in sql:
             return _FakeResult([(name,) for name in self._tables])
         if sql.startswith("SELECT count(), sum("):
@@ -96,7 +96,7 @@ class FakeClickHouse:
 
     @property
     def service_delivered_builds(self) -> list[tuple[str, dict]]:
-        return [q for q in self.queries if "schedule_relationship_trip" in q[0]]
+        return [q for q in self.queries if "AS trip_rel" in q[0]]
 
     @property
     def schedule_revision_builds(self) -> list[tuple[str, dict]]:
@@ -164,7 +164,8 @@ class FakeConn:
             self._purged.add(sql.split()[2])
         # A Postgres copy's totals: what it held, until its own purge emptied it.
         if sql.startswith("SELECT count(*), coalesce(") and "::bigint FROM " in sql:
-            table = sql.split(" FROM ")[1].split()[0]
+            # A figure can read its array through a subquery with its own FROM.
+            table = sql.split("::bigint FROM ")[1].split()[0]
             return ((0, 0, 0) if table in self._purged else self._pg_totals), []
         # A reference table's figure, as an internal table's store check reads it.
         for reference, _, expression in ch_aggregates.REFERENCES.values():
@@ -180,12 +181,18 @@ class FakeConn:
             return (self._fingerprint,), []
         if "FROM agg_table_state" in sql:
             return None, list(self._states.items())
-        if "SELECT date, raw_samples, total_rows FROM agg_feed_health" in sql:
-            return None, self._ledger_rows
+        if "SELECT date, raw_samples, total_rows, live_rows FROM agg_feed_health" in sql:
+            return None, [(*row, 0) for row in self._ledger_rows]
         if "SUM(clamp_count)" in sql:
             return (0,), []
+        # The scorecard finds no observed day, so it builds no month here;
+        # tests/pipeline/test_feed_quality.py runs it against real stores.
+        if sql.startswith("SELECT MIN(date) FROM agg_feed_health") or sql == feed_quality.NEWEST_DAY_SQL:
+            return (None,), []
         if "ingest_strategy FROM agencies" in sql:
             return ((self._ingest_strategy,) if self._ingest_strategy else None), []
+        if sql.startswith("SELECT to_regclass("):
+            return (analyze_mod.IN_FORCE_TABLE,), []
         return None, []
 
 
@@ -200,13 +207,18 @@ def _run(
     has_static=False,
     pg_totals=(0, 0, 0),
     ch_tables=_STORE_TABLES,
+    seeded=False,
 ):
     """Run `analyze`, returning the fakes.
 
     *ledger* is what ClickHouse answers (date, raw_samples, total_rows);
-    *stored* is what agg_feed_health holds, defaulting to the same rows.
+    *stored* is what agg_feed_health holds, defaulting to the same rows. Both
+    hold no live-sourced row.
     *has_static* gives the agency a (row-less) static schedule, which the
     builders joining it — agg_stop_routes among them — need in order to run.
+    The agency's tables stand as the last run recorded them under the current
+    builders; *seeded* leaves it instead on the agency-wide fingerprint, whose
+    tables seed at their versions of the switch (`_SEED_VERSIONS`).
     """
     conn = FakeConn(
         ledger_rows=stored if stored is not None else ledger,
@@ -214,10 +226,11 @@ def _run(
         has_static=has_static,
         pg_totals=pg_totals,
     )
-    # The agency-wide fingerprint the last build recorded, so its tables seed as current.
-    conn._fingerprint = analyze_mod._legacy_fingerprint(
-        ingest_strategy, analyze_mod._static_parts(AGENCY_ID, conn, has_static)
-    )
+    static_parts = analyze_mod._static_parts(AGENCY_ID, conn, has_static)
+    if seeded:
+        conn._fingerprint = analyze_mod._legacy_fingerprint(ingest_strategy, static_parts)
+    else:
+        conn._states = analyze_mod.table_fingerprints(ingest_strategy, has_static, static_parts)
     ch = FakeClickHouse(ledger, tables=ch_tables)
     analyze(AGENCY_ID, conn, ch)
     return conn, ch
@@ -294,7 +307,7 @@ def test_a_changed_date_rebuilds_its_stop_route_days_from_every_row_of_it():
 
 
 # The scheduled headway's median reads the static schedule and nothing else.
-_HEADWAY_MEDIAN = "PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec"
+_HEADWAY_MEDIAN = "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec"
 
 
 def test_a_noop_run_neither_purges_nor_rebuilds_the_scheduled_headway():
@@ -349,12 +362,13 @@ def test_a_noop_run_issues_no_service_delivered_or_schedule_revision_scan():
 def test_a_changed_run_scopes_service_delivered_and_schedule_revision_to_the_changed_dates():
     _, ch = _changed_run(ingest_strategy="static_join")
     assert ch.service_delivered_builds and ch.schedule_revision_builds
+    filed_on = f"{static_archive.FILED_DATE_SQL} BETWEEN {{run_first:Date}} AND {{run_last:Date}}"
     for sql, params in ch.service_delivered_builds + ch.schedule_revision_builds:
-        assert sql.count(f"{service_date_ch()} IN {{rebuild_dates:Array(Date)}}") >= 1
-        assert params["rebuild_dates"] == [LEDGER_DATE]
+        assert sql.count(filed_on) >= 1
+        assert (params["run_first"], params["run_last"]) == (LEDGER_DATE, LEDGER_DATE)
     # Every FROM updates in the cancellation builder is bounded, not just the first.
     ((sd_sql, _),) = ch.service_delivered_builds
-    assert sd_sql.count("FROM updates") == sd_sql.count("{rebuild_dates:Array(Date)}")
+    assert sd_sql.count("FROM updates") == sd_sql.count(filed_on)
 
 
 def test_a_date_that_lost_only_delayless_rows_is_rebuilt():
@@ -403,13 +417,21 @@ def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
 
     from pipeline import agg_registry
 
-    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["agg_hour_daily"], version=agg_registry.TABLES["agg_hour_daily"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
-    conn, ch = _noop_run()
+    # A table still at its version of the switch, whatever it has been bumped to since.
+    at_the_switch = dataclasses.replace(
+        agg_registry.TABLES["agg_service_delivered_daily"],
+        version=analyze_mod._SEED_VERSIONS["agg_service_delivered_daily"],
+    )
+    monkeypatch.setitem(agg_registry.TABLES, "agg_service_delivered_daily", at_the_switch)
+    conn, ch = _noop_run(seeded=True)
     assert [s for s in conn.executed if "DELETE FROM agg_hour_daily WHERE agency_id = %s" in s] or [
         sql for sql, _ in ch.commands if sql.startswith("INSERT INTO agg_hour_daily__work_a")
     ]
-    assert not [s for s in conn.executed if "DELETE FROM agg_feed_health" in s]
+    assert not [s for s in conn.executed if "DELETE FROM agg_service_delivered_daily" in s]
 
 
 def test_the_ledger_query_counts_every_row_and_the_delay_rows_separately():
@@ -459,7 +481,9 @@ def test_a_version_bump_changes_that_tables_fingerprint_alone(monkeypatch):
     from pipeline import agg_registry
 
     before = _fingerprints()
-    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["agg_hour_daily"], version=agg_registry.TABLES["agg_hour_daily"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
     after = _fingerprints()
 
@@ -511,22 +535,22 @@ def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_ov
     _, ch = _changed_run()
     tables = len(ch_aggregates.MONTHLY_TABLES)
     dedup = ch_aggregates.dedup_table(AGENCY_ID)
-    day = {
-        "day_start_0": service_day_start_utc(LEDGER_DATE),
-        "day_end_0": service_day_start_utc(LEDGER_DATE + timedelta(days=1)),
-    }
+    start, end = filed_capture_span(LEDGER_DATE, LEDGER_DATE)
+    day = {"run_first": LEDGER_DATE, "run_last": LEDGER_DATE, "day_start_0": start, "day_end_0": end}
     filled = [params for sql, params in ch.ch_agg_builds if sql.startswith(f"INSERT INTO {dedup} ")]
     carried = [params for sql, params in ch.ch_agg_builds if "NOT has({days:" in sql]
     recomputed = [params for sql, params in ch.ch_agg_builds if f"FROM {dedup}" in sql]
     assert filled == [{"agency_id": AGENCY_ID, **day}]
     assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
     # The stop tables also bind the schedule join: with no timetable loaded, one with nothing to join.
+    # stop_route_days reads every `updates` row of the date itself, not the dedup.
+    monthly = set(ch_aggregates.MONTHLY_TABLES) - {ch_aggregates.ROUTE_STOP_DAYS}
+    stop_tables = ch_aggregates.STATIC_JOINED_TABLES & monthly
     no_join = static_archive.ScheduleJoin([], [], "").params()
     joined = [params for params in recomputed if no_join.keys() <= params.keys()]
-    assert joined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE], **no_join}] * 2
-    # stop_route_days reads every `updates` row of the date itself, not the dedup.
+    assert joined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE], **no_join}] * len(stop_tables)
     unjoined = [params for params in recomputed if params not in joined]
-    assert unjoined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * (tables - 3)
+    assert unjoined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * (tables - len(stop_tables) - 1)
     raw = f"INSERT INTO {ch_aggregates.ROUTE_STOP_DAYS}__"
     fresh = [params for sql, params in ch.ch_agg_builds if sql.startswith(raw) and "FROM updates" in sql]
     assert fresh == [{"agency_id": AGENCY_ID, **day, **no_join}]
@@ -564,8 +588,9 @@ def test_the_dated_slice_loads_no_capture_time():
     [("aomori_regex", True), (None, True), ("static_join", False)],
 )
 def test_the_visit_slice_is_scanned_only_where_dwell_and_running_time_is_built(ingest_strategy, has_static):
-    """agg_route_daily_dwell_run is the slice's only reader: an agency without
-    both an arrival-carrying feed and a schedule never pays for the scan."""
+    """The slice's readers, agg_route_daily_dwell_run and
+    agg_route_segment_runtime, are built only for an agency with both an
+    arrival-carrying feed and a schedule; any other never pays for the scan."""
     _, ch = _changed_run(ingest_strategy=ingest_strategy, has_static=has_static)
     assert _visit_scans(ch) == []
 

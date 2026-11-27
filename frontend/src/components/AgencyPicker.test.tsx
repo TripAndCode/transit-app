@@ -8,7 +8,7 @@ import type { Agency } from "../api/types";
 import { AgencyPicker } from "./AgencyPicker";
 
 function agency(agency_id: number, agency_name: string): Agency {
-  return { agency_id, agency_name, feed_url: "", static_url: null, latest_data_date: null };
+  return { agency_id, agency_name, feed_url: "", static_url: null, latest_data_date: null, capability_tier: "full" };
 }
 
 function Probe() {
@@ -53,6 +53,16 @@ describe("AgencyPicker", () => {
     await user.click(screen.getByRole("button", { name: /Aomori City Bus/ }));
     await user.click(screen.getByRole("option", { name: "Hiroshima Bus" }));
     expect(screen.getByTestId("location").textContent).toBe(to);
+  });
+
+  it("names a basic-tier agency's tier beside it, and nothing beside a full-tier one", async () => {
+    const user = userEvent.setup();
+    renderPicker("/agencies/9/pulse", {
+      agencies: [{ ...agency(1, "Aomori City Bus"), capability_tier: "basic" }, agency(9, "Hiroshima Bus")],
+    });
+    await user.click(screen.getByRole("button", { name: /Hiroshima Bus/ }));
+    expect(screen.getByRole("option", { name: "Aomori City Bus Basic data: on-time only" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Hiroshima Bus" })).toBeInTheDocument();
   });
 
   it("closes on Escape and puts focus back on its trigger", async () => {

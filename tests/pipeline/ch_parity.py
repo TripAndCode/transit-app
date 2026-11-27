@@ -1,8 +1,21 @@
 """Parity oracle: the Postgres builders the ClickHouse-computed aggregates replaced.
 
 Each SQL below is the builder pipeline/analyze.py ran for that table before it
-moved to ClickHouse, copied verbatim. Never edit one to make a parity test pass:
-a parity test asks whether the ClickHouse build reproduces exactly this.
+moved to ClickHouse, copied verbatim, but for agg_route_band_daily,
+agg_stop_hour_daily and agg_stop_departures_daily, which were built in ClickHouse
+from the start: their SQL states the same rows in the legacy builders' terms.
+Never edit one to make a parity test pass: a parity test asks whether the
+ClickHouse build reproduces exactly this.
+
+These builders take the hour and band from a TIME `scheduled_time`, which holds
+no time past 24:00, so they leave every departure at 24:00 or later out of
+agg_hour_daily, agg_route_hour, agg_route_hour_dow, agg_stop_hour_daily,
+agg_stop_departures_daily and the hour-keyed rows of route_delay_counts, and band
+it 'none' in agg_stop_daily and agg_route_stop_daily. The ClickHouse build files
+it under its hour and band on purpose (method version 2026.11.1, and
+agg_stop_hour_daily and agg_stop_departures_daily from their first), so a
+parity fixture holding such a departure is expected to differ there; do not edit
+an oracle to match.
 """
 
 import psycopg2.extras
@@ -40,6 +53,15 @@ _RAW_KEYS_SQL = (
 _RAW_KEYS_COLUMNS = "route_code text, trip_id text, stop_sequence int"
 # agg_stop_daily's and agg_route_stop_daily's builders read their band CASE through this name.
 band_case = time_band_case_sql("d.scheduled_time")
+# agg_stop_hour_daily's hour: before the 04:00 cutover a time is the service day's hour 24 to 27.
+service_day_hour = (
+    "(EXTRACT(HOUR FROM d.scheduled_time)::int + CASE WHEN EXTRACT(HOUR FROM d.scheduled_time) < 4 THEN 24 ELSE 0 END)"
+)
+# agg_stop_departures_daily's clock: before the 04:00 cutover a time is a day later.
+service_day_sec = (
+    "(EXTRACT(EPOCH FROM d.scheduled_time)::int"
+    " + CASE WHEN EXTRACT(HOUR FROM d.scheduled_time) < 4 THEN 86400 ELSE 0 END)"
+)
 # agg_route_stats's builder read its two thresholds through these names.
 on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
 late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
@@ -224,6 +246,43 @@ LEGACY_SQL = {
                 GROUP BY d.route_code, sst.stop_id, d.date,
                          COALESCE(d.service_type, ''), {band_case}
             """,
+    "agg_route_band_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE scheduled_time IS NOT NULL)
+                SELECT
+                    %(agency_id)s, d.date, COALESCE(d.route_code, '') AS route_code,
+                    {band_case} AS time_band,
+                    COUNT(*), SUM(d.dep_delay)::bigint, SUM(GREATEST(d.dep_delay, 0))::bigint
+                FROM deduped d
+                GROUP BY d.date, COALESCE(d.route_code, ''), {band_case}
+            """,
+    "agg_stop_hour_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE scheduled_time IS NOT NULL)
+                SELECT
+                    %(agency_id)s, sst.stop_id, d.date, {service_day_hour} AS hour,
+                    COUNT(*), SUM(d.dep_delay)::bigint,
+                    COUNT(*) FILTER (WHERE d.dep_delay <= {on_time_thr}),
+                    COUNT(*) FILTER (WHERE d.dep_delay > {late_thr}),
+                    COUNT(*) FILTER (WHERE d.dep_delay < -{ch_aggregates.STOP_HOUR_EARLY_SEC})
+                FROM deduped d
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY sst.stop_id, d.date, {service_day_hour}
+            """,
+    "agg_stop_departures_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE scheduled_time IS NOT NULL)
+                SELECT
+                    %(agency_id)s, sst.stop_id, d.date,
+                    array_agg({service_day_sec} ORDER BY {service_day_sec}, d.dep_delay),
+                    array_agg(d.dep_delay ORDER BY {service_day_sec}, d.dep_delay)
+                FROM deduped d
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY sst.stop_id, d.date
+            """,
     "agg_route_hour_dow": """
             WITH deduped AS (
                 SELECT * FROM _analyze_alltime WHERE route_code IS NOT NULL AND scheduled_time IS NOT NULL
@@ -269,7 +328,8 @@ def legacy_rows(conn, ch_client, agency_id: int, table: str) -> list[str]:
             "ch_sql": build_dedup_ch_sql(include_captured_at=True),
         }
     with conn.cursor() as cur:
-        _load_temp_table(cur, ch_client, **load, parameters={"agency_id": agency_id}, label="parity")
+        ch_sql = load.pop("ch_sql")
+        _load_temp_table(cur, ch_client, **load, reads=[(ch_sql, {"agency_id": agency_id})], label="parity")
         cur.execute(LEGACY_SQL[table], {"agency_id": agency_id})
         rows = cur.fetchall()
         cur.execute(f"CREATE TEMP TABLE _parity_{table} (LIKE {table}) ON COMMIT DROP")

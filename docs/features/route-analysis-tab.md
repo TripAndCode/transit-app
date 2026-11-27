@@ -38,7 +38,20 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 
 What the user sees/does:
 
-- **Route/keito filter** — `frontend/src/components/analysis/AnalysisFilters.tsx`.
+- **Scope bar** — the shared `ScopeBar` (`frontend/src/components/scope/ScopeBar.tsx`;
+  see `analysis-tab.md`'s "The scope bar" section), without saved views or
+  the pin, since the page has its own browser-local save. Its routes token
+  names the page's route and is never marked as a change or cleared by its
+  Reset; picking one route
+  there moves the page to it, and picking several hands them to the Routes
+  list (`RouteDossier`).
+  Period, days and timetable, time band and the on-time tolerance apply as
+  on every other screen. A condition is left out of the bar only when none of
+  the stop delays (`route-shape`), the summary strip's on-time list
+  (`useAgencyOnTime` in `components/analysis/agencyOnTime.ts`) and the performance standard used it, so
+  a stop, direction or hour carried over from another screen is hidden
+  rather than shown. A section that failed counts as using nothing, and
+  while a section reloads the last complete answer stands.
   Inside the dossier the scope always holds the path's one route (see
   `ScopeRouteContext` above), and the empty state offers no "clear the
   route filter" recovery there, since the route is the page rather than a
@@ -53,6 +66,17 @@ What the user sees/does:
   the ranking floor are the Routes lists' own) and the overview's
   `concentration`, which names only its top routes. Links open the route on
   the Time (`trend`) and Why (`dwell_run`) pages.
+  - Under the mean delay and the on-time rate, the route's own trailing 90
+    days from the `on_time` report's `reference` (`RouteReferenceNote` in
+    `frontend/src/components/analysis/RouteReference.tsx`; computed and
+    withheld as `analysis-tab.md` ▸ The Routes table ▸ Trailing reference
+    states): the reference's figure and a neutral chip,
+    「過去90日より改善」, 「過去90日とほぼ同じ」 or 「過去90日より悪化」. The
+    mean delay is judged as Pulse judges its headline
+    (`avgDelayReferenceJudgement`: under 0.1 min or under 5% is about the
+    same), the rate as the Routes table judges it
+    (`onTimeReferenceJudgement`: under 1 point). A withheld reference states its reason
+    once, under the on-time rate, which also holds the rules' ⓘ.
 - **Path picker** — `frontend/src/components/analysis/RouteVariantPicker.tsx`:
   the route's observed variants (GTFS shapes) with their share of the
   route's observations, and an "other direction" button for the most
@@ -109,7 +133,7 @@ What the user sees/does:
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
 | `useRouteShape(agencyId, route, ctx, shape)` (current window; a second call for the previous window on the same `shape_id` fires only when the compare checkbox is on) | `GET /api/{agency_id}/route-shape?route=...&shape=...` (`api/routers/map.py: route_shape`) | `pipeline/reports/map.py: compute_route_shape()` — a cheap Postgres `agg_route_daily` existence precheck, then a live ClickHouse dedup scan of `updates` to vote the route's most-frequent `shape_id` (or pin the requested one when it is the route's) and compute per-stop mean departure delay, joined to Postgres `static_stops`/`static_shapes` for geometry and stop labels. It also returns `variants` (each observed shape's end stops and share) and `segments` (per consecutive stop pair, the mean increase over the trip-days seen at both, leaving out the segment from the first stop). No precomputed-aggregate fast path exists for this endpoint — every request scans ClickHouse live. |
-| `useReport(agencyId, "ranking" \| "on_time" \| "worst_5min", agencyCtx, { limit: REPORT_ROWS_MAX })`, `useOverviewSummary(agencyId, agencyCtx)` | `GET /api/{agency_id}/reports/{type}`, `GET /api/{agency_id}/overview/summary` | The summary strip's figures, with the scope's `routes` emptied so each list ranks every route. |
+| `useReport(agencyId, "ranking" \| "on_time" \| "worst_5min", agencyCtx, { limit: REPORT_ROWS_MAX })`, `useOverviewSummary(agencyId, agencyCtx)` | `GET /api/{agency_id}/reports/{type}`, `GET /api/{agency_id}/overview/summary` | The summary strip's figures, with the scope's `routes` emptied so each list ranks every route. The `on_time` response's `reference` holds the route's trailing 90 days, so the references need no request of their own. |
 | `useRouteTrips(agencyId, route, { timeBand })` (current day; a second call for the same day one week earlier fires only when compare is on, once the current day's date is known) | `GET /api/{agency_id}/today/route/{route}/trips` (`api/routers/map.py: route_trips`) | Per-trip, per-stop delay for one route on one service day, feeding the Marey diagram's polylines. Read-only ClickHouse dedup query, capped at `MAX_ROUTE_TRIPS`; date defaults to the route's own latest observed day, independent of the shared filter's date range. |
 
 ## Key files
@@ -120,7 +144,6 @@ What the user sees/does:
 |---|---|
 | `frontend/src/tabs/RouteDossier.tsx` | Dossier route: provides the path's route through `ScopeRouteContext`, follows a different single route, hands several to the Routes list |
 | `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state, scrub second |
-| `frontend/src/components/analysis/AnalysisFilters.tsx` | Route/keito filter UI |
 | `frontend/src/components/analysis/StopChart.tsx` | Per-stop delay chart (current + optional previous-week overlay) |
 | `frontend/src/components/charts/MareyDiagram.tsx` | Time-distance diagram of one day's trips, with optional previous-week ghost trips |
 | `frontend/src/components/charts/mareyLayout.ts` | Pure layout/geometry math (axes, time windows, trip polylines) behind the Marey diagram |
@@ -160,7 +183,8 @@ What the user sees/does:
 - Backend: `tests/api/test_api_map.py` (exercises `/route-shape` alongside the
   Map tab's other endpoints in `api/routers/map.py`),
   `tests/clickhouse/test_range_updates_filter_ch.py` (the
-  `build_updates_filter_ch` filter `compute_route_shape()` scans through), and
+  `build_updates_filter_ch` filter `compute_route_shape()` scans through,
+  by way of `updates_filter_ch`), and
   `tests/unit/test_response_schema_ratchet.py` (lists `/route-shape` among the
   endpoints still without a response model).
 
@@ -173,8 +197,8 @@ What the user sees/does:
    route name in the ranking → URL `/agencies/:agencyId/routes/<route_code>`.
 3. Expect the stop chart, Marey diagram, map, and by-stop table to
    populate; switch between the four sub-tabs. Pick one different route in
-   the filter — expect the path to move to that route; pick several —
-   expect the Routes list.
+   the scope bar's routes control and press Apply — expect the path to
+   move to that route; pick several — expect the Routes list.
 4. Toggle "Compare with the previous period" — expect a second series on the
    trend chart for the equal-length window before the selected one, and ghost
    trips behind the Marey diagram, or a "no comparison data" message where

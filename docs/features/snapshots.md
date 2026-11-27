@@ -1,0 +1,268 @@
+# Frozen snapshots
+
+A snapshot stores the figures a screen showed, with their method stamp, so its
+link reproduces them exactly after any later re-analyze. The share link in the
+Export menu is only the current URL: opened after a rebuild, it shows the new
+figures. A snapshot is what council material quotes when a number has to stay
+the number that was handed out.
+
+## Who does what
+
+- **Admins** take snapshots. On the council report (Reports, `doc=council`),
+  the Routes table and a route's own page, an admin sees an Export menu whose
+  "Create snapshot" item (「スナップショットを作成」) stores the screen as it is
+  asked for (scope, on-time window, sort, order, sparse and left-out toggles,
+  row count; on a route's page, the route and its variant) and copies the
+  snapshot's link, `/s/{id}`. An admin's print of the council
+  report takes one too and prints its link ([On paper](#on-paper)). Everyone
+  else sees no change on those screens.
+- **Anyone holding the link** reads it, signed in or not: the page
+  (`frontend/src/pages/SnapshotPage.tsx`) sits outside the app shell, and
+  `GET /api/snapshots/{id}` and `GET /api/snapshots/{id}/today` need no
+  session. The id is 128 random bits
+  (`secrets.token_urlsafe(16)`), and nothing lists ids to a non-admin. A
+  malformed, unknown or deleted id gets the same 404 from both.
+  The read also carries the agency's `capability_tier`, derived when read and
+  never stored (`pipeline/reports/capability.py`; null for an agency no longer
+  on record), because the page renders from that one read, without the agency
+  catalogue, and words a basic agency's missing figures by its tier.
+- **Admins** list and delete them through `/api/admin/snapshots`
+  ([admin-control-room.md](admin-control-room.md#snapshots)). Each create and
+  delete is in the audit log.
+
+## What is stored
+
+One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
+
+- `screen`: `council_report`, `route_table` or `route_page`.
+- `params`: the resolved scope, with explicit dates even when the request
+  left them to the default window, and the screen's own options. A route
+  page's names its one route (`routes`) and the variant it showed (`shape`),
+  even when the server picked it.
+- `payloads`:
+  - `report`: the response the screen's endpoint
+    (`GET /api/{agency_id}/reports/{council_summary|route_table}`) serves,
+    once per language, each with its `definition` (`DefinitionMeta`: method
+    version, build time, timetables, ingest sources, feed quality). Both languages are
+    stored because the server writes the council report's prose. Everything
+    but that prose (`text`) and the serving time (`rendered_at`) must match
+    between them, or the create answers 409 and stores nothing.
+  - `routes`: the agency's route catalogue (`GET /api/{agency_id}/routes`), so
+    the rows keep the labels they had.
+  - `credit`: the open-data credit for the agency's feed, per language.
+  - A Routes table also stores the panels beside it, each asked what the live
+    screen asks (the scope and its on-time tolerance, never the table's own
+    options):
+    - `headway`: headway quality (`GET /api/{agency_id}/headway_quality`),
+      only when the table is sorted by on-time, which is the one sort the
+      screen shows it under. It is written in no language, so it is stored
+      once.
+    - `standards`: the agency's performance standards
+      (`GET /api/{agency_id}/performance_standards`), once per language,
+      since the targets' disclaimer is the server's prose. The figures are
+      computed once and only the disclaimer is written per language.
+  - A route's page stores, in place of `report`, the responses its panels
+    read, each asked what the live page asks:
+    - `route_lists`: the agency's route lists over the scope without its
+      route (`ranking`, `on_time`, `worst_5min`), at the length the live page
+      asks for (the client's `REPORT_ROWS_MAX`), which the summary strip
+      reads the route's rank and figures from. Their figures are the same in
+      every language, so each is computed once and stored once, without its
+      prose (`text`).
+    - `concentration`: the agency overview's lateness by route
+      (`GET /api/{agency_id}/overview/summary`'s `concentration`), which the
+      strip's share of all lateness reads. It is written in no language, so
+      it is stored once.
+    - `route_page`: per language, the route's performance targets
+      (`standards`, `GET /api/{agency_id}/performance_standards?route=`) and
+      its delay by stop on its variant (`shape`,
+      `GET /api/{agency_id}/route-shape`), with `geometry` set to null, since
+      only the map draws the line. Everything but the targets' disclaimer and
+      the stop names must match between the languages, or the create answers
+      409: a stop the timetable leaves unnamed is named by its sequence in
+      each language.
+- `method_version`, `agency_name`, `created_at`, `created_by` and an optional
+  `title` (up to 200 characters) and `note` (up to 2000).
+
+The server computes every payload itself, through the same function the
+screen's endpoint runs (`api.routers.reports.render_report`, for a Routes table also
+`render_headway_quality` and `render_performance_standards`, and for a route's
+page also `render_performance_standards`, `api.routers.map.render_route_shape`
+and `api.routers.overview.render_overview_summary`); a create request names
+only the screen, the agency and the query, and any other field is refused. A
+route page's query names exactly one route and may name its variant (`shape`);
+the report screens' options (preset, sort, order, the sparse and left-out
+toggles, row count) are refused on it, and a variant on any other screen.
+Payloads over 1 MiB serialized are refused with 413.
+
+## The page
+
+`/s/{id}` draws the stored responses with the live screens' own components
+(`CouncilSummaryBlock`, `ReportTable`, `DefinitionMetaBlock`), under a banner
+「スナップショット（2026-11-09 14:05 JST 作成、手法 2026.11.0）」 / "Snapshot
+(created 2026-11-09 14:05 JST, method 2026.11.0)". Beneath it the scope states
+every condition the figures were computed under, since it records what was
+asked: a condition the screen's data did not use is struck through, where
+the live screens' scope bar leaves it out; a Routes table also states its observation floor and the routes it left out,
+as disabled toggles.
+Route rows are not links, since a route's live page would show today's
+figures. The table's observation counts follow the reader's statistics
+setting, as on the live screen (`analysis-tab.md` ▸ The Routes table).
+
+A Routes table's snapshot also freezes the two panels the screen draws
+beside its table, which come from endpoints of their own (see
+[What is stored](#what-is-stored)): headway quality, drawn under the on-time
+sort as the live screen does, and the agency's performance standards. They are
+drawn by the live panels' own views (`HeadwayQualityView`,
+`PerformanceStandardView`) from the stored responses, in the reader's language,
+and never ask a live endpoint. A snapshot taken before they were stored has
+neither; it draws the table and says in one line that those panels are not part
+of it, as a route's page says of its map. The council report has no such
+panels, and stores none.
+
+### A route's page
+
+`/s/{id}` draws a route's page with the live page's own parts, from the
+stored responses in the reader's language
+(`frontend/src/pages/RoutePageSnapshot.tsx`): the route's name as its title,
+the definition block, the summary strip (`RouteSummaryFigures`), the
+performance targets (`PerformanceStandardView`), and the delay by stop
+(`RiseHeadline`, `StopDelayTrend`, `StopDelayTable`, `SelectedStopAside`).
+The live page fetches through hooks and hands the same parts its responses.
+
+- **Frozen:** the strip's mean delay and rank, on-time rate, share over five
+  minutes late and share of all lateness, each with the route's 90-day
+  reference; the performance targets with their verdicts and disclaimer;
+  and the delay at each stop with the segment where it grows most. Both the
+  chart and the stop table are drawn, one under the other. Picking a stop
+  moves the chart's marker and the side panel to it; no figure changes.
+- **Not stored, and said so:** the map, the day's trips (the Marey diagram)
+  and the comparison with the previous period read live data. The page
+  draws none of them, and says so in one line beneath the figures, never
+  showing today's data beside the frozen figures.
+- **No live links.** The strip's links on to the route's reports are left
+  out, and the variant is named in a disabled picker with no other-direction
+  button.
+- **The scope statement** strikes nothing through: the panels each honour
+  their own part of the scope, so no one panel's `scope_applied` speaks for
+  the page.
+
+## On paper
+
+An admin's print of the council report (its 「印刷 / PDFで保存」 / "Print /
+Save as PDF" button; its Export menu has no print item) traces to stored data.
+The print takes a snapshot of the report as it is asked for, the same create
+the Export menu's item sends, and prints its link in the page's foot above the
+print time: 「スナップショット: https://…/s/{id}（手法 2026.11.0）」 /
+"Snapshot: https://…/s/{id} (method 2026.11.0)". Each press takes one
+snapshot, and the button waits while it is taken.
+
+- **The figures on the page.** The server recomputes the report for the
+  query, so after the create the print reads the snapshot back
+  (`GET /api/snapshots/{id}`) and prints its link only when the stored
+  response in the page's language is the one on the page, all but the moment
+  each was served (`frontend/src/components/analysis/printSnapshot.ts`). A
+  page loaded before a rebuild prints without a link and says the figures
+  were updated after it opened; reloading lets the next print carry one. The
+  snapshot it took stays, a true record of the figures it holds, in the
+  admin list.
+- **Never held back.** A create the server refuses (409, 413), a network
+  failure, or a create and read that together take longer than
+  `PRINT_SNAPSHOT_WAIT_MS` (20 seconds) still prints, without a link, and the
+  screen says so calmly. A create the print stopped waiting for may still be
+  stored, and is listed like any other. A scope the aggregates cannot serve
+  is scanned live once per language, so its print is the likeliest to go
+  without a link: the wait is bounded for the reader's sake, not stretched
+  to fit the slowest scan. Figures held over from another scope while the
+  new one loads print without a snapshot.
+- **Called off when the view changes.** Each press holds its own
+  cancellation. Another scope, a new response or leaving the report while
+  its snapshot is taken stops the requests and calls the print off, since
+  the page it would print is no longer the one asked for (the printed header
+  already names the new scope). The screen says 「表示が変わったため、印刷を
+  取り消しました。」 / "Printing was cancelled because the view changed."
+- **One line, one response.** The line stays in the foot only while the page
+  shows the very response it was checked against: a scope change or any new
+  response takes it off (`frontend/src/components/analysis/CouncilPrint.tsx`).
+  A print the browser starts on its own (Ctrl+P) takes no snapshot; on a page
+  still showing a response a print button already checked, it carries that
+  snapshot's link.
+- **Unchanged elsewhere.** A reader who is not an admin prints the page as
+  before, with no snapshot and no link. A snapshot's own page (`/s/{id}`)
+  prints what it stores and takes no new snapshot, and the Routes table's
+  print, from its Export menu, takes none either.
+- **The delay record** prints no snapshot. Its printers are mostly readers
+  with no account, and only admins take snapshots; a snapshot for it waits on
+  letting anyone take one, rate-limited, which is not decided.
+
+The foot's line goes through `printFootSlot.ts`: `PrintFrame`'s footer
+(`frontend/src/components/PrintFrame.tsx`) holds a slot a screen draws its
+own line into, and the print stylesheet shows it.
+
+## Compared with today
+
+The page asks the API for the snapshot alone until the reader turns on
+「今日の数値と比較」 / "Compare with today's figures" (off on every visit).
+Then it asks `GET /api/snapshots/{id}/today` once, and marks the stored
+figures against today's; the stored figures themselves never change.
+
+A route's page offers no comparison, and its `/today` answers
+`not_computable`: the endpoint answers one screen's report
+(`SnapshotToday.report`), and the page's comparison reads one report's
+figures, while a route's page is several responses, not all of them reports.
+
+- **Like for like.** The endpoint replays the snapshot's stored `params` (the
+  resolved dates, never a rolling window, the scope and the screen's options)
+  through the same function the create used, `render_report`, in the reader's
+  language. A stored query the current code refuses (a preset or sort since
+  retired, a scope value it no longer takes), or a screen with no computation,
+  answers `{"report": null, "unavailable": "not_computable"}`; an agency no
+  longer listed answers `"agency_removed"`. The page says either calmly:
+  today's figures are unavailable, and why.
+- **What is compared.** What the page prints, never prose: each figure at
+  the precision it is printed, so two values that print the same are not a
+  difference, and only what the snapshot's own screen shows
+  (`frontend/src/components/snapshotCompare.ts`). An early-departure rate a
+  snapshot never showed (its definition names no threshold) is not compared.
+  - the Routes table's figure columns, rows matched by route. A moved
+    figure shows today's value beside the stored one (「今日 15.0%」 /
+    "today 15.0%"); a route only one side lists is marked
+    「スナップショットのみ」 / "only in the snapshot" or 「今日のみ」 / "only
+    today", today's routes following the stored ones. Beneath, the page says
+    plainly that such a route is in one side's list alone. Only when a side
+    reached its row limit (it listed fewer routes than qualified) does it
+    add that the route may have moved past that limit rather than left the
+    data.
+  - the council report's headline tiles, from its structured fields
+    (`frontend/src/components/analysis/councilTiles.ts`, the one table both
+    the tiles and the comparison read): the on-time, early-departure and
+    service-delivered rates, the average delay, the observations, the
+    planned trips with the days a timetable plans, the reason a delivered
+    rate is missing, and the agencies board's verdict with every figure its
+    reason prints (coverage, the on-time interval, the implausible-reading
+    share, each against its threshold). A note's values count only where
+    the note is printed. The prose is written from those fields and is not
+    compared.
+  - The Routes table's side panels (headway quality, performance standards)
+    are drawn as stored and never compared.
+  - Equal figures show nothing extra; a figure missing on one side counts as
+    moved.
+- **Both sides named.** Above the figures, each side's method version, build
+  time (JST, or that it was a live scan) and on-time definition. When the
+  method versions differ the page says so plainly ("Today's figures use
+  method X; the snapshot used Y"), and when the on-time windows differ (a
+  snapshot that left its window to the default, after the default changed)
+  it says so too: a difference may then come from the method rather than the
+  data. A count of the differences, or that every figure matches, follows.
+- **Cost.** The endpoint computes on a public path, so every caller is held
+  to `SNAPSHOT_TODAY_LIMIT` (`api/middleware/ratelimit.py`, 10 a minute),
+  stricter than the snapshot read's generic budget (`DEFAULT_LIMIT`, 60 a
+  minute). A repeated query reuses the compute caches behind it: the Routes
+  table's computation and the agencies board behind the council verdict are
+  each cached for five minutes. The council report's pooled on-time figures
+  are read from the aggregates each time, or scanned live for a scope the
+  aggregates cannot serve; the limit is what bounds those. The page reuses
+  one answer for five minutes and asks again on a language switch, since the
+  council report's response is written in the reader's language. A caller
+  over the limit gets a calm note to wait, with no retry button, since a
+  retry would meet the limit again.

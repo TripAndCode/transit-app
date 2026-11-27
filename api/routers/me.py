@@ -1,31 +1,15 @@
 """Self-service endpoints for logged-in users."""
 
-import json
 from typing import Any
 
 import asyncpg
-import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel
 
 from api.deps import get_conn, get_pooled_conn
-from api.middleware.ratelimit import limiter, tier_limit
 from api.middleware.session import SESSION_COOKIE_NAME
-from api.range import jst_today
 from api.security import User, csrf_guard, current_user, require_user, token_hash
-from pipeline.account_erasure import ErasureRefused, erase_user
-from pipeline.account_export import collect_user_data
 from pipeline.admin_users import SessionPrefixError, resolve_session_prefix
-from pipeline.query.llm_key_validation import validate_provider_key
-from pipeline.query.user_llm_keys import (
-    ALLOWED_PROVIDERS,
-    delete_user_llm_key,
-    get_user_llm_key,
-    key_suffix,
-    save_user_llm_key,
-)
 
 router = APIRouter(prefix="/api", tags=["me"])
 
@@ -56,9 +40,8 @@ async def get_me(
     """Return the caller's profile and linked OAuth identities, or ``null`` when signed out.
 
     Signed out is an answer to who-am-I rather than a refusal, because the SPA asks it on
-    every page. It discloses nothing, so the login gate lets a signed-out GET through even
-    while sign-in is required; every other ``/me`` route keeps ``require_user`` and the
-    gate. The connection is borrowed per statement, so a signed-out caller holds none.
+    every page, and it discloses nothing; every other ``/me`` route keeps ``require_user``.
+    The connection is borrowed per statement, so a signed-out caller holds none.
     """
     if user is None:
         return None
@@ -155,238 +138,3 @@ async def revoke_session(
         raise HTTPException(exc.status, exc.detail) from None
     await conn.execute("DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2", sid_hash, user.user_id)
     return Response(status_code=204)
-
-
-# Sized against what the filter UI can legitimately build, not against today's
-# data: range_ctx carries a route list, and the picker can select every route an
-# agency has. A large network's full selection would exceed a few kilobytes, so
-# the cap sits well clear of it and only stops payloads no picker could produce.
-_MAX_PRESET_RANGE_CTX_BYTES = 64 * 1024
-
-
-class PresetIn(BaseModel):
-    """Body for creating a saved filter preset."""
-
-    agency_id: int
-    name: str = Field(max_length=120)
-    range_ctx: dict[str, Any]
-
-    @field_validator("range_ctx")
-    @classmethod
-    def _range_ctx_bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
-        size = len(json.dumps(v).encode())
-        if size > _MAX_PRESET_RANGE_CTX_BYTES:
-            raise ValueError(f"range_ctx exceeds {_MAX_PRESET_RANGE_CTX_BYTES} bytes serialized")
-        return v
-
-
-class PresetOut(BaseModel):
-    """Saved filter preset as returned to the caller."""
-
-    preset_id: int
-    agency_id: int
-    name: str
-    range_ctx: dict[str, Any]
-
-
-@router.get("/me/presets", response_model=list[PresetOut])
-async def list_presets(
-    agency_id: int, user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
-) -> list[PresetOut]:
-    """List the caller's saved filter presets for ``agency_id``."""
-    rows = await conn.fetch(
-        "SELECT preset_id, agency_id, name, range_ctx::text AS range_ctx_text "
-        "FROM filter_presets WHERE user_id=$1 AND agency_id=$2 ORDER BY created_at DESC",
-        user.user_id,
-        agency_id,
-    )
-    return [
-        PresetOut(
-            preset_id=r["preset_id"],
-            agency_id=r["agency_id"],
-            name=r["name"],
-            range_ctx=json.loads(r["range_ctx_text"]),
-        )
-        for r in rows
-    ]
-
-
-@router.post("/me/presets", response_model=PresetOut, status_code=201)
-async def create_preset(
-    body: PresetIn,
-    request: Request,
-    user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> PresetOut:
-    """Save a filter preset; 409 if the name is already in use."""
-    csrf_guard(request)
-    try:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO filter_presets (user_id, agency_id, name, range_ctx)
-            VALUES ($1, $2, $3, $4::jsonb)
-            RETURNING preset_id, agency_id, name, range_ctx::text AS range_ctx_text
-            """,
-            user.user_id,
-            body.agency_id,
-            body.name,
-            json.dumps(body.range_ctx),
-        )
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(409, "name already used") from None
-    except asyncpg.ForeignKeyViolationError:
-        raise HTTPException(404, "unknown agency") from None
-    return PresetOut(
-        preset_id=row["preset_id"],
-        agency_id=row["agency_id"],
-        name=row["name"],
-        range_ctx=json.loads(row["range_ctx_text"]),
-    )
-
-
-@router.delete("/me/presets/{preset_id}", status_code=204)
-async def delete_preset(
-    preset_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> Response:
-    """Delete one of the caller's filter presets."""
-    csrf_guard(request)
-    result = await conn.execute(
-        "DELETE FROM filter_presets WHERE preset_id=$1 AND user_id=$2",
-        preset_id,
-        user.user_id,
-    )
-    if result.endswith(" 0"):
-        raise HTTPException(404, "preset not found")
-    return Response(status_code=204)
-
-
-class LLMKeyStatus(BaseModel):
-    """Status of the caller's stored BYOK LLM key — never the raw key itself."""
-
-    configured: bool
-    provider: str | None = None
-    key_suffix: str | None = None
-
-
-class LLMKeyPut(BaseModel):
-    """Body for storing (or replacing) the caller's BYOK LLM key."""
-
-    provider: str
-    api_key: str
-
-
-@router.get("/me/llm-key", response_model=LLMKeyStatus)
-async def get_llm_key(user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)) -> LLMKeyStatus:
-    """Return whether the caller has a BYOK LLM key configured, and its masked suffix."""
-    key = await get_user_llm_key(conn, user.user_id)
-    if key is None:
-        return LLMKeyStatus(configured=False)
-    return LLMKeyStatus(configured=True, provider=key.provider, key_suffix=key.key_suffix)
-
-
-@router.put("/me/llm-key", response_model=LLMKeyStatus)
-@limiter.limit(tier_limit)
-async def put_llm_key(
-    body: LLMKeyPut,
-    request: Request,
-    user: User = Depends(require_user),
-) -> LLMKeyStatus:
-    """Validate then store the caller's BYOK LLM key.
-
-    Validation runs before ``save_user_llm_key`` is ever called, so a bad key
-    is rejected with 400 and never persisted. Unlike the other routes in this
-    file, this does not take ``conn: Depends(get_conn)`` — the pooled
-    connection is acquired only after ``validate_provider_key``'s external
-    HTTPS round-trip (up to a 10s timeout) succeeds, so it never sits idle in
-    the pool for that call's duration.
-    """
-    csrf_guard(request)
-    if body.provider not in ALLOWED_PROVIDERS:
-        raise HTTPException(status_code=400, detail=f"unsupported provider: {body.provider}")
-    try:
-        valid = await validate_provider_key(body.provider, body.api_key)
-    except (openai.APIConnectionError, openai.APITimeoutError):
-        # A network/timeout failure proves nothing about the key itself —
-        # tell the caller we couldn't check right now (503), distinct from
-        # the key actually being rejected (400).
-        raise HTTPException(status_code=503, detail="validation_unavailable") from None
-    if not valid:
-        raise HTTPException(status_code=400, detail="key_rejected")
-    async with request.app.state.pool.acquire() as conn:
-        await save_user_llm_key(conn, user.user_id, body.provider, body.api_key)
-    return LLMKeyStatus(configured=True, provider=body.provider, key_suffix=key_suffix(body.api_key))
-
-
-@router.delete("/me/llm-key", status_code=204)
-async def delete_llm_key(
-    request: Request,
-    user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> Response:
-    """Delete the caller's stored BYOK LLM key, if any."""
-    csrf_guard(request)
-    await delete_user_llm_key(conn, user.user_id)
-    return Response(status_code=204)
-
-
-class DeleteMeBody(BaseModel):
-    """The caller types their own email to confirm deleting the account."""
-
-    confirm_email: str
-
-
-@router.delete("/me", status_code=204)
-@limiter.limit("5/minute")
-async def delete_me(
-    body: DeleteMeBody,
-    request: Request,
-    user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> Response:
-    """Hard-delete the caller's account and every personal row tied to it."""
-    csrf_guard(request)
-    if body.confirm_email.strip().lower() != user.email.lower():
-        raise HTTPException(status_code=400, detail="confirmation_mismatch")
-    try:
-        async with conn.transaction():
-            await erase_user(conn, user.user_id)
-    except ErasureRefused as exc:
-        raise HTTPException(status_code=409, detail=exc.reason) from None
-    resp = Response(status_code=204)
-    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
-    return resp
-
-
-class AccountExport(BaseModel):
-    """The download's JSON shape: the caller's personal data, as
-    ``pipeline.account_export.collect_user_data`` defines it."""
-
-    exported_at: Any
-    profile: dict[str, Any] | None
-    identities: list[dict[str, Any]]
-    sessions: list[dict[str, Any]]
-    login_events: list[dict[str, Any]]
-    presets: list[dict[str, Any]]
-    conversations: list[dict[str, Any]]
-    llm_key: dict[str, Any] | None
-    api_keys: list[dict[str, Any]]
-    usage_daily: list[dict[str, Any]]
-    invites: list[dict[str, Any]]
-    admin_actions: list[dict[str, Any]]
-    admin_account_events: list[dict[str, Any]]
-
-
-@router.get("/me/export", response_model=AccountExport)
-@limiter.limit("5/minute")
-async def export_me(
-    request: Request,
-    user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> JSONResponse:
-    """The caller's personal data, as a JSON download."""
-    data = await collect_user_data(conn, user.user_id)
-    filename = f"transit-app-export-{jst_today().isoformat()}.json"
-    return JSONResponse(jsonable_encoder(data), headers={"Content-Disposition": f'attachment; filename="{filename}"'})

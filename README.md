@@ -7,7 +7,86 @@ aggregates, and application data live in Postgres/PostGIS.
 
 It is an independent service-quality audit instrument for the transport-policy
 staff who prepare 地域公共交通協議会 material; [Audience and job](docs/features/audience.md)
-says who it is for and what each screen answers.
+says who it is for and what each screen answers. The
+[methodology and publication policy](docs/methodology.md) ([English](docs/methodology.en.md))
+says how every figure is computed, what is never computed, and how an operator hears
+of its figures before they are published.
+
+![Planned departures per hour at every stop in Hiroshima, from the operators' published timetables](docs/images/readme/supply.webp)
+
+| Pulse: the period at a glance | Routes: every route's punctuality |
+| --- | --- |
+| ![Pulse screen](docs/images/readme/pulse.webp) | ![Routes screen](docs/images/readme/routes.webp) |
+
+Screenshots use the Hiroshima GTFS and GTFS-Realtime feeds published by
+広島県バス協会 (CC0) and 地理院タイル (© 国土地理院). Operator and route
+names are blurred: the [publication policy](docs/methodology.en.md#publication-process) gives an
+operator notice before its figures are made public.
+
+## At a Glance
+
+**What it answers.** Did the buses a council subsidises or contracts run as
+planned over the period, and where and when not? Every figure carries its
+definition, period, data source and the amount of data behind it, and results
+leave as CSV, chart images or a printable summary for the council paper.
+
+**What it does.**
+
+- Punctuality, delay and cancellations per route, stop, hour and day type,
+  from realtime feeds collected around the clock.
+- Planned supply from timetables: departures per hour at every stop, service
+  gaps, and what each timetable revision changed.
+- A monthly A–F report card per route, bunching from headways, and connection
+  reliability at transfer hubs.
+- Feed-quality monitoring, and a check of each feed's predicted times
+  against the stop passages its vehicles' positions record.
+- A live delay map, and a "play the day" replay of how delay moved across a
+  whole service day.
+- A notebook for questions in plain Japanese or English. Fixed rules answer
+  first; only what they cannot answer reaches an LLM, which works through
+  deterministic SQL tools and sits behind a kill switch.
+- Japanese and English throughout, and an admin control room for agencies,
+  users, feature flags and pipeline runs.
+
+**How it is built.**
+
+```mermaid
+flowchart LR
+  feeds["GTFS / GTFS-RT feeds"] --> collector["Collector VM"]
+  collector -- "daily archives" --> r2[("Cloudflare R2")]
+  collector -- "polls, via the API" --> live[("ClickHouse<br/>updates_live")]
+  live -- "closed days" --> updates[("ClickHouse<br/>updates")]
+  r2 -- "archive ingest" --> updates
+  updates --> analyze["analyze"]
+  analyze --> agg[("Postgres + PostGIS<br/>agg_* tables")]
+  agg --> api["FastAPI"]
+  updates -. "narrow filters" .-> api
+  api --> spa["React SPA<br/>(ja / en)"]
+```
+
+- Raw realtime observations, hundreds of millions of rows, live in
+  ClickHouse. The daily `analyze` step turns them into per-day aggregates, so
+  default reports read those rather than scanning the raw history.
+- Each observation is judged against the timetable in force on its service
+  day, kept in a schedule archive, so loading a new timetable does not
+  re-judge past days against it.
+- Postgres holds the aggregates, the static GTFS (PostGIS) and application
+  data. FastAPI serves the API and the built SPA from one origin.
+
+**Stack.** Python, FastAPI, asyncpg, ClickHouse, Postgres with PostGIS and
+pgvector, Cloudflare R2 · React 19 with the React Compiler, TanStack Query,
+React Router, MapLibre GL, i18next · Docker, GitHub Actions.
+
+**Engineering practices.**
+
+- Hundreds of backend and frontend test files. CI runs the backend suite in
+  parallel shards against real Postgres and ClickHouse, and gates frontend
+  coverage, i18n key parity, entry-chunk size and React Compiler coverage.
+- A written [methodology](docs/methodology.en.md) defines every figure, and
+  what the app refuses to compute.
+- Feature kill switches, an audit log of every admin action, and a record of
+  every pipeline run.
+- Secret scanning on every pull request, and across the full history.
 
 ## Start Here
 
@@ -17,15 +96,15 @@ says who it is for and what each screen answers.
 - [Poetry](https://python-poetry.org/) 2.5+ (`requires-poetry` in `pyproject.toml`;
   `poetry self update` upgrades an older install)
 - Docker Desktop
-- An LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`). The API
-  refuses to start without one; any non-empty value boots it, but LLM-backed
-  answers need a real key.
+- Optional: an LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`).
+  The API starts without one and serves the deterministic Ask notebook;
+  LLM-backed answers and follow-ups stay off until a real key is set.
 
 ### Local setup
 
 ```bash
 cp .env.example .env
-# Set GEMINI_API_KEY in .env (required to start). Other settings have local defaults.
+# Optionally set GEMINI_API_KEY in .env for LLM-backed Ask. Other settings have local defaults.
 make bootstrap
 make doctor
 make serve
@@ -49,82 +128,88 @@ returns to `:5173` instead of `:8000`.
 
 ## Load Data
 
-The bootstrap database is empty. Choose one path:
+History and live data each have one command:
 
 ```bash
-# Fallback: load each agency's timetable, sample the current agency feeds into
-# updates_live, then build every agency's aggregates. A sample reaches agg_*
-# only once its service day closes and the promotion sweep (the cron poke, or
-# an admin ingest run) copies it into updates.
-poetry run python gtfs_pipeline.py refresh-static
-poetry run python gtfs_pipeline.py ingest_live
-make analyze-all
-
-# Or replay the archives the Oracle collector still holds (the days it has not
-# uploaded to R2 yet).
-make fetch-ingest
+make catch-up-from-r2 APPLY=1 ANALYZE=1               # history: closed days from the R2 archive
+make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1   # the same, for an empty database: its last 3 days
+poetry run python gtfs_pipeline.py ingest_live        # live: a sample of each agency's feed into updates_live
 ```
 
-The archive path pulls GTFS-Realtime and static GTFS archives, then runs ingest,
-static loading, and aggregation. A `static_join` agency needs its timetable
-loaded before it can be ingested (`REQUIRES_STATIC_TIMETABLE` in
-`pipeline/strategies/__init__.py`). The live path is useful for local checks but
-does not provide the same historical coverage. Add a one-off agency with:
+**History** comes from the collector's daily archives in R2 (the four
+`OBJECT_STORE_*` variables in `.env`; `make doctor` reports them). The catch-up
+ingests each agency's archived days after its newest row in `updates`, loading
+R2's newer timetables between them so each day joins the timetable in force on
+it, then builds the aggregates. Without `APPLY=1` it prints the plan (days,
+timetable loads, download size) and changes nothing; `scripts/catch_up_from_r2.py`'s
+docstring has its rules. The bootstrap database is empty, so the first run
+needs `SEED_DAYS`. `AGENCY="1 9"` narrows it to some agencies. An agency the plan marks `REFUSED` stops the whole apply, so leave it
+out with `AGENCY=` or follow its refusal first. `make check-aggs` then confirms
+the aggregates reach the newest day.
+
+**Live** data goes to `updates_live`: the collector's pushes in production,
+`ingest_live` locally (load each agency's timetable first with
+`gtfs_pipeline.py refresh-static`). It serves today's screens. Once a day
+closes, promotion (the cron poke, an admin ingest run, or the standalone
+poller) copies it into
+`updates`, and the next analyze aggregates it. That copy holds only the
+polls the collector pushed, so an archive ingest that reads the day's complete
+archive later replaces it (`pipeline/archive_replace.py` defines complete).
+`make check-aggs` lists the days still held from the live copy. The catch-up
+starts after the newest row, so it does not reach back to a promoted day: ingest
+a folder holding both of that day's tarballs with
+`make ingest FOLDER=<dir> AGENCY_ID=<id>`, then `make analyze-all`. For a
+`static_join` agency whose timetable changed since that day, load the timetable
+in force on it first, or its rows join the newer one.
+
+Add an agency from its GTFS-RT TripUpdates feed and GTFS static zip:
 
 ```bash
 poetry run python gtfs_pipeline.py add_agency \
-  --name "My Agency" --feed-url "https://example.test/feed.pb"
+  --feed-url "https://example.test/trip_updates.pb" --static-url "https://example.test/gtfs.zip"
 ```
 
-### Fill days the dashboard is missing
+It names the agency and sets its timezone from the zip's `agency.txt`; pass
+`--name` when `agency.txt` lists several agencies or names none. It polls the
+feed every `POLL_INTERVAL_SEC` for `--probe-seconds` (default 120) and adds the
+agency only when at least 80% of the feed's StopTimeUpdates join `stop_times.txt`
+on `(trip_id, stop_sequence)`, the join `static_join` ingest makes. It then
+loads the timetable it measured and, when the busiest poll holds enough
+StopTimeUpdates, records the feed's RT field-coverage verdict; otherwise the
+poller's hourly re-probe records it. A refusal prints the reason with the probe
+report, exits nonzero and adds nothing. `--dry-run` prints the same report and
+never writes. A feed that sends nothing during the probe is refused until it is
+in service, or added anyway with `--accept-empty`. If the agency is added but
+its timetable fails to load, the agency stays, the command exits 1, and ingest
+refuses the agency until `refresh-static --agency-id <id>` loads it. Without
+`--static-url`, `add_agency --name … --feed-url …` inserts the row with no
+strategies, so its feed is read as `aomori_regex`.
 
-The admin agencies page's 再集計 and まとめて更新 read the agency's live feed,
-which carries only the present moment, so neither fills a past day. Past days
-come from the collector's daily archives. The collector VM deletes each archive
-once R2 holds it, so `make fetch-ingest` (and its `SINCE`) reaches only the days
-not uploaded yet. `make catch-up-from-r2` catches every agency up from the
-bucket instead: it ingests the days after each agency's newest row and loads
-R2's newer timetables between them, so each day joins the timetable in force on
-it, which a plain `make ingest` over many days does not. It prints its plan and
-changes nothing until `APPLY=1`; `scripts/catch_up_from_r2.py`'s docstring has
-its rules.
+### Disaster tools
 
-```bash
-make catch-up-from-r2              # the plan: days, timetable loads, download size
-make catch-up-from-r2 APPLY=1      # run it; then `make analyze-all`, as it prints
-SINCE=20260917 make fetch-ingest   # or fetch and ingest the days still on the VM from that date on
-make check-aggs                    # confirm the aggregates reach the newest day
-```
+These rewrite rows `updates` already holds, across the whole table. Normal
+operation never needs them. Run one only when stored rows are known to be wrong,
+and follow it with `make analyze-all FULL=1 && make check-aggs`.
 
-Days already ingested are skipped, and the same run aggregates each newly
-ingested day. After a repair that rewrites rows already stored (below), rebuild
-every date with `make analyze-all FULL=1` instead.
+- `scripts/repair_archive_rows.py` brings archive-ingested rows to what archive
+  ingest assigns them today: the `captured_at` read from each file's own feed
+  header, and, for `static_join` agencies, the timetable fields of rows ingested
+  before a timetable was loaded, so load each `static_join` agency's current
+  timetable first. It targets whatever `CLICKHOUSE_*` and `DATABASE_URL` name,
+  and prints both. Without `--apply` it only reads, and reports per agency the
+  rows that would move, the blank rows the timetables would fill, and the disk
+  the rebuild needs. `--apply` copies `updates` into `updates_repair` one
+  partition at a time, verifies the copy, and swaps it in with `EXCHANGE TABLES`;
+  the original rows stay in `updates_repair` until you drop it. Rerun with
+  `--resume`, and the same options, to finish a run that stopped partway.
+  `--extra-static 8=path/to/gtfs_static_20260816.zip` adds an older timetable for
+  retired trips. The script's docstring has the details.
+- `gtfs_pipeline.py restamp_archive` restamps archive-ingested rows with the time
+  archive ingest assigns today. It prints the plan and writes nothing unless
+  `--apply`.
 
-### Repair archive-ingested rows
-
-`scripts/repair_archive_rows.py` brings archive-ingested `updates` rows to what
-archive ingest assigns them today: the `captured_at` read from each file's own
-feed header, and, for `static_join` agencies, the timetable fields of rows
-ingested before a timetable was loaded, so load each `static_join` agency's
-current timetable first. It targets whatever `CLICKHOUSE_*` and
-`DATABASE_URL` name, and prints both. Without `--apply` it only reads, and
-reports per agency the rows that would move (with a histogram of the shift),
-the blank rows the timetables would fill, and the disk the rebuild needs.
-
-```bash
-poetry run python scripts/repair_archive_rows.py                  # report only
-poetry run python scripts/repair_archive_rows.py \
-  --extra-static 8=path/to/gtfs_static_20260816.zip               # an older timetable, for retired trips
-poetry run python scripts/repair_archive_rows.py --apply          # rebuild; asks to confirm
-make analyze-all FULL=1 && make check-aggs                        # then rebuild every date's aggregates
-```
-
-`--apply` copies `updates` into `updates_repair` one partition at a time,
-verifies the copy, and swaps it in with `EXCHANGE TABLES`. The original rows
-stay in `updates_repair` until you drop it. Rerun with `--resume`, and the same
-options, to finish a run that stopped partway. `--agency` limits which rows
-change, not how much is rewritten: the whole table is still copied and swapped.
-The script's docstring has the details.
+`make fetch-ingest` replays the archives the Oracle collector still holds, the
+days it has not uploaded to R2 yet. It needs SSH access to the collector VM.
 
 ## Data Flow
 
@@ -132,7 +217,7 @@ The script's docstring has the details.
 GTFS-RT feeds
     |
     v
-Oracle collector -- daily archives --> Cloudflare R2 (backfill only)
+Oracle collector -- daily archives --> Cloudflare R2 (history)
     |
     | pushed polls
     v
@@ -146,27 +231,60 @@ FastAPI + React SPA  <-------------------------------------------------+
 - Oracle is the production collector. It pushes polls to the API, which keeps
   them in `updates_live`, and it uploads daily archives to R2.
 - A daily cron poke promotes each closed JST day into `updates` (history) and
-  rebuilds aggregates. The R2 archive job backfills only days the live path
-  never promoted.
+  rebuilds aggregates; in a standalone deployment the poller does this. An archive ingest that reads a day's complete archive
+  later replaces that promoted copy, which holds only the pushed polls.
 - Without collector streaming, `ingest_live` takes one live sample per poke.
 - The API normally reads precomputed `agg_*` tables; narrow time-band queries
   may read ClickHouse directly.
 - `analyze` computes the tables in `pipeline/ch_aggregates.py`'s
   `COPIED_TABLES` in ClickHouse, stores them there and copies them into
   Postgres; the whole-history ones are finalized from ClickHouse-only tables
-  of delay counts and of the stop-route pairs each date observed. Those that
-  join the static schedule join the timetable archive below, each row to the
-  timetable its version name maps to, or the loaded one when it maps to none.
-  It builds the rest in Postgres; of those, dwell and running time take each
-  stop visit's scheduled times from the same archive, through the ClickHouse
-  scan that pairs its arrival with its departure. A ClickHouse that predates one of
-  those tables needs `make ch-bootstrap` before the next `analyze`.
-- Every timetable an agency loads is kept in ClickHouse's
-  `static_stop_times_archive` under its content hash, and `static_version_map`
-  records which content each version name carried: `load_static` archives the
-  outgoing timetable before it replaces it, and `analyze` archives the loaded
-  one when its content is missing. A ClickHouse that predates them needs
-  `make ch-bootstrap` before the next `load_static` or `analyze`.
+  of delay counts and of the stop-route pairs each date observed. Each row is
+  read as joined to the timetable in force on its service date
+  (`pipeline/timetable_in_force.py`): the newest loaded timetable whose feed
+  dates, or else calendar, cover that day. A row ingested against another
+  timetable, or against none, takes the in-force timetable's scheduled time
+  and day type from the archive below, and its route only where the feed
+  named none. A day no recorded timetable covers keeps the timetable its
+  rows were ingested against: its version name's archived one, or the loaded
+  one when the name maps to none. Those that join the static schedule join
+  the same timetable's stops. It builds the rest in Postgres; of those, dwell
+  and running time take each stop visit's scheduled times from the same
+  archive, through the ClickHouse scan that pairs its arrival with its
+  departure. A ClickHouse that predates one of those tables needs its schema
+  applied (`make ch-bootstrap`; a deploy's schema step applies it) before the
+  next `analyze`.
+- Every timetable an agency loads is kept in ClickHouse under its content
+  hash: its stop times in `static_stop_times_archive` and its schedule as
+  ingest stamps it in `static_schedule_archive`. `static_version_map` records
+  which content each version name carried, and `static_version_spans` the days
+  each name covers. `load_static` records the incoming timetable's span and
+  archives the outgoing timetable before it replaces it, and `analyze`
+  archives the loaded one when its content or span is missing.
+  `scripts/backfill_timetable_archive.py` fills the archive for names loaded
+  before it kept them, from the kept zips; with `--headways` it records again,
+  from the same zips, the headways of archived timetables not kept at the
+  current `agg_route_headway` version, whether kept at an older one or never
+  kept. `static_calendar_archive` keeps each timetable's calendar under its
+  version name and content (a calendar-only refetch under the same name keeps
+  the first calendar), and `--calendars` keeps it, from the same zips, for
+  timetables archived before it was. A ClickHouse that predates these
+  tables needs its schema applied (`make ch-bootstrap`; a deploy's schema step
+  applies it) before the next `load_static` or `analyze`.
+  Where the version in force on a date has other content than the one its
+  rows were ingested against, `analyze` writes that date's rows filed under
+  it to `updates_filed` (`pipeline/refiled.py`), and its own reads and the
+  live scans take them from there instead of joining the archive, for as long
+  as `updates_filed_dates` shows the date's filing unchanged. A refiled date
+  outside analyze's rebuild scope has no valid write until
+  `scripts/write_refiled_history.py --apply` writes it, so it is run again
+  after the filing rules (`pipeline.refiled.RULES`) change.
+  Postgres mirrors the map in `static_version_contents`, each name at its
+  latest content, written right after each map row, so the definition stamp
+  names each timetable's content without reading ClickHouse.
+  `scripts/fill_version_contents.py` copies the mappings written before the
+  mirror existed; a Postgres without the mirror needs `make migrate` before
+  the next `load_static` or `analyze`.
 - Each day's planned trips are saved into `planned_trips_daily` while the
   timetable that plans the day is loaded: every `analyze` run saves each day
   before today the loaded timetable covers that has no saved count yet, and
@@ -175,10 +293,14 @@ FastAPI + React SPA  <-------------------------------------------------+
   latest timetable loaded that day until it is over. The service-delivered
   rate reads a saved day before the loaded timetable, so a reload no longer
   drops past days from it. Nothing reconstructs the days before the first save.
+  A day saved before its stop events were saved beside its trips keeps them
+  unknown until `scripts/fill_planned_stop_events.py` computes them from the
+  archived timetable in force that day, only where that timetable's calendar
+  is archived and its planned trips equal the day's saved count.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
   calls an LLM, and optional LLM features have kill switches.
 
-See the [deployment guide](docs/deploy-railway.md) for production setup and
+See the [deployment guide](docs/deploy-standalone.en.md) for production setup and
 the [feature guides](docs/features/) for user-facing behavior.
 
 ## Commands
@@ -193,16 +315,15 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze` | Rebuild one agency's changed dates (`FULL=1`: every date) |
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline (`SINCE=YYYYMMDD` fetches only that day's RT archives and later; per-agency layout only) |
-| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `AGENCY="8 53"` narrows it) |
-| `make check-aggs` | Detect stale aggregate tables |
+| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `SEED_DAYS=3` starts an agency with no rows 3 JST days back, `AGENCY="8 53"` narrows it) |
+| `make check-aggs` | Detect stale aggregate tables; list days still held from the live copy |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
 | `make reprobe-rt-coverage` | Re-probe each agency whose RT field-coverage verdict is missing, refuted or about to lapse; probes only in service hours, so schedule it daily in the late morning |
-| `make build-rag-index` | Build the Ask RAG index for all agencies (also the re-index after an embedder change) |
 | `make ask-eval` | Check the Ask gold set's stored signatures still match canonicalization (no database; pytest runs it too) |
 | `make prune-query-log` | Delete `ask_query_log` rows older than 90 days (the API also runs this daily) |
 | `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
-| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon; the API also runs this daily) |
+| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (production `updates`' horizon; the API also runs this daily) |
 | `make prune-personal-data` | Delete usage counts and login history older than 25 months, and expired sessions (the API also runs this daily) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
@@ -282,15 +403,13 @@ The main endpoints are:
 | `GET /api/auth/{provider}/login` | Start Google or GitHub OAuth |
 | `/api/admin/board`, `/api/admin/runs` | Admin control room: fleet health board + run timeline |
 | `/api/admin/agencies*` | Admin agency list, per-agency health, and diagnostics drawer |
-| `/api/admin/users*` | Admin user management, sessions, API keys |
+| `/api/admin/users*` | Admin user management, sessions |
 | `/api/admin/audit` | Merged admin-action + login audit log |
 | `/api/admin/ops` | Read-only ops health snapshot (migrations, aggregate freshness) |
 | `/api/admin/flags` | Feature-flag registry: resolved values + DB overrides |
-| `/api/admin/ask/*` | Ask query log, funnel, intent-cache promotion, eval result |
+| `/api/admin/snapshots*`, `GET /api/snapshots/{id}`, `GET /api/snapshots/{id}/today` | Frozen snapshots: admins create, list and delete; anyone with the link reads one and today's figures for its query ([guide](docs/features/snapshots.md)) |
+| `/api/admin/ask/*` | Ask query log and funnel |
 | `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
-| `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |
-| `/api/me/export` | Download everything the app holds about you (JSON) |
-| `DELETE /api/me` | Delete your own account and its personal data (confirm with your email) |
 
 Most data endpoints accept `from`, `to`, `dow`, `time_band`, `service`, and
 `routes` filters. API documentation is available from FastAPI at `/docs`
@@ -300,8 +419,8 @@ Configuration below).
 Example:
 
 ```bash
-# While sign-in is required, pass a session cookie from a signed-in browser
-# (or an X-API-Key header issued from the admin console).
+# A signed-out call gets the rules-stage answer. An LLM-grounded answer needs
+# the session cookie of a signed-in account that an admin approved for it.
 curl -X POST http://localhost:8000/api/1/ask \
   -H 'Content-Type: application/json' \
   -H 'Origin: http://localhost:8000' \
@@ -314,15 +433,22 @@ curl -X POST http://localhost:8000/api/1/ask \
 Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
-- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder. At
-  least one provider listed in `CHAT_PROVIDERS` needs a key, or the API will
-  not start.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder. With no
+  key for any provider listed in `CHAT_PROVIDERS` the API still starts, LLM-backed
+  features are disabled and `/api/config` reports `llm_enabled: false`.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
-- `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
-  `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`, `ADMIN_EMAILS`: optional
-  authentication and admin setup.
+- `SESSION_SIGNING_KEY`: required by every sign-in method (OAuth or the local
+  admin below). Startup refuses to boot with sign-in on while it is unset or
+  the public dev default; generate one with `openssl rand -hex 32`. An
+  anonymous-only deployment needs none.
+- `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`,
+  `ADMIN_EMAILS`: optional admin sign-in through OAuth. Set all four client
+  variables or none; startup refuses a partial set. Sign-in is for
+  administrators only: `ADMIN_EMAILS` is the one way to make a new admin
+  through SSO, and any other account is refused.
 - `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`: break-glass local-admin
-  account, seeded (and re-seeded on every boot) only when both are set.
+  account, seeded (and re-seeded on every boot) only when both are set. It
+  needs `SESSION_SIGNING_KEY` too, with or without OAuth.
   Rotating it is editing `.env` and restarting — the same mental model as
   rotating an OAuth client secret. Never set `DEFAULT_ADMIN_USERNAME` to a
   live SSO user's email: seeding refuses to promote an email that already
@@ -332,7 +458,7 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   reads, when it differs from its built-in default path. Unset
   on a host where that path doesn't exist and the board's `github` tile
   reads `unknown` rather than a real status.
-- `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
+- `OBJECT_STORE_*`, `AGENCY_IDS`: scheduled archive ingest.
 
 ### Feature kill switches
 
@@ -345,33 +471,38 @@ value when neither an override nor the env var is set.
 | `ask_router_enabled` | `ASK_ROUTER_ENABLED` | on |
 | `ask_llm_enabled` | `ASK_LLM_ENABLED` | on |
 | `ask_followup_enabled` | `ASK_FOLLOWUP_ENABLED` | off |
-| `copilot_insight_enabled` | `COPILOT_INSIGHT_ENABLED` | off |
 | `ask_history_enabled` | `ASK_HISTORY_ENABLED` | on |
 | `ask_intent_cache_enabled` | `ASK_INTENT_CACHE_ENABLED` | off |
 | `ask_query_log_enabled` | `ASK_QUERY_LOG_ENABLED` | on |
 | `weather_ingest_enabled` | `WEATHER_INGEST_ENABLED` | off |
 | `openapi_docs_enabled` | `OPENAPI_DOCS_ENABLED` | off |
 | `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
-| `login_required` | `LOGIN_REQUIRED` | on |
 | `ml_forecast` | `ML_FORECAST_ENABLED` | off |
+| `updates_prune_enabled` | `UPDATES_PRUNE_ENABLED` | off |
+
+`weather_ingest_enabled` gates the weather ingest and also the rain panel on
+Why: with it off the panel is not mounted and `/weather_delay` is not requested.
 
 `openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json`;
 `.env.example` turns it on for local dev.
-
-`login_required` makes every `/api/*` route and the OpenAPI docs refuse a
-signed-out caller with `401 {"detail": "auth required"}`, except the sign-in
-flow (`/api/auth/*`) and `/api/config`. It is enforced only while SSO is
-configured.
 
 `ml_forecast` lets `GET /api/{agency_id}/forecast/heatmap` and
 `/forecast/overview` fill a cell from the ML model's fresh forecasts in
 `agg_route_forecast_ml`, marked `source: "ml"`; with it off, every cell is the
 historical baseline.
 
-Leaving all OAuth variables unset runs the app in anonymous-only mode: nobody
-can sign in through SSO (only the break-glass account, when it is set), so the
-login gate stays open and every page works signed out. Do not
-commit `.env`, API keys, OAuth secrets, database passwords, or private keys.
+`updates_prune_enabled` lets `gtfs_pipeline.py prune-updates` drop ClickHouse
+`updates` months past the horizon. The retention table in
+`docs/ops-monitoring-deploy.md` says what it drops and how to turn it on.
+
+Every reader page works signed out, whether or not SSO is configured, and so
+does `POST /api/{agency_id}/delays/refresh`, under a per-caller rate limit
+(per address, or per account when signed in) and a per-agency cooldown. Admin routes need an admin session; the account
+routes (`/api/me/*`, saved conversations) need a signed-in caller. Leaving all
+OAuth variables unset turns off SSO sign-in; only the break-glass account can
+sign in, and only when it and `SESSION_SIGNING_KEY` are set. With neither, the
+app runs in anonymous-only mode. Do not commit `.env`, API keys, OAuth secrets, database
+passwords, or private keys.
 
 ### Secret scanning
 
@@ -387,14 +518,27 @@ and CI's `secrets-scan.yml` runs it again on every pull request and push to
 
 ## Deployment
 
-Production uses Railway services for the app, Postgres, and the scheduled
-ingest job. The Docker image builds the React SPA and serves it from FastAPI.
-The database remains on Railway's private network, and migrations run through
-the deployment configuration.
+Production runs from the `standalone` Compose profile on one host, the same
+path anyone else deploys with. The Docker image builds the React SPA and serves
+it from FastAPI.
 
-Read [docs/deploy-railway.md](docs/deploy-railway.md) before deploying. It
-covers service creation, variables, data loading, custom domains, backups, and
-the Oracle-to-R2 archive path.
+### Standalone
+
+One machine with Docker runs the whole app for your own feeds, with no Oracle
+collector, R2, VPS or LLM key. [docs/deploy-standalone.en.md](docs/deploy-standalone.en.md) (日本語:
+[docs/deploy-standalone.md](docs/deploy-standalone.md)) is the one page for it:
+clone, `.env`, `GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app poller`, adding an agency with `add_agency` and reading its verdicts, signing in as
+administrator, backups, upgrades and their cadence, starting from an R2
+archive, and what is not automated. Its schema step applies the migrations and
+the ClickHouse schema on every start, so a deploy needs no manual schema step.
+[`feeds/`](feeds/README.en.md) is the catalogue of known feeds.
+
+### Railway
+
+[docs/deploy-railway.md](docs/deploy-railway.md) covers the Railway deployment
+production ran on before: service creation, variables, data loading, custom
+domains, backups, and the Oracle-to-R2 archive path. It is the fallback when a
+public URL is needed and no host is available.
 
 ## Repository Map
 
@@ -402,7 +546,7 @@ the Oracle-to-R2 archive path.
 api/                    FastAPI app, auth, routers, middleware
 pipeline/               ingest, static loading, aggregation, reports, Ask
 db/                     Postgres/PostGIS and ClickHouse schemas
-deploy/                 systemd units and log rotation for ops monitoring and drift checks
+deploy/                 systemd units and log rotation for ops monitoring
 frontend/               React SPA and translations
 oracle_cloud/           Oracle VM collector agent (v3): archive fetch, R2 sync, health checks, alerting
 scripts/                operational tools and review helpers
@@ -429,9 +573,8 @@ Useful entry points:
 - Dev databases are read-only; see `AGENTS.md`. Use the throwaway `:5544`/
   `:8124` pair described above for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
-- Branch commits carry no `[skip ci]`, so every push to a PR runs CI and the
-  merge gate has a result to read. Only the squash-merge commit carries the
-  trailer, keeping `main` from re-running what the branch proved. See
+- No commit carries `[skip ci]`, the squash-merge included, so every push to a
+  PR runs CI for the merge gate and every merge runs CI on `main`. See
   `AGENTS.md` for the rule and `transit-app-gotchas` for how it behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.

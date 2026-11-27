@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import type { AgencyHealthRow, AgencyRun, AgencyRunStep } from "../../api/admin";
 import { useNow } from "../../hooks/useNow";
 import { destHref } from "../../routes/destinations";
+import type { LabelT } from "../../utils/filterValueLabels";
 import { EM_DASH, formatDateTime, formatDuration, formatShortDate } from "../../utils/format";
 import { AdminButton } from "./adminControls";
 import { currentStepIndex, isAbandoned, runState, stoppedStepIndex, type RunState } from "./agencyRunState";
@@ -197,7 +198,7 @@ function StepResult({
 }
 
 function segLabel(
-  t: (key: string, opts?: Record<string, unknown>) => string,
+  t: LabelT,
   run: AgencyRun,
   state: RunState,
   stoppedAt: number,

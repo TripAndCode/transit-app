@@ -85,3 +85,11 @@ def test_parse_departure_time_never_raises_on_pathological_input():
     parse_departure_time shares the exact same regex match."""
     parse_departure_time("9" * 10_000)
     parse_departure_time(":" * 10_000)
+
+
+def test_the_latest_hour_the_parse_yields_has_two_digits():
+    """GTFS writes an hour in at most two digits, so 99 is the latest hour
+    ingest can store and 100 is refused."""
+    _, status, seconds = parse_departure_time("99:59:59")
+    assert status == "extended" and seconds is not None and seconds // 3600 == 99
+    assert parse_departure_time("100:00:00")[1] == "bad"

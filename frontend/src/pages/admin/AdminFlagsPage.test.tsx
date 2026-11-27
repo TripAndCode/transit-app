@@ -51,8 +51,8 @@ function twoFlags() {
         reason: null,
       },
       {
-        key: "copilot_insight_enabled",
-        label_key: "admin.flags.labels.copilotInsightEnabled",
+        key: "ask_followup_enabled",
+        label_key: "admin.flags.labels.askFollowupEnabled",
         value: true,
         source: "override",
         env_default: false,
@@ -129,7 +129,7 @@ describe("AdminFlagsPage", () => {
 
   it("shows an override-source pill plus the updated-by/reason provenance line", () => {
     wrap();
-    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    const row = screen.getByText("Ask: LLM follow-up").closest("tr")!;
     // Exact text: the same row now also carries a "Clear override" button.
     expect(within(row).getByText("Override")).toBeTruthy();
     expect(within(row).getByText(/7/)).toBeTruthy();
@@ -210,7 +210,7 @@ describe("AdminFlagsPage", () => {
 
   it("offers a clear-override action only on rows that carry an override", () => {
     wrap();
-    const overridden = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    const overridden = screen.getByText("Ask: LLM follow-up").closest("tr")!;
     const fromEnv = screen.getByText("Ask: rules router").closest("tr")!;
 
     expect(within(overridden).getByRole("button", { name: /clear override/i })).toBeTruthy();
@@ -220,17 +220,17 @@ describe("AdminFlagsPage", () => {
   it("clears the override for the row that was clicked", async () => {
     const user = userEvent.setup();
     wrap();
-    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    const row = screen.getByText("Ask: LLM follow-up").closest("tr")!;
     await user.click(within(row).getByRole("button", { name: /clear override/i }));
 
-    expect(clearMutate).toHaveBeenCalledWith({ key: "copilot_insight_enabled" });
+    expect(clearMutate).toHaveBeenCalledWith({ key: "ask_followup_enabled" });
     expect(patchMutate).not.toHaveBeenCalled();
   });
 
   it("does not open the reason dialog when clearing", async () => {
     const user = userEvent.setup();
     wrap();
-    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    const row = screen.getByText("Ask: LLM follow-up").closest("tr")!;
     await user.click(within(row).getByRole("button", { name: /clear override/i }));
 
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -239,7 +239,7 @@ describe("AdminFlagsPage", () => {
   it("disables the clear action while one is in flight", () => {
     clearState.isPending = true;
     wrap();
-    const row = screen.getByText("Copilot: proactive insight").closest("tr")!;
+    const row = screen.getByText("Ask: LLM follow-up").closest("tr")!;
     expect(within(row).getByRole("button", { name: /clear override/i })).toBeDisabled();
   });
 

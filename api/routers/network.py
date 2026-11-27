@@ -1,17 +1,33 @@
 """Cross-agency network summary endpoint (not scoped to a single agency)."""
 
+from datetime import date, datetime, timezone
+
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.deps import get_ch, get_conn
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
-from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
-from pipeline.reports.network import compute_network_summary
+from pipeline.reports.capability import CapabilityTier
+from pipeline.reports.comparability import (
+    BOARD_ON_TIME_DEFINITION,
+    MAX_CI_HALF_WIDTH_PP,
+    MAX_CLAMP_PCT,
+    MIN_COVERAGE_PCT,
+    ComparableReason,
+)
+from pipeline.reports.definition import DefinitionMeta, forget_stale_builds, resolve_definition_meta, stamp_build
+from pipeline.reports.network import board_feed_quality, compute_network_summary, coverage_through
+from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC
+from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
+from pipeline.reports.stop_supply import FIRST_HOUR, LAST_HOUR, AgencyStatus, read_supply_map, read_supply_stop
+from pipeline.service_day import service_date_of
+from pipeline.stop_supply import SupplyDayType
 
 router = APIRouter(prefix="/api/network", tags=["network"])
 
@@ -24,6 +40,11 @@ class NetworkAgencyRow(BaseModel):
     agency_name: str
     avg_delay_min: float | None
     on_time_pct: float | None
+    # on_time_pct's 95% interval in percent, counting trips rather than stop
+    # events; None without a trip count to count. See
+    # pipeline.reports.comparability.assess.
+    ci_low: float | None
+    ci_high: float | None
     samples: int
     raw_samples: int
     clamp_count: int
@@ -47,6 +68,19 @@ class NetworkAgencyRow(BaseModel):
     # Why service_delivered_pct is None, or None beside a rate; see
     # pipeline.reports.service_delivered.DeliveredMissing.
     delivered_missing: DeliveredMissing | None
+    # pipeline.reports.capability: "basic" when the feed cannot support the
+    # timetable-joined figures, which the board then attributes to the tier.
+    capability_tier: CapabilityTier
+    # observed_trips of coverage_planned_trips over the planned days through
+    # NetworkSummary.coverage_through, uncapped; see
+    # pipeline.reports.comparability.assess and docs/features/network-tab.md.
+    observed_trips: int | None
+    coverage_planned_trips: int | None
+    coverage_pct: float | None
+    # Whether the board ranks this agency, and otherwise the first check it
+    # fails; see pipeline.reports.comparability.
+    comparable: bool
+    comparable_reason: ComparableReason | None
     # pipeline.reports.ridership: has_ridership_weights is False (and
     # weighted_on_time_pct None) whenever this agency has no ridership_weights
     # rows at all -- the frontend toggle must key off has_ridership_weights,
@@ -67,38 +101,218 @@ class NetworkAgencyRow(BaseModel):
     vehicle_km_delivered_pct: float | None
 
 
+class ComparabilityThresholds(BaseModel):
+    """The gate's thresholds, served so the board's reasons quote the same
+    figures the server applied. Each is inclusive: a figure at it passes."""
+
+    min_coverage_pct: float
+    max_ci_half_width_pp: float
+    max_clamp_pct: float
+
+
+COMPARABILITY_THRESHOLDS = ComparabilityThresholds(
+    min_coverage_pct=MIN_COVERAGE_PCT,
+    max_ci_half_width_pp=MAX_CI_HALF_WIDTH_PP,
+    max_clamp_pct=MAX_CLAMP_PCT,
+)
+
+
 class NetworkSummary(BaseModel):
     from_: str = Field(serialization_alias="from")
     to: str
+    # Comparable agencies first, worst avg_delay_min first; then the rest in
+    # agency_id order, which the board re-sorts by name in its own collation.
     agencies: list[NetworkAgencyRow]
-    # This board's on_time_pct always reads agg_route_daily_dist's exact
-    # on_time_count column -- there is no tolerance query param here (unlike
-    # GET /api/{agency_id}/reports/on_time) -- so the definition is always
-    # the legacy_60s preset. Surfaced anyway (rather than assumed) so a user
-    # comparing this board against a per-agency report's on_time export can
-    # see both are using the same definition. See pipeline.reports.definition.
+    comparability: ComparabilityThresholds
+    # The newest day any agency has observations for in the range, where every
+    # row's observation coverage stops; None when no agency has any.
+    coverage_through: str | None
+    # Always the default preset's window, since this board takes no
+    # tolerance, and surfaced anyway so it can be checked against a report's
+    # own definition.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
 
 
 @router.get("/summary", response_model=NetworkSummary)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def network_summary(
     request: Request,
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
     ctx: RangeCtx = Depends(get_range_ctx),
 ) -> NetworkSummary:
-    """Per-agency network health board over [from, to], ranked worst-avg-delay first.
+    """Per-agency network health board over [from, to]: the agencies the data
+    can compare, ranked worst-avg-delay first, then the rest in agency_id
+    order. The client orders those by name in its own collation, so the
+    server sorts nothing it would only re-sort.
 
     Honors the date range only; service/time_band/dow/routes are not applied
     (whole-agency comparison). Read-only.
     """
+    schedule = await read_schedule_days(conn, None, ctx.from_date, ctx.to_date)
+    definition = await stamp_build(conn, BOARD_ON_TIME_DEFINITION, None, schedule)
     rows = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
+    # Each agency's completeness and clamp share, as its row states them.
+    definition = definition.model_copy(update={"feed_quality": board_feed_quality(rows)})
+    # The same rule compute_network_summary bounded each row's coverage by,
+    # over the same per-agency last days.
+    through = coverage_through(date.fromisoformat(r["data_to"]) for r in rows if r["data_to"])
     return NetworkSummary(
         from_=ctx.from_date.isoformat(),
         to=ctx.to_date.isoformat(),
         agencies=[NetworkAgencyRow.model_validate(r) for r in rows],
-        definition=resolve_definition_meta("on_time", None, None),
+        comparability=COMPARABILITY_THRESHOLDS,
+        coverage_through=through.isoformat() if through else None,
+        definition=definition,
         scope_applied=_NETWORK_SCOPE,
     )
+
+
+class SupplyStopColumns(BaseModel):
+    """An operator's stops as columns, index i one stop. lat/lon come from the
+    loaded timetable, None for a stop it no longer has; longest_gap_min is
+    the longest stretch of the band without a departure."""
+
+    stop_id: list[str]
+    lat: list[float | None]
+    lon: list[float | None]
+    departures: list[int]
+    longest_gap_min: list[float]
+
+
+class SupplyAgency(BaseModel):
+    agency_id: int
+    agency_name: str
+    status: AgencyStatus
+    static_version_id: str | None
+    # The day the version's departures of the day type were read on.
+    typical_day: date | None
+    # Only an "ok" operator has stops.
+    stops: SupplyStopColumns | None
+
+
+class SupplyMapResponse(BaseModel):
+    date: date
+    day_type: SupplyDayType
+    from_hour: int
+    to_hour: int
+    agencies: list[SupplyAgency]
+
+
+class SupplyHourWait(BaseModel):
+    # How long riders arriving at a random moment of the hour waited for the
+    # next departure, pooled over the days judged for it: as run, and as the
+    # same departures were timetabled.
+    days: int
+    p50_min: float
+    p90_min: float
+    scheduled_p50_min: float
+    scheduled_p90_min: float
+
+
+class SupplyHourObserved(BaseModel):
+    # Pooled over the observed window's days; on time and the average delay
+    # are of the departures observed, None with none observed.
+    departures: int
+    per_day: float
+    on_time: int
+    on_time_pct: float | None
+    uncertain: bool
+    avg_delay_min: float | None
+    # None when no day judged for the hour has its last departure, as run and as
+    # timetabled, after the hour began.
+    wait: SupplyHourWait | None
+
+
+class SupplyHour(BaseModel):
+    hour: int
+    # Planned on the typical day of the day type.
+    departures: int
+    # None without an observed window.
+    observed: SupplyHourObserved | None
+
+
+class SupplyObservedWindow(BaseModel):
+    first: date
+    last: date
+    days: int
+
+
+class SupplyStopResponse(BaseModel):
+    agency_id: int
+    stop_id: str
+    stop_name: str | None
+    departures: int
+    per_hour: float
+    longest_gap_min: float
+    # The day's first and last departure in service-day seconds (24:30 is
+    # 88200); None with no departure on the day type.
+    first_sec: int | None
+    last_sec: int | None
+    hours: list[SupplyHour]
+    observed_window: SupplyObservedWindow | None
+    definition: DefinitionMeta | None = None
+
+
+@router.get("/supply", response_model=SupplyMapResponse)
+@limiter.limit(DEFAULT_LIMIT)
+async def network_supply(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+    day: date | None = Query(None, alias="date"),
+    day_type: SupplyDayType = Query("weekday"),
+    from_hour: int = Query(10, ge=FIRST_HOUR, lt=LAST_HOUR),
+    to_hour: int = Query(16, gt=FIRST_HOUR, le=LAST_HOUR),
+) -> JSONResponse:
+    """Every operator's stops by planned departures over [from_hour, to_hour)
+    of a typical day of *day_type*, from each operator's timetable version in
+    force on *date* (today's service date by default), as
+    pipeline.reports.stop_supply.read_supply_map lays them out. The payload
+    holds every stop of every operator, so the cached dict is sent as a
+    JSONResponse, which FastAPI does not validate against the model again;
+    the model only describes it. Read-only."""
+    if to_hour <= from_hour:
+        raise HTTPException(status_code=422, detail="to_hour must be after from_hour")
+    day = day or service_date_of(datetime.now(timezone.utc))
+    await forget_stale_builds(conn)
+    return JSONResponse(await read_supply_map(conn, ch, day, day_type, from_hour, to_hour))
+
+
+@router.get(
+    "/supply/stop",
+    response_model=SupplyStopResponse,
+    responses={404: {"description": "No active operator's version in force has this stop for the date and day type"}},
+)
+@limiter.limit(DEFAULT_LIMIT)
+async def network_supply_stop(
+    request: Request,
+    agency_id: int,
+    stop_id: str,
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+    day: date | None = Query(None, alias="date"),
+    day_type: SupplyDayType = Query("weekday"),
+    from_hour: int = Query(10, ge=FIRST_HOUR, lt=LAST_HOUR),
+    to_hour: int = Query(16, gt=FIRST_HOUR, le=LAST_HOUR),
+) -> SupplyStopResponse:
+    """One stop of the supply map, opened: its name, its supply over the band,
+    the day's first and last departure, and each hour's planned departures
+    beside the observed ones and riders' waits (read_supply_stop), stamped with the on-time
+    definition and the window's timetables when anything was observed. 404
+    when the operator is not active, or its version in force has no such stop
+    or cannot tell the day type."""
+    if to_hour <= from_hour:
+        raise HTTPException(status_code=422, detail="to_hour must be after from_hour")
+    day = day or service_date_of(datetime.now(timezone.utc))
+    await forget_stale_builds(conn)
+    stop = await read_supply_stop(conn, ch, agency_id, stop_id, day, day_type, from_hour, to_hour)
+    if stop is None:
+        raise HTTPException(status_code=404, detail="stop not readable for this date and day type")
+    window = stop["observed_window"]
+    if window is not None:
+        meta = resolve_definition_meta("on_time", DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC)
+        schedule = await read_schedule_days(conn, agency_id, window["first"], window["last"])
+        stop["definition"] = await stamp_build(conn, meta, agency_id, schedule)
+    return SupplyStopResponse(**stop)

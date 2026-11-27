@@ -5,14 +5,15 @@ import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom"
 import {
   RedirectAnalysisLens,
   RedirectForecast,
+  RedirectNetworkToAgencyNetwork,
   RedirectReportType,
   RedirectSaved,
   RedirectTo,
   RedirectWhere,
 } from "./routes/legacyRedirects";
-import { RedirectNetworkToAgencyNetwork } from "./routes/networkRedirect";
 import {
   loadAskTab,
+  loadBusTownTab,
   loadCompareTab,
   loadMapTab,
   loadOverviewTab,
@@ -27,11 +28,9 @@ import { refreshAuthStateOn401, retryTransientOnce } from "./api/authExpiry";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
-import { RequireAuth } from "./components/RequireAuth";
 import { LocaleUnavailable } from "./components/LocaleUnavailable";
 import { RouteError } from "./components/RouteError";
 import { ToastProvider } from "./components/ui/Toast";
-import { ApiKeyRejectedNotice } from "./components/ApiKeyRejectedNotice";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import "./styles/global.css";
 import { BannerDismissalsProvider } from "./components/BannerDismissals";
@@ -54,12 +53,14 @@ const CompareTab = lazy(loadCompareTab);
 const MapTab = lazy(loadMapTab);
 const SavedExportTab = lazy(loadSavedExportTab);
 const AskTab = lazy(loadAskTab);
+const BusTownTab = lazy(loadBusTownTab);
 const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
 const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
 const ModelPage = lazy(() => import("./pages/ModelPage").then((m) => ({ default: m.ModelPage })));
 const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
+const SnapshotPage = lazy(() => import("./pages/SnapshotPage").then((m) => ({ default: m.SnapshotPage })));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
 const AdminUserDetailPage = lazy(() =>
   import("./pages/admin/AdminUserDetailPage").then((m) => ({ default: m.AdminUserDetailPage })),
@@ -79,6 +80,9 @@ const AdminOpsPage = lazy(() =>
 const AdminFlagsPage = lazy(() =>
   import("./pages/admin/AdminFlagsPage").then((m) => ({ default: m.AdminFlagsPage }))
 );
+const AdminTransfersPage = lazy(() =>
+  import("./pages/admin/AdminTransfersPage").then((m) => ({ default: m.AdminTransfersPage }))
+);
 const AdminArchitecturePage = lazy(() =>
   import("./pages/admin/AdminArchitecturePage").then((m) => ({ default: m.AdminArchitecturePage }))
 );
@@ -87,6 +91,9 @@ const AdminAuditPage = lazy(() =>
 );
 const AdminAskOpsPage = lazy(() =>
   import("./pages/admin/AdminAskOpsPage").then((m) => ({ default: m.AdminAskOpsPage }))
+);
+const AdminUsagePage = lazy(() =>
+  import("./pages/admin/AdminUsagePage").then((m) => ({ default: m.AdminUsagePage }))
 );
 
 /** Wrap a lazy route element in its own Suspense fallback. Only the
@@ -108,15 +115,17 @@ const onAuthError = refreshAuthStateOn401(queryClient);
 
 const router = createBrowserRouter([
   // /welcome, /login and the two legal pages render outside <App /> so they
-  // own the full viewport (no Header or sidebar), and outside RequireAuth so a
-  // signed-out visitor can reach them.
+  // own the full viewport (no Header or sidebar).
   { path: "/welcome", element: el(<LandingPage />), errorElement: <RouteError /> },
   { path: "/login", element: el(<LoginPage />), errorElement: <RouteError /> },
   { path: "/privacy", element: el(<LegalPage doc="privacy" />), errorElement: <RouteError /> },
   { path: "/terms", element: el(<LegalPage doc="terms" />), errorElement: <RouteError /> },
+  // A frozen snapshot is read by whoever holds its link, an account or not,
+  // and stands outside the app shell like the pages above.
+  { path: "/s/:snapshotId", element: el(<SnapshotPage />), errorElement: <RouteError /> },
   {
     path: "/",
-    element: <RequireAuth><App /></RequireAuth>,
+    element: <App />,
     // Catches render errors from any child route — a broken tab degrades to
     // an inline message instead of white-screening the whole app.
     errorElement: <RouteError />,
@@ -138,6 +147,7 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/live", element: <MapTab /> },
       { path: "agencies/:agencyId/reports", element: <SavedExportTab /> },
       { path: "agencies/:agencyId/ask", element: <AskTab /> },
+      { path: "agencies/:agencyId/bus-town", element: <BusTownTab /> },
       // Legacy URLs, each replaced by the screen that serves it (routes/legacyRedirects).
       { path: "agencies/:agencyId/analysis", element: <RedirectTo dest="pulse" /> },
       { path: "agencies/:agencyId/analysis/:lens", element: <RedirectAnalysisLens /> },
@@ -173,9 +183,11 @@ const router = createBrowserRouter([
           },
           { path: "ops", element: <AdminOpsPage /> },
           { path: "ask", element: <AdminAskOpsPage /> },
+          { path: "usage", element: <AdminUsagePage /> },
           { path: "architecture", element: <AdminArchitecturePage /> },
           { path: "audit", element: <AdminAuditPage /> },
           { path: "flags", element: <AdminFlagsPage /> },
+          { path: "transfers", element: <AdminTransfersPage /> },
         ],
       },
       { path: "*", element: <Navigate to="/" replace /> },
@@ -195,7 +207,6 @@ void i18nReady.then((stringsLoaded) => {
       {stringsLoaded ? (
         <QueryClientProvider client={queryClient}>
           <ToastProvider>
-            <ApiKeyRejectedNotice />
             <BannerDismissalsProvider>
               <RouterProvider router={router} />
             </BannerDismissalsProvider>

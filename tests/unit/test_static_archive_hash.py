@@ -1,6 +1,12 @@
-"""The archive's content key and the schedule join's parameters."""
+"""The archive's content key, the schedule join's parameters, and the day a
+version name says its timetable was fetched."""
+
+from datetime import date
+
+import pytest
 
 from pipeline.static_archive import ScheduleJoin, content_hash
+from pipeline.timetable_in_force import Segment, fetch_day
 
 
 def test_the_key_is_stable_for_the_same_parts():
@@ -20,7 +26,43 @@ def test_a_join_binds_every_mapped_content_and_the_loaded_one():
         "join_hashes": ["h0", "h1"],
         "join_current": "hc",
         "join_contents": ["h0", "h1", "hc"],
+        "force_steps": [-(2**31)],
+        "force_step_at": [0],
+        "force_stems": [],
+        "force_contents": [],
     }
+
+
+def _day(year: int, month: int, day: int) -> int:
+    return (date(year, month, day) - date(1970, 1, 1)).days
+
+
+def test_a_join_binds_the_versions_in_force_with_their_contents():
+    force = (Segment(date(2026, 1, 1), date(2026, 1, 31), "s1"), Segment(date(2026, 2, 1), date(2026, 3, 31), "s0"))
+    params = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc", force).params()
+    assert params["force_steps"] == [-(2**31), _day(2026, 1, 1), _day(2026, 2, 1), _day(2026, 4, 1)]
+    assert params["force_step_at"] == [0, 1, 2, 0]
+    assert params["force_stems"] == ["s1", "s0"]
+    assert params["force_contents"] == ["h1", "h0"]
+
+
+def test_a_day_no_segment_covers_steps_back_to_none():
+    force = (
+        Segment(date(1900, 1, 1), date(2026, 1, 31), "s0"),
+        Segment(date(2026, 2, 1), date(2026, 2, 3), "s1"),
+        Segment(date(2026, 2, 5), date(2026, 2, 5), "s0"),
+        Segment(date(2026, 2, 6), date(2299, 12, 31), "s1"),
+    )
+    params = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc", force).force_params()
+    assert list(zip(params["force_steps"], params["force_step_at"], strict=True)) == [
+        (-(2**31), 0),
+        (_day(1900, 1, 1), 1),
+        (_day(2026, 2, 1), 2),
+        (_day(2026, 2, 4), 0),
+        (_day(2026, 2, 5), 3),
+        (_day(2026, 2, 6), 4),
+        (_day(2300, 1, 1), 0),
+    ]
 
 
 def test_a_month_binds_only_the_contents_its_stems_join():
@@ -36,3 +78,19 @@ def test_with_no_loaded_timetable_unmapped_rows_join_nothing():
 def test_a_name_joins_its_mapped_content_else_the_loaded_one():
     content_of = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc").content_of()
     assert [content_of(stem) for stem in ("s1", "", "gtfs_static_19990101")] == ["h1", "hc", "hc"]
+
+
+@pytest.mark.parametrize(
+    ("name", "day"),
+    [
+        ("gtfs_static_20260918", date(2026, 9, 18)),
+        ("hiroden_static", None),
+        ("gtfs_static_20261340", None),
+        ("", None),
+        (None, None),
+    ],
+)
+def test_a_version_name_gives_the_day_its_zip_was_fetched(name, day):
+    """The fetchers name each zip `gtfs_static_YYYYMMDD` after the day they
+    fetched it; an older name carries no day, and a malformed one is no day."""
+    assert fetch_day(name) == day

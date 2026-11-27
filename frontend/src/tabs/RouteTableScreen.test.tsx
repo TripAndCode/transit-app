@@ -1,22 +1,37 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { act, cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
-import type { DefinitionMeta, ReportResponse } from "../api/types";
+import * as snapshots from "../api/snapshots";
+import * as adminHook from "../api/useIsAdmin";
+import type { DefinitionMeta, ReportResponse, RouteReference, RouteReferences } from "../api/types";
 import { RouteTableScreen } from "./RouteTableScreen";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
 vi.mock("../components/PerformanceStandardPanel", () => ({ PerformanceStandardPanel: () => <div>standards-panel</div> }));
 
 const DEFINITION: DefinitionMeta = {
-  preset: "legacy_60s",
-  early_tolerance_sec: null,
-  late_tolerance_sec: 60,
+  preset: "standard_m1_p5",
+  early_tolerance_sec: 60,
+  late_tolerance_sec: 300,
+  early_departure_sec: 60,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0", source: "aggregates",
+  built_at: null,
+  value_basis: "feed_prediction",
+  timetable_versions: null,
+  source_mix: null,
 };
 
 function tableResponse(overrides: Record<string, unknown> = {}): ReportResponse {
@@ -25,8 +40,8 @@ function tableResponse(overrides: Record<string, unknown> = {}): ReportResponse 
     rendered_at: "2026-10-24T00:00:00Z",
     text: "",
     rows: [
-      ["42", "10.60", "12.3", "40.1", 496, 1236, false, 1.9],
-      ["70-3", "7.97", "11.3", "64.2", 28641, 44609, false, 0.3],
+      ["42", "10.60", "12.3", "40.1", 496, 1236, "3.5", false, 1.9],
+      ["70-3", "7.97", "11.3", "64.2", 28641, 44609, "0.2", false, 0.3],
     ],
     ctx: { from: "2026-09-24", to: "2026-10-23", dow: "all", time_band: "all", service: "all", routes: [] },
     definition: DEFINITION,
@@ -43,7 +58,6 @@ function tableResponse(overrides: Record<string, unknown> = {}): ReportResponse 
 
 function setup(path: string, response: ReportResponse | undefined = tableResponse(), extra: Record<string, unknown> = {}) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
-  vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
   const useReport = vi
     .spyOn(hooks, "useReport")
     .mockReturnValue({ data: response, isFetching: false, error: null, refetch: vi.fn(), ...extra } as never);
@@ -56,11 +70,50 @@ function setup(path: string, response: ReportResponse | undefined = tableRespons
   return { useReport, router, params, options };
 }
 
+/** The 90 days before the table's 2026-09-24 start, each route's figures over
+ *  them as `routes` gives them. */
+function reference(routes: Record<string, Partial<RouteReference>>, overrides: Partial<RouteReferences> = {}): RouteReferences {
+  return {
+    samples: 90_000,
+    window_from: "2026-06-26",
+    window_to: "2026-09-23",
+    days: 90,
+    days_selected: 90,
+    days_collected: 90,
+    min_days: 72,
+    min_samples: 100,
+    reason: null,
+    routes: Object.fromEntries(
+      Object.entries(routes).map(([code, r]) => [code, { on_time_pct: null, avg_min: null, samples: 5000, reason: null, ...r }]),
+    ),
+    ...overrides,
+  };
+}
+
 const pressed = (name: string) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
 const csvHref = () => screen.getByRole("link", { name: /CSV/ }).getAttribute("href") ?? "";
 
 describe("RouteTableScreen", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("hides the observation count until statistics are asked for, and remembers the choice", async () => {
+    setup("/agencies/9/routes");
+    const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers()).not.toContain("Observations");
+    const toggle = screen.getByRole("checkbox", { name: "Show statistics" });
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    expect(headers()).toContain("Observations");
+    expect(localStorage.getItem("transit.showStatistics")).toBe("1");
+    // A later visit in this browser reads the stored choice.
+    cleanup();
+    resetShowStatisticsForTests();
+    setup("/agencies/9/routes");
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeChecked();
+    expect(headers()).toContain("Observations");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
+    expect(localStorage.getItem("transit.showStatistics")).toBe("0");
+  });
 
   it("opens on every route sorted by average delay, worst first, fifty at a time", () => {
     const { useReport, options } = setup("/agencies/1/routes");
@@ -156,26 +209,44 @@ describe("RouteTableScreen", () => {
 
   it("states what counts as on time and as over five minutes under the table", () => {
     setup("/agencies/1/routes");
-    expect(screen.getByText("On time = no more than 1 min late (early departures count as on time).")).toBeInTheDocument();
+    expect(screen.getByText("On time (industry standard) = no more than 5 min late and no more than 1 min early.")).toBeInTheDocument();
     expect(screen.getByText(/^Over 5 min = departures more than 5 minutes late/)).toBeInTheDocument();
   });
 
-  it("puts the headway and targets panels beside the on-time sort only", () => {
-    setup("/agencies/1/routes?sort=on_time");
-    expect(screen.getByText("headway-panel")).toBeInTheDocument();
-    expect(screen.getByText("standards-panel")).toBeInTheDocument();
+  it("shows each route's early-departure rate, naming the threshold it counts past", () => {
+    setup("/agencies/1/routes");
+    expect(screen.getByRole("columnheader", { name: "Early (> 1 min)" })).toBeInTheDocument();
+    const row = screen.getAllByRole("row")[1];
+    expect(within(row).getByText("3.5%")).toBeInTheDocument();
+    expect(screen.getByText(/^Early = departures more than 1 min early/)).toBeInTheDocument();
   });
 
-  it("leaves the punctuality panels off the other sorts", () => {
+  it("follows the threshold the response names", () => {
+    setup("/agencies/1/routes?early=120", tableResponse({ definition: { ...DEFINITION, preset: "custom", early_tolerance_sec: 120, early_departure_sec: 120 } }));
+    expect(screen.getByRole("columnheader", { name: "Early (> 2 min)" })).toBeInTheDocument();
+  });
+
+  it("puts the headway panel beside the on-time sort", () => {
+    setup("/agencies/1/routes?sort=on_time");
+    expect(screen.getByText("headway-panel")).toBeInTheDocument();
+  });
+
+  it("leaves the headway panel off the other sorts", () => {
     setup("/agencies/1/routes?sort=late5_count");
     expect(screen.queryByText("headway-panel")).toBeNull();
-    expect(screen.queryByText("standards-panel")).toBeNull();
+  });
+
+  // Every sort shows each route's on-time rate, so its targets follow the table.
+  it.each(["avg", "on_time", "late5_share", "late5_count"])("judges the targets under the %s sort", (sort) => {
+    setup(`/agencies/1/routes?sort=${sort}`, tableResponse({ sort }));
+    expect(screen.getByText("standards-panel")).toBeInTheDocument();
   });
 
   it("keeps the floor toggle in reach when no route clears it", () => {
     setup("/agencies/1/routes", tableResponse({ rows: [], rows_total: 0 }));
     expect(screen.getByText("No matching data")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Include routes observed fewer than 100 times" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
   });
 
   it("marks the rows it holds by the sort they arrived in while another sort loads", () => {
@@ -189,5 +260,100 @@ describe("RouteTableScreen", () => {
     setup("/agencies/1/routes", tableResponse(), { isFetching: true });
     expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
     expect(screen.getByRole("table").closest(".route-table__body")).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("lets an admin freeze the table as it is asked for, and keeps the menu out of everyone else's way", async () => {
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    setup("/agencies/1/routes?from=2026-09-24&to=2026-10-23&sort=on_time");
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    const { useReport, options } = setup("/agencies/1/routes?from=2026-09-24&to=2026-10-23&sort=on_time");
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    const scope = useReport.mock.calls.at(-1)![2];
+    expect(create).toHaveBeenCalledWith({
+      screen: "route_table",
+      agencyId: 1,
+      query: hooks.reportQueryString(scope, options()),
+    });
+    expect(create.mock.calls[0][0].query).toContain("sort=on_time");
+  });
+
+  describe("each route's past 90 days", () => {
+    // The response's rows in order: "42", then "70-3".
+    const rowOf = (code: string) => screen.getAllByRole("row")[code === "42" ? 1 : 2];
+
+    it("marks each on-time rate against the route's own past 90 days, with that rate in the mark's tip", () => {
+      setup("/agencies/1/routes", tableResponse({ reference: reference({ "42": { on_time_pct: 10.0 }, "70-3": { on_time_pct: 11.3 } }) }));
+      expect(screen.getByText(/compare it with the route’s own past 90 days \(.+\)\. Point at one/)).toBeInTheDocument();
+      const better = within(rowOf("42")).getByText("Better");
+      expect(better).toHaveClass("reference-chip");
+      expect(better.closest("td")).toHaveTextContent(/^12\.3%/);
+      expect(within(rowOf("70-3")).getByText("About the same")).toHaveClass("reference-chip");
+      act(() => better.focus());
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/^Past 90 days \(.+\): on time 10\.0%$/);
+    });
+
+    it("says how many days the feed had when it missed some", () => {
+      setup("/agencies/1/routes", tableResponse({ reference: reference({ "42": { on_time_pct: 10.0 } }, { days_collected: 80 }) }));
+      act(() => within(rowOf("42")).getByText("Better").focus());
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/on the 80 days with data: on time 10\.0%$/);
+    });
+
+    it("leaves a route seen too rarely in those days unmarked", () => {
+      setup(
+        "/agencies/1/routes",
+        tableResponse({
+          reference: reference({ "42": { samples: 90, reason: "insufficient_samples" }, "70-3": { on_time_pct: 9.0 } }),
+        }),
+      );
+      expect(within(rowOf("42")).queryByText(/^(Better|About the same|Worse)$/)).not.toBeInTheDocument();
+      expect(within(rowOf("70-3")).getByText("Better")).toBeInTheDocument();
+    });
+
+    it("says once why no route is compared when the window falls short", () => {
+      setup(
+        "/agencies/1/routes",
+        tableResponse({
+          reference: reference(
+            { "42": { reason: "insufficient_days" }, "70-3": { reason: "insufficient_days" } },
+            { reason: "insufficient_days", days_collected: 60 },
+          ),
+        }),
+      );
+      expect(screen.getByText(/^Past 90 days \(.+\): data on only 60 days, short of the 72 needed for a usual level\.$/)).toBeInTheDocument();
+      expect(screen.queryByText(/^(Better|About the same|Worse)$/)).not.toBeInTheDocument();
+    });
+
+    it("says routes are not compared under a time of day", async () => {
+      const notAggregated = { reason: "not_aggregated" as const, samples: 0 };
+      setup(
+        "/agencies/1/routes?time_band=morning",
+        tableResponse({
+          ctx: { from: "2026-09-24", to: "2026-10-23", dow: "all", time_band: "morning", service: "all", routes: [] },
+          reference: reference({ "42": notAggregated, "70-3": notAggregated }, { ...notAggregated, days_selected: 0, days_collected: 0, min_days: 0 }),
+        }),
+      );
+      expect(screen.getByText("With a time of day chosen, routes are not compared with their past 90 days.")).toBeInTheDocument();
+      // No aggregate was read, so there are no days to count in the rules.
+      await userEvent.click(screen.getByRole("button", { name: "Hint" }));
+      expect(screen.getByText(/under 1 point in the on-time rate/)).toBeInTheDocument();
+      expect(screen.queryByText(/of the 0 days|at least 0/)).not.toBeInTheDocument();
+    });
+
+    it("explains the floors and the tolerances in the legend's hint", async () => {
+      setup("/agencies/1/routes", tableResponse({ reference: reference({ "42": { on_time_pct: 10.0 } }, { days_selected: 64, min_days: 52 }) }));
+      await userEvent.click(screen.getByRole("button", { name: "Hint" }));
+      expect(screen.getByText(/at least 52 of the 64 days/)).toBeInTheDocument();
+      expect(screen.getByText(/under 1 point in the on-time rate/)).toBeInTheDocument();
+      expect(screen.getByText(/under 0\.1 min, or under 5% of the past 90 days’ average/)).toBeInTheDocument();
+    });
+
+    it("names no reference for a table without one", () => {
+      setup("/agencies/1/routes");
+      expect(screen.queryByText(/past 90 days/i)).not.toBeInTheDocument();
+    });
   });
 });

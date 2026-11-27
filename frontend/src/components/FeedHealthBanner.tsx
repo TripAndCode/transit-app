@@ -32,11 +32,6 @@ export function FeedHealthBanner({ hidden = false }: { hidden?: boolean }) {
   if (!feedHealthBannerDue(data?.raw_samples ?? 0, count)) return null;
   if (dismissed) return null;
 
-  // Same calm warm-tan palette as DataStalenessBanner — never alarm red.
-  const bg = "hsl(38, 50%, 95%)";
-  const fg = "hsl(28, 45%, 32%)";
-  const border = "hsl(38, 45%, 78%)";
-
   return (
     <div
       role="status"
@@ -44,9 +39,6 @@ export function FeedHealthBanner({ hidden = false }: { hidden?: boolean }) {
       lang={i18n.language}
       data-shell-banner=""
       style={{
-        background: bg,
-        color: fg,
-        borderBottom: `1px solid ${border}`,
         padding: "6px 16px",
         fontSize: 13,
         display: "flex",
@@ -66,7 +58,7 @@ export function FeedHealthBanner({ hidden = false }: { hidden?: boolean }) {
         style={{
           background: "transparent",
           border: "none",
-          color: fg,
+          color: "inherit",
           cursor: "pointer",
           fontSize: 16,
           lineHeight: 1,

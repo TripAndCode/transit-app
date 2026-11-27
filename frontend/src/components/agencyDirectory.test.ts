@@ -6,7 +6,7 @@ const HIROSHIMA_FEED = "https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updat
 const AOMORI_FEED = "https://aomoricitybus.com/TripUpdate.pb";
 
 function agency(agency_id: number, agency_name: string, over: Partial<Agency> = {}): Agency {
-  return { agency_id, agency_name, feed_url: HIROSHIMA_FEED, static_url: null, latest_data_date: null, ...over };
+  return { agency_id, agency_name, feed_url: HIROSHIMA_FEED, static_url: null, latest_data_date: null, capability_tier: "full", ...over };
 }
 
 const names = (list: Agency[]) => list.map((a) => a.agency_name);
@@ -37,9 +37,9 @@ describe("prefectureOf", () => {
 describe("newestDataDate", () => {
   it("is the latest day any agency has data for", () => {
     const list = [
-      agency(1, "A", { latest_data_date: "2026-10-14" }),
+      agency(1, "A", { latest_data_date: "2026-10-14", capability_tier: "full" }),
       agency(2, "B"),
-      agency(3, "C", { latest_data_date: "2026-10-23" }),
+      agency(3, "C", { latest_data_date: "2026-10-23", capability_tier: "full" }),
     ];
     expect(newestDataDate(list)).toBe("2026-10-23");
   });
@@ -93,11 +93,11 @@ describe("groupAgencies", () => {
   it("orders a group by name, current data before stopped data before none", () => {
     const groups = groupAgencies(
       [
-        agency(1, "Delta", { latest_data_date: "2026-10-14" }),
+        agency(1, "Delta", { latest_data_date: "2026-10-14", capability_tier: "full" }),
         agency(2, "Echo"),
-        agency(3, "Charlie", { latest_data_date: "2026-10-23" }),
+        agency(3, "Charlie", { latest_data_date: "2026-10-23", capability_tier: "full" }),
         agency(4, "Alpha"),
-        agency(5, "Bravo", { latest_data_date: "2026-10-22" }),
+        agency(5, "Bravo", { latest_data_date: "2026-10-22", capability_tier: "full" }),
       ],
       "2026-10-23",
     );

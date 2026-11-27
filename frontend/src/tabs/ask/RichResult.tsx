@@ -1,22 +1,28 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, type CSSProperties, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { TFunction } from "i18next";
-import type { ToolResult, TrendDay } from "../../api/types";
+import type { CardConditions, DefinitionMeta, ToolResult, TrendDay } from "../../api/types";
+import { DefinitionMetaBlock } from "../../components/DefinitionMetaBlock";
 import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
 import { formatNumber } from "../../utils/format";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
+import { cardHome } from "./cardHome";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
 import { conditionsLabel, formatWindow, provenancePath, resultRowCount, toolLabel } from "./provenance";
+import { MAX_STAGGER, rankedBarColor, rankedBarColumn, rankedBarShares } from "./rankedBars";
 import { SHARED_TABLE } from "../../components/tableStyles";
+import "./rankedBars.css";
 
-type Conditions = { dow?: string; time_band?: string; service?: string } | null;
+type Conditions = CardConditions | null;
 
 /** Render a tool result as a table / key-value list / chart, falling back to
  *  plain text for empty or text-kind results. Table/kv/series results are
  *  wrapped in the Ask evidence card: a provenance badge, the chart/table
  *  first, a one-sentence summary, next-step chips, and a "where this comes
  *  from" disclosure — all derived from fields the Ask API already returns
- *  (`tool`, `args`, the message's persisted `conditions`). */
+ *  (`tool`, `args`, the message's persisted `conditions`), then the method
+ *  stamp the card was answered with, when it carries one. */
 export function RichResult({
   result,
   fallbackText,
@@ -25,7 +31,9 @@ export function RichResult({
   tool,
   args,
   conditions,
+  definition,
   onChip,
+  agencyId = null,
 }: {
   result: ToolResult;
   fallbackText: string;
@@ -34,11 +42,15 @@ export function RichResult({
   tool: string | null;
   args: Record<string, unknown> | null;
   conditions?: Conditions;
+  definition?: DefinitionMeta | null;
   onChip?: (action: NextStepAction) => void;
+  /** The agency the card was answered for: with it, the card links to the
+   *  screen that answers its question in full. */
+  agencyId?: number | null;
 }) {
   if (result.kind === "table" && result.rows && result.columns) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} agencyId={agencyId} t={t}>
         <ResultTable result={result} formatRoute={formatRoute} t={t} />
       </EvidenceCard>
     );
@@ -46,7 +58,7 @@ export function RichResult({
 
   if (result.kind === "kv" && result.pairs) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} agencyId={agencyId} t={t}>
         <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
           <tbody>
             {(result.pairs as [string, unknown][]).map(([k, v], i) => (
@@ -63,7 +75,7 @@ export function RichResult({
 
   if (result.kind === "series" && result.series && (result.series as unknown[]).length > 0) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} agencyId={agencyId} t={t}>
         <DailyChart days={result.series as TrendDay[]} granularity={seriesGranularity(args)} height={200} brushable={false} routeName={formatRoute} />
       </EvidenceCard>
     );
@@ -97,6 +109,10 @@ function ResultTable({
   // pipeline/stats.py), not a plain value; render a short marker only
   // when true rather than the raw "true"/"false".
   const lowConfIdx = cols.findIndex((c) => c === "low_confidence");
+  const visibleRows = rows.slice(0, 50);
+  // Which tables get a ranked bar, and why: see ./rankedBars.ts.
+  const barColumn = rankedBarColumn(cols);
+  const barShares = barColumn ? rankedBarShares(visibleRows.map((row) => (row as unknown[])[barColumn.index])) : [];
   return (
     <div style={{ overflowX: "auto" }}>
       {/* The element style is the shared one. The cells are not: this table
@@ -122,11 +138,11 @@ function ResultTable({
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, 50).map((row, i) => (
+          {visibleRows.map((row, i) => (
             <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
-              {(row as unknown[]).map((cell, j) => (
-                <td key={j} style={{ padding: "6px 10px" }}>
-                  {j === routeIdx
+              {(row as unknown[]).map((cell, j) => {
+                const text =
+                  j === routeIdx
                     ? formatRoute(cell as string)
                     : j === serviceTypeIdx && cell != null
                       ? serviceValueLabel(String(cell), t)
@@ -138,9 +154,32 @@ function ResultTable({
                           ? "—"
                           : typeof cell === "number"
                             ? formatNumber(cell)
-                            : String(cell)}
-                </td>
-              ))}
+                            : String(cell);
+                const isBarColumn = barColumn != null && j === barColumn.index;
+                return (
+                  <td key={j} style={{ padding: "6px 10px" }}>
+                    {isBarColumn ? (
+                      <span className="ask-rank-bar-cell">
+                        <span className="ask-rank-bar-track" aria-hidden="true">
+                          <span
+                            className="ask-rank-bar-fill"
+                            style={
+                              {
+                                width: `${barShares[i] * 100}%`,
+                                "--stagger": Math.min(i, MAX_STAGGER),
+                                background: rankedBarColor(barColumn!.kind, cell),
+                              } as CSSProperties
+                            }
+                          />
+                        </span>
+                        {text}
+                      </span>
+                    ) : (
+                      text
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -159,7 +198,9 @@ function EvidenceCard({
   tool,
   args,
   conditions,
+  definition,
   onChip,
+  agencyId,
   t,
   children,
 }: {
@@ -167,7 +208,9 @@ function EvidenceCard({
   tool: string | null;
   args: Record<string, unknown> | null;
   conditions?: Conditions;
+  definition?: DefinitionMeta | null;
   onChip?: (action: NextStepAction) => void;
+  agencyId: number | null;
   t: TFunction;
   children: ReactNode;
 }) {
@@ -176,6 +219,7 @@ function EvidenceCard({
   const window_ = formatWindow(args ?? null, t);
   const count = resultRowCount(result);
   const chips = buildNextStepChips({ tool, args: args ?? null, conditions: conditions ?? null, resultKind: result.kind, t });
+  const home = agencyId != null ? cardHome(agencyId, tool, args, conditions) : null;
   const cardRef = useRef<HTMLDivElement | null>(null);
 
   function handleChip(action: NextStepAction) {
@@ -249,6 +293,12 @@ function EvidenceCard({
         </div>
       )}
 
+      {home && (
+        <Link className="ask-evidence-home" to={home.href} style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "var(--accent-strong)" }}>
+          {home.screen === "time" ? t("ask.evidence.open_daily_trend") : t("ask.evidence.open_home", { screen: t(`nav.${home.screen}`) })}
+        </Link>
+      )}
+
       <details className="ask-evidence-disclosure" style={{ marginTop: 10, fontSize: 12, color: "var(--text-tertiary)" }}>
         <summary style={{ cursor: "pointer" }}>{t("ask.evidence.disclosure_title")}</summary>
         <dl style={{ margin: "6px 0 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px" }}>
@@ -270,6 +320,12 @@ function EvidenceCard({
           <dd>{t(path === "sql" ? "ask.evidence.confidence.sql" : "ask.evidence.confidence.llm")}</dd>
         </dl>
       </details>
+
+      {definition != null && (
+        <div style={{ marginTop: 10 }}>
+          <DefinitionMetaBlock definition={definition} />
+        </div>
+      )}
     </div>
   );
 }

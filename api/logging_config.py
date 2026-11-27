@@ -8,7 +8,10 @@ id (or '-') into every LogRecord so the format string can reference
 
 Idempotent: a second `configure()` call clears existing handlers
 before installing a fresh one, so test fixtures + app startup can
-both call it without duplicating output.
+both call it without duplicating output. `_RateLimitAddressFilter`
+strips the client address slowapi logs on a 429, so server logs
+never carry a client address. `configure()` always attaches the same
+module-level instance, which `addFilter` skips once it is present.
 """
 
 import logging
@@ -25,6 +28,26 @@ class _RequestIdFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = REQUEST_ID_CTX.get()
         return True
+
+
+class _RateLimitAddressFilter(logging.Filter):
+    """Strip the client address slowapi logs on every 429.
+
+    Server logs never carry a client address: rate limiting holds the address
+    only as an in-memory counter key, and never persists or logs it.
+    """
+
+    _SLOWAPI_FORMAT = "ratelimit %s (%s) exceeded at endpoint: %s"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.msg == self._SLOWAPI_FORMAT and isinstance(record.args, tuple) and len(record.args) == 3:
+            limit, _limit_key, scope = record.args
+            record.msg = "ratelimit %s exceeded at endpoint: %s"
+            record.args = (limit, scope)
+        return True
+
+
+_rate_limit_address_filter = _RateLimitAddressFilter()
 
 
 def configure(level: str | None = None) -> None:
@@ -46,3 +69,4 @@ def configure(level: str | None = None) -> None:
     handler.setFormatter(formatter)
     root.addHandler(handler)
     root.setLevel(resolved)
+    logging.getLogger("slowapi").addFilter(_rate_limit_address_filter)

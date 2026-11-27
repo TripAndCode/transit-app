@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -7,18 +7,31 @@ import * as hooks from "../api/hooks";
 import * as csv from "../components/analysis/csv";
 import { ReportsHomeTab } from "./ReportsHomeTab";
 import type { Agency, DefinitionMeta, RankingRow, ReportResponse, TrendDay } from "../api/types";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 const DEFINITION: DefinitionMeta = {
   preset: null,
   early_tolerance_sec: null,
   late_tolerance_sec: null,
+  early_departure_sec: null,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0", source: "aggregates",
+  built_at: null,
+  value_basis: "feed_prediction",
+  timetable_versions: null,
+  source_mix: null,
 };
 
 function agencies(): Agency[] {
-  return [{ agency_id: 1, agency_name: "Hiroden", feed_url: "x", static_url: null, latest_data_date: "2026-04-07" }];
+  return [{ agency_id: 1, agency_name: "Hiroden", feed_url: "x", static_url: null, latest_data_date: "2026-04-07", capability_tier: "full" }];
 }
 
 function trendResponse(days: TrendDay[] = []): ReportResponse {
@@ -54,11 +67,15 @@ describe("ReportsHomeTab", () => {
     vi.restoreAllMocks();
   });
 
-  it("states its scope as a sentence, greying what the trend did not use", () => {
-    mockReports({ ...trendResponse(), scope_applied: { from: true, to: true, time_band: false } } as ReportResponse, rankingResponse());
+  it("hides the scope conditions the trend did not use", () => {
+    mockReports(
+      { ...trendResponse(), scope_applied: { from: true, to: true, time_band: false, hour: false } } as ReportResponse,
+      rankingResponse(),
+    );
     renderTab("/agencies/1/reports?time_band=morning");
-    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
+    const bar = within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar.queryByRole("button", { name: /^Time/ })).toBeNull();
+    expect(bar.getByRole("button", { name: /^Period/ })).toBeInTheDocument();
   });
 
   it("writes its period the way the rest of the page writes dates", () => {
@@ -92,9 +109,12 @@ describe("ReportsHomeTab", () => {
     );
     renderTab("/agencies/1/reports?service=平日");
     expect(screen.getAllByRole("link", { name: "Open analysis →" })).toHaveLength(2);
-    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
     expect(screen.queryByRole("cell", { name: "Weekday" })).toBeNull();
+    // The observation count is a statistic, shown on request.
+    expect(screen.queryByRole("cell", { name: "12,345" })).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
+    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
   });
 
   it("shows how the figures are made as its own disclosure, not nested in another", () => {
@@ -109,6 +129,8 @@ describe("ReportsHomeTab", () => {
     mockReports(trendResponse([]), rankingResponse([]));
     renderTab();
     expect(screen.getAllByText("No observations match these filters")).toHaveLength(2);
+    // No table, so nothing for the statistics toggle to change.
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
   });
 
   it("shows the saved-analyses view and its local-only note from the doc param", () => {
@@ -119,13 +141,13 @@ describe("ReportsHomeTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("tells saved analyses in this browser apart from saved views kept with an account", () => {
+  it("tells saved analyses apart from saved views, both browser-local", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab("/agencies/1/reports?doc=saved");
     expect(
       screen.getByText(
         "These are saved analyses, kept in this browser by “Save analysis” on a route's page. Saved views are different: " +
-          "while signed in, “Saved views ▾” at the top of a screen keeps them with your account, and opens them on any device.",
+          "“Saved views ▾” at the top of a screen saves them in this browser too.",
       ),
     ).toBeInTheDocument();
   });
@@ -165,6 +187,28 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByRole("link", { name: "Every route on the Routes table →" })).toHaveAttribute(
       "href",
       expect.stringMatching(/^\/agencies\/1\/routes/),
+    );
+  });
+
+  it("links its list to the Routes table over the same period and filters, sorted as the list is", () => {
+    mockReports(trendResponse(), { ...rankingResponse([["101", null, 2, 1, 3, 400] as unknown as RankingRow]), rows_total: 1 });
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101");
+    // One route in scope still opens the table, not that route's page.
+    expect(screen.getByRole("link", { name: "Every route on the Routes table →" })).toHaveAttribute(
+      "href",
+      "/agencies/1/routes?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101&sort=avg",
+    );
+  });
+
+  it("links its chart to Time's trend over the same period and filters", () => {
+    mockReports(
+      trendResponse([{ date: "2026-06-03", avg_min: 2, samples: 10, top_offenders: [] }]),
+      rankingResponse([["101", null, 2, 1, 3, 400] as unknown as RankingRow]),
+    );
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101");
+    expect(screen.getByRole("link", { name: "The trend by day and hour on Time →" })).toHaveAttribute(
+      "href",
+      "/agencies/1/time?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101&report=trend",
     );
   });
 
@@ -216,14 +260,17 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByText("Routes observed fewer than 100 times in the period are left out.")).toBeInTheDocument();
   });
 
-  it("opens a ranking row in its route's dossier and the detailed reports on Time", () => {
-    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as RankingRow]));
+  it("opens a ranking row in its route's dossier and the trend on Time", () => {
+    mockReports(
+      trendResponse([{ date: "2026-06-03", avg_min: 2, samples: 10, top_offenders: [] }]),
+      rankingResponse([["101", "平日", 2, 1, 3, 4] as RankingRow]),
+    );
     renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07&service=平日");
     const open = new URL(screen.getByRole("link", { name: "Open analysis →" }).getAttribute("href")!, "http://x");
     expect(open.pathname).toBe("/agencies/1/routes/101");
     expect(open.searchParams.has("routes")).toBe(false);
     expect(open.searchParams.get("service")).toBe("平日");
-    const detailed = new URL(screen.getByRole("link", { name: "Detailed reports →" }).getAttribute("href")!, "http://x");
+    const detailed = new URL(screen.getByRole("link", { name: "The trend by day and hour on Time →" }).getAttribute("href")!, "http://x");
     expect(detailed.pathname).toBe("/agencies/1/time");
     expect(detailed.searchParams.get("report")).toBe("trend");
     expect(detailed.searchParams.get("from")).toBe("2026-06-01");
@@ -268,7 +315,7 @@ describe("ReportsHomeTab", () => {
 function renderRecoveryTab(path: string) {
   vi.spyOn(hooks, "useReport").mockReturnValue({ data: trendResponse(), isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useAgencies").mockReturnValue({
-    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
+    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01", capability_tier: "full" }],
     isPending: false,
   } as never);
   renderWithProviders(

@@ -33,9 +33,6 @@ TARGETS = [
     ("report.compare_ranking", "/api/{agency}/reports/compare_ranking"),
     ("report.dow_weekend", "/api/{agency}/reports/dow_weekend"),
     ("report.dow_weekday", "/api/{agency}/reports/dow_weekday"),
-    ("dashboard.heatmap", "/api/{agency}/ask/dashboard/heatmap"),
-    ("dashboard.anomalies", "/api/{agency}/ask/dashboard/anomalies"),
-    ("dashboard.movers", "/api/{agency}/ask/dashboard/movers"),
 ]
 
 

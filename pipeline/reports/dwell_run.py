@@ -38,7 +38,7 @@ _NO_PAIRED_SAMPLES = {"unavailable_reason": "no_paired_samples"}
 
 
 @perf.timed("reports.dwell_run")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_dwell_run_decomposition(agency_id: int, ctx: RangeCtx, conn) -> dict:
     """Per-route dwell/running-time distribution summary over ``ctx``'s range.
 

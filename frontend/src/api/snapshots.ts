@@ -1,0 +1,140 @@
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { apiGet, apiPost } from "./client";
+import { useLocalizedQuery } from "./hooks";
+import type {
+  CapabilityTier,
+  HeadwayQualityResponse,
+  OverviewConcentration,
+  PerformanceStandardsResponse,
+  ReportFigures,
+  ReportResponse,
+  Route,
+  RouteShapeResponse,
+} from "./types";
+import type { Locale } from "../i18n";
+
+/** The screens a snapshot can be taken of (api/routers/snapshots.py). */
+export type SnapshotScreen = "council_report" | "route_table" | "route_page";
+
+/** The agency's route lists a route's page reads its standing from, at the
+ *  length the live page asks for, without their prose. */
+export type RouteListsPayload = {
+  ranking: ReportFigures;
+  on_time: ReportFigures;
+  worst_5min: ReportFigures;
+};
+
+/** One language's responses a route's page reads for the route itself: its
+ *  performance targets and its delay by stop (`geometry` is never kept:
+ *  only the map draws it). */
+export type RoutePagePayload = {
+  standards: PerformanceStandardsResponse;
+  shape: RouteShapeResponse;
+};
+
+/** A frozen snapshot as anyone holding its id reads it: what the screen's own
+ *  endpoints served when it was taken. `report` is that endpoint's response
+ *  in each language, since the server writes the council report's prose;
+ *  `routes` is the agency's route catalogue the labels are drawn from;
+ *  `credit` is the open-data credit, null where no source covers the feed. */
+export type Snapshot = {
+  snapshot_id: string;
+  created_at: string;
+  /** A screen this build may not render yet. */
+  screen: SnapshotScreen | (string & {});
+  agency_id: number;
+  agency_name: string;
+  params: Record<string, unknown>;
+  payloads: {
+    report?: Partial<Record<Locale, ReportResponse>>;
+    /** A route's page, in place of `report`: the route's own responses per
+     *  language, and the agency's lists and lateness by route, written in no
+     *  language and so stored once. */
+    route_page?: Partial<Record<Locale, RoutePagePayload>>;
+    route_lists?: RouteListsPayload;
+    /** A Routes table's side panels, which the screen asks for beside its
+     *  table: headway quality once (written in no language, stored only
+     *  under the on-time sort, where the screen shows it) and the agency's
+     *  performance standards per language. A snapshot taken before they were
+     *  stored has neither. */
+    headway?: HeadwayQualityResponse;
+    standards?: Partial<Record<Locale, PerformanceStandardsResponse>>;
+    concentration?: OverviewConcentration;
+    routes?: Route[];
+    credit?: Partial<Record<Locale, string | null>>;
+  };
+  method_version: string;
+  title: string | null;
+  note: string | null;
+  /** The agency's capability tier as it stands when read, never stored;
+   *  null for an agency no longer on record. */
+  capability_tier: CapabilityTier | null;
+};
+
+type SnapshotCreated = {
+  snapshot_id: string;
+  /** The page that renders it, on the SPA's origin. */
+  path: string;
+  created_at: string;
+  screen: string;
+  agency_id: number;
+  method_version: string;
+};
+
+/** What a screen asks a snapshot of: itself, for its agency, with the query
+ *  string it asks its data with (a report screen's `reportQueryString`; a
+ *  route's page, its scope and its variant as `shape`), so the server
+ *  computes exactly what the screen shows. */
+export type SnapshotSpec = { screen: SnapshotScreen; agencyId: number; query: string };
+
+/** Admin only: the server computes and stores the screen's figures and
+ *  answers with the snapshot's id and page. */
+export function createSnapshot(
+  { screen, agencyId, query }: SnapshotSpec,
+  opts?: { signal?: AbortSignal },
+): Promise<SnapshotCreated> {
+  return apiPost<SnapshotCreated>(
+    "/api/admin/snapshots",
+    { screen, agency_id: agencyId, query: Object.fromEntries(new URLSearchParams(query)) },
+    opts,
+  );
+}
+
+export function fetchSnapshot(snapshotId: string, opts?: { signal?: AbortSignal }): Promise<Snapshot> {
+  return apiGet<Snapshot>(`/api/snapshots/${encodeURIComponent(snapshotId)}`, opts);
+}
+
+/** One snapshot by its id. It never changes, so it is read once. */
+export function useSnapshot(snapshotId: string): UseQueryResult<Snapshot> {
+  return useQuery({
+    queryKey: ["snapshot", snapshotId],
+    queryFn: ({ signal }) => fetchSnapshot(snapshotId, { signal }),
+    staleTime: Infinity,
+  });
+}
+
+/** Today's figures for a snapshot's stored query
+ *  (`GET /api/snapshots/{id}/today`): the screen endpoint's response as it
+ *  would serve that query now, or null beside why there is none. */
+export type SnapshotToday = {
+  report: ReportResponse | null;
+  unavailable: "agency_removed" | "not_computable" | null;
+};
+
+// How long one computation of today's figures is reused, since each ask is a
+// rate-limited compute. Figures read from the aggregates move only when those
+// are rebuilt; a scope the aggregates cannot serve (a time band, a tolerance
+// past the delay histogram) is scanned live and can move within this window.
+const TODAY_STALE_MS = 5 * 60_000;
+
+/** Today's figures for the snapshot, asked only while `enabled`: each ask
+ *  runs a report computation on a public, rate-limited path. Keyed on the UI
+ *  language, as the server writes the council prose in it. */
+export function useSnapshotToday(snapshotId: string, enabled: boolean): UseQueryResult<SnapshotToday> {
+  return useLocalizedQuery({
+    queryKey: ["snapshot-today", snapshotId],
+    queryFn: ({ signal }) => apiGet<SnapshotToday>(`/api/snapshots/${encodeURIComponent(snapshotId)}/today`, { signal }),
+    enabled,
+    staleTime: TODAY_STALE_MS,
+  });
+}

@@ -1,45 +1,140 @@
 :root {
+  /* Primitive palette: raw colour values named by hue family and lightness
+     step, never by where they are used. Within this stylesheet, a future
+     reskin edits this block only; every semantic token below -- on this
+     bare :root and on each scoped theme block -- names a primitive through
+     var(--p-...) instead of carrying its own literal. tokens.ts's
+     hand-mirrored fallbacks (see its NOTE) need a matching edit too, since
+     there's no build-time link between the two. Primitives are declared
+     once, here: a theme block only ever points an existing semantic name at
+     a different primitive, it never declares a --p-* of its own. Alpha
+     tones (scrims, shadows, glass) are primitives too, suffixed with their
+     alpha as hundredths (-a04 is 4%). They are their own primitives,
+     deliberately not derived from the solid tone they share an RGB base
+     with: a color-mix() computation would change how getComputedStyle
+     serialises the value. */
+  --p-slate-25: #F6F7FB;
+  --p-slate-100: #EEF1F5;
+  --p-slate-125: #EDF0F7;
+  --p-slate-150: #E6ECF4;
+  --p-slate-250: #E5E9EF;
+  --p-slate-275: #E4E7EC;
+  --p-slate-325: #D6DDE6;
+  --p-slate-375: #AAB6C7;
+  --p-slate-425: #94A3B8;
+  --p-slate-475: #95A1B3;
+  --p-slate-500: #5E6982;
+  --p-slate-550: #4A5670;
+  --p-slate-575: #475569;
+  --p-slate-650: #283444;
+  --p-slate-700: #1F2A37;
+  --p-slate-750: #1A2431;
+  --p-slate-775: #14213D;
+  --p-slate-800: #18212D;
+  --p-slate-900: #131B26;
+  --p-slate-950: #0C1219;
+  --p-blue-25: #E6EBFF;
+  --p-blue-200: #BCCBFF;
+  --p-blue-375: #86A2FF;
+  --p-blue-450: #3355E0;
+  --p-blue-600: #2238A8;
+  --p-blue-850: #1C2847;
+  --p-indigo-50: #7E8CD0;
+  --p-indigo-250: #5B6CAD;
+  --p-indigo-425: #30385A;
+  --p-indigo-625: #202642;
+  --p-indigo-800: #0F1119;
+  --p-teal-50: #D7EDE7;
+  --p-teal-275: #A6D5C7;
+  --p-teal-525: #2C6758;
+  --p-teal-750: #1E3934;
+  --p-green-50: #4ADE80;
+  --p-green-250: #31B483;
+  --p-green-425: #2EA87A;
+  --p-green-625: #207454;
+  --p-green-800: #166534;
+  --p-amber-50: #FDF6E3;
+  --p-amber-150: #F0CD7A;
+  --p-amber-250: #E0B45C;
+  --p-amber-375: #FBBF24;
+  --p-amber-475: #C99A2E;
+  --p-amber-575: #8C7331;
+  --p-amber-675: #8A6F1C;
+  --p-amber-775: #81631D;
+  --p-amber-900: #2A1F14;
+  --p-clay-50: #E08A61;
+  --p-clay-175: #E39556;
+  --p-clay-325: #E08A54;
+  --p-clay-450: #C4501F;
+  --p-clay-600: #A45E2E;
+  --p-clay-725: #A74D21;
+  --p-clay-850: #B45309;
+  --p-rust-50: #F0837A;
+  --p-rust-200: #E0685B;
+  --p-rust-375: #BC523A;
+  --p-rust-525: #B84F3A;
+  --p-rust-675: #C0392B;
+  --p-rust-850: #A8391F;
+  --p-graphite-50: #FFFFFF;
+  --p-graphite-275: #F5F5F5;
+  --p-graphite-525: #ECECEC;
+  --p-graphite-750: #2A2A2A;
+  --p-ink-900-a04: rgba(17, 24, 39, 0.04);
+  --p-ink-900-a05: rgba(17, 24, 39, 0.05);
+  --p-ink-900-a10: rgba(17, 24, 39, 0.10);
+  --p-ink-900-a18: rgba(17, 24, 39, 0.18);
+  --p-ink-950-a32: rgba(15, 17, 25, 0.32);
+  --p-white-a04: rgba(255, 255, 255, 0.04);
+  --p-white-a06: rgba(255, 255, 255, 0.06);
+  --p-white-a08: rgba(255, 255, 255, 0.08);
+  --p-white-a16: rgba(255, 255, 255, 0.16);
+  --p-black-a03: rgba(0, 0, 0, 0.03);
+  --p-black-a04: rgba(0, 0, 0, 0.04);
+  --p-black-a40: rgba(0, 0, 0, 0.40);
+  --p-black-a55: rgba(0, 0, 0, 0.55);
+  --p-black-a60: rgba(0, 0, 0, 0.60);
+
   /* Cool paper and ink, like transport signage: the ground is a pale blue-grey
      rather than a warm cream, and every text level clears WCAG AA (4.5:1) on
      --bg-surface, --bg-soft and --bg-page (asserted in tokens.test.ts). */
-  --bg-page: #F1F4F7;
-  --bg-surface: #FFFFFF;
-  --bg-soft: #E8ECF1;
-  --border-soft: #E5E9EF;
-  --border-subtle: #D6DDE6;
-  --text-primary: #0F1A2A;
-  --text-secondary: #435166;
-  --text-tertiary: #5B687D;
+  --bg-page: var(--p-slate-25);
+  --bg-surface: var(--p-graphite-50);
+  --bg-soft: var(--p-slate-125);
+  --border-soft: var(--p-slate-250);
+  --border-subtle: var(--p-slate-325);
+  --text-primary: var(--p-slate-775);
+  --text-secondary: var(--p-slate-550);
+  --text-tertiary: var(--p-slate-500);
   /* One accent for the whole product, light and dark: signage blue, for
      interaction and selection only -- never for delay magnitude, which has
      its own ramp (--d0..--d4). Any scoped redefinition of --accent would
      fork the identity and is asserted against in tokens.test.ts. */
-  --accent: #2750C2;
-  --accent-soft: #E2E9FA;
-  --on-accent: #FFFFFF;
+  --accent: var(--p-blue-450);
+  --accent-soft: var(--p-blue-25);
+  --on-accent: var(--p-graphite-50);
   /* Delay magnitude, calm to heavy: < 1.5, < 2.5, < 3.5, < 5 and >= 5
-     minutes. Magnitude, never alarm: rust is reserved for the last step.
-     --none fills a cell with no observations. */
-  --d0: #D7EDE7;
-  --d1: #A6D5C7;
-  --d2: #F0CD7A;
-  --d3: #E39556;
-  --d4: #BC523A;
-  --none: #EEF1F5;
+     minutes. Magnitude, never alarm: rust is reserved for this ramp's last
+     step. --none fills a cell with no observations. */
+  --d0: var(--p-teal-50);
+  --d1: var(--p-teal-275);
+  --d2: var(--p-amber-150);
+  --d3: var(--p-clay-175);
+  --d4: var(--p-rust-375);
+  --none: var(--p-slate-100);
   /* A separate identity from the accent, not a second accent: it marks a
      route (the operations route badge) and the pre-auth wordmark, and nothing
      else. --on-brand is theme-split because the dark brand is
      light enough that white text on it falls below AA. */
-  --brand: #5b6cad;
-  --on-brand: #ffffff;
+  --brand: var(--p-indigo-250);
+  --on-brand: var(--p-graphite-50);
   /* Own token (aliasing --accent) rather than a hardcoded var(--accent)
      reference in every :focus-visible rule, so a future focus-ring color
      can diverge from the accent color in one place. Tracks --accent
      automatically in both themes, including the .app-shell/dark overrides
      below, with no separate dark-block entry needed. */
   --focus-ring: var(--accent);
-  --error-bg: #fdf6e3;
-  --error-fg: #8a6f1c;
+  --error-bg: var(--p-amber-50);
+  --error-fg: var(--p-amber-675);
   /* Derived from --bg-surface (not a hand-copied literal per theme) so it
      can't drift out of sync if --bg-surface is ever retuned — see the
      --surface-1/--surface-2 note below for the exact failure mode this
@@ -65,27 +160,27 @@
      gap as --surface-1/--surface-2 above. Same value in both themes; passes
      contrast comfortably on dark, matches the pre-existing (marginal) look
      on light — not changing the light-mode value here, out of scope. */
-  --color-warning: #C99A2E;
+  --color-warning: var(--p-amber-475);
   /* Text-safe counterpart to --color-warning: the plain value is 2.3-2.6:1 as
      text against --bg-surface/--bg-soft, well under WCAG AA. Darkened along
      the same amber hue rather than desaturating to grey. Dark theme reuses
      --color-warning itself -- see the dark declaration. */
-  --color-warning-text: #81631D;
+  --color-warning-text: var(--p-amber-775);
   /* Reserved for destructive-action buttons only (delete/remove controls) --
      an alarm red the calm-UI rule otherwise rules out. Any other severity
      signal (a stale feed, an error message, a danger-zone heading) uses
      --delay-severe instead, which is per-theme and AA-passing as text. */
-  --color-danger: #c0392b;
+  --color-danger: var(--p-rust-675);
   /* Deepened variant of --accent for primary buttons/active states -- more
      confident at button weight than --accent reads on its own. Same hue
      family as --accent by contract (tokens.test.ts): a different family here
      would give the app two accents again, one per weight. Clears 4.5:1 as
      text on both --bg-surface and --bg-soft. */
-  --accent-strong: #1A378C;
+  --accent-strong: var(--p-blue-600);
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
      distinct from --delay-severe, which stays the map's own per-point
      severity ramp; this is specifically for aggregate counts. */
-  --delay-flag: #C4501F;
+  --delay-flag: var(--p-clay-450);
   /* Fallback first for engines without color-mix() support (same reasoning as
      --map-badge-bg above); the mix itself tracks --delay-flag automatically
      in both themes, so it needs no separate dark-block entry. */
@@ -96,14 +191,19 @@
      --delay-severe below has with SEVERE_FALLBACK. Unlike --delay-severe this
      tier never carries text on top of it, so it needs no per-theme AA split:
      same value in both themes. */
-  --delay-ok: #2EA87A;
-  --card-border: #E4E7EC;
+  --delay-ok: var(--p-green-425);
+  --card-border: var(--p-slate-275);
   --card-radius: var(--radius-lg);
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
      text, in both light and dark mode) — NOT derived from --text-primary,
      which flips light-to-dark and would otherwise break tooltip contrast. */
-  --tooltip-bg: #2a2a2a;
-  --tooltip-fg: #ffffff;
+  --tooltip-bg: var(--p-graphite-750);
+  --tooltip-fg: var(--p-graphite-50);
+  /* .glint's sheen mixes toward this, always the white primitive and never
+     --bg-surface: the dark theme's surface is near-black, and mixing a
+     bright line toward it would darken the sheen instead of lightening it.
+     Theme-invariant by design, so no dark-block entry. */
+  --glint-tint: var(--p-graphite-50);
   /* Floating map chrome (filter dock, legend, basemap switcher, fit-all
      button): a translucent, blurred fill so the control reads as sitting on
      the map rather than punched through it, on any basemap including dark
@@ -127,40 +227,48 @@
      and JS consumers (MapLibre style expressions) resolve the same source
      of truth; its SEVERE_FALLBACK mirrors this light value by hand and is
      held to it by the same test. */
-  --delay-severe: #A8391F;
+  --delay-severe: var(--p-rust-850);
   /* Text-safe counterpart to the ok/mild/moderate delay-ramp fills
      (tokens.ts's DELAY_RAMP), which are 2.6-3.8:1 as text against
      --bg-surface -- under WCAG AA. Darkened along each fill's own hue rather
      than desaturating to grey. The severe tier needs no text variant: it is
      already per-theme and AA-passing (--delay-severe above). Each theme's
      values are tuned per tier to clear AA on every surface they land on. */
-  --delay-text-ok: #207454;
-  --delay-text-mild: #81631D;
-  --delay-text-moderate: #A74D21;
+  --delay-text-ok: var(--p-green-625);
+  --delay-text-mild: var(--p-amber-775);
+  --delay-text-moderate: var(--p-clay-725);
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
-     ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
-     (fills/strokes) plus overview.css's pareto/peak/service-split hover and
-     fill rules; track-bg is a background fill for bar/rail tracks (pareto,
-     service-split); hover-tint is a bare (non-brand) hover feedback tint;
+     ConcentrationBar and InlineSparkline (fills/strokes) plus overview.css's
+     pareto hover and fill rules; track-bg is a background fill for bar/rail
+     tracks (pareto); hover-tint is a bare (non-brand) hover feedback tint;
      skeleton-* feed .skeleton's shimmer gradient. All theme-aware — light
      values below match the pre-existing hardcoded overview.css hex exactly;
      dark values are lifted to pass contrast / stay visible on the dark
      surfaces. */
-  --trend-good: #166534;
-  --trend-bad: #b45309;
-  --trend-neutral: #475569;
-  --track-bg: rgba(0, 0, 0, 0.03);
-  --hover-tint: rgba(0, 0, 0, 0.04);
-  --skeleton-a: #ececec;
-  --skeleton-b: #f5f5f5;
+  --trend-good: var(--p-green-800);
+  --trend-bad: var(--p-clay-850);
+  --trend-neutral: var(--p-slate-575);
+  --track-bg: var(--p-black-a03);
+  --hover-tint: var(--p-black-a04);
+  --skeleton-a: var(--p-graphite-525);
+  --skeleton-b: var(--p-graphite-275);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --radius: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  /* Shared control sizing for the button family (and future segmented
+     controls/chips): a bare control is --control-h tall with
+     --control-radius corners, a compact one (e.g. an in-card CSV action)
+     is --control-h-sm with --control-radius-sm corners. BP.sm below raises
+     both heights so a phone's tap targets stay comfortable. */
+  --control-h: 40px;
+  --control-h-sm: 32px;
+  --control-radius: var(--radius-lg);
+  --control-radius-sm: var(--radius);
   /* Motion scale. --dur-1 is UI feedback (hover, focus, colour), --dur-2 a
      panel or menu opening, --dur-3 a chart or bar drawing itself in, --dur-4
      an ambient loop (skeleton pulse). --ease-out decelerates hard for things
@@ -173,7 +281,12 @@
   --dur-4: 1200ms;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  /* A control that springs toward its pressed/released state (the button
+     family's active-state scale), rather than decelerating into rest. */
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
   --transition: var(--dur-1) var(--ease-out);
+  /* Shared by .lift and any host that composes it; see .lift below. */
+  --lift-transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
   /* Elevation scale: el-1 a resting card, el-2 something floating over the
      page (menu, popover, tooltip, hover lift), el-3 a modal or full overlay.
      On light surfaces depth reads as a soft drop shadow; the dark theme
@@ -182,16 +295,9 @@
      come from the edge instead. Every tier carries the hairline ring, in both
      themes: a surface that swaps tiers on hover would otherwise lose its own
      edge at the moment it gains depth. */
-  --el-1: 0 1px 3px rgba(17, 24, 39, 0.05), 0 0 0 1px rgba(17, 24, 39, 0.04);
-  --el-2: 0 4px 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
-  --el-3: 0 24px 60px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04);
-  /* Leftward counterpart of --el-2, for a panel anchored to the right edge
-     (a drawer) whose shadow has to cast onto the page it covers rather than
-     downward -- the scale above is downward-only, so an edge-anchored panel
-     can't reuse it without losing the direction that separates it from the
-     content it covers. Same weight and opacity as --el-2, offset to the left
-     instead of down. */
-  --el-left: -4px 0 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  --el-1: 0 1px 3px var(--p-ink-900-a05), 0 0 0 1px var(--p-ink-900-a04);
+  --el-2: 0 4px 16px var(--p-ink-900-a10), 0 0 0 1px var(--p-ink-900-a04);
+  --el-3: 0 24px 60px var(--p-ink-900-a18), 0 0 0 1px var(--p-ink-900-a04);
   /* Type scale. --text-xs (12px) is the floor for any DOM text: below it CJK
      glyphs lose stroke separation and Japanese labels stop being readable.
      SVG chart tick labels are the one exception and set their size as an
@@ -208,7 +314,7 @@
      the theme, not of whichever overlay happens to be open: two overlays
      picking their own literal drift apart the moment either theme is
      retuned, and they are routinely seen one over the other. */
-  --scrim: rgba(15, 17, 25, 0.32);
+  --scrim: var(--p-ink-950-a32);
   /* Stacking-order ladder -- mirrors src/styles/zIndex.ts's Z_INDEX exactly
      (zIndex.test.ts enforces it) for CSS files that can't import the TS
      constant. Keep both in sync: add/change a rung in Z_INDEX first, then
@@ -236,9 +342,9 @@
   --font-display: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
   --font-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
                system-ui, sans-serif;
-  /* The numeral face (see .num). Condensed so a column of minutes stays
-     narrow; Japanese in the same run falls back to the body face. */
-  --font-num: "Barlow Semi Condensed", "BIZ UDPGothic", system-ui, sans-serif;
+  /* The numeral face (see .num). Tight letter-spacing keeps a column of
+     minutes narrow; Japanese in the same run falls back to the body face. */
+  --font-num: "Inter Tight", "BIZ UDPGothic", system-ui, sans-serif;
   /* Identifiers that are read character by character — a user id, a route
      code, a hash, a clock time — where proportional digits and an ambiguous
      1/l/I cost the reader a second look. Not for anything with prose in it. */
@@ -251,57 +357,57 @@
 }
 
 :root[data-theme="dark"] {
-  --bg-page: #0C1219;
-  --bg-surface: #131B26;
-  --bg-soft: #1A2431;
-  --border-soft: #1F2A37;
-  --border-subtle: #283444;
-  --text-primary: #E6ECF4;
-  --text-secondary: #AAB6C7;
-  --text-tertiary: #95A1B3;
+  --bg-page: var(--p-slate-950);
+  --bg-surface: var(--p-slate-900);
+  --bg-soft: var(--p-slate-750);
+  --border-soft: var(--p-slate-700);
+  --border-subtle: var(--p-slate-650);
+  --text-primary: var(--p-slate-150);
+  --text-secondary: var(--p-slate-375);
+  --text-tertiary: var(--p-slate-475);
   /* Dark counterpart of the single signage-blue accent. */
-  --accent: #86A2FF;
-  --accent-soft: #1C2847;
-  --on-accent: #0C1219;
-  --d0: #1E3934;
-  --d1: #2C6758;
-  --d2: #8C7331;
-  --d3: #A45E2E;
-  --d4: #B84F3A;
-  --none: #18212D;
-  --brand: #7E8CD0;
+  --accent: var(--p-blue-375);
+  --accent-soft: var(--p-blue-850);
+  --on-accent: var(--p-slate-950);
+  --d0: var(--p-teal-750);
+  --d1: var(--p-teal-525);
+  --d2: var(--p-amber-575);
+  --d3: var(--p-clay-600);
+  --d4: var(--p-rust-525);
+  --none: var(--p-slate-800);
+  --brand: var(--p-indigo-50);
   /* Dark ink, not white: the dark brand is light enough that white on it
      lands around 3.2:1. */
-  --on-brand: #0F1119;
-  --error-bg: #2A1F14;
-  --error-fg: #E0B45C;
-  --color-danger: #E0685B;
+  --on-brand: var(--p-indigo-800);
+  --error-bg: var(--p-amber-900);
+  --error-fg: var(--p-amber-250);
+  --color-danger: var(--p-rust-200);
   /* Dark-theme severe tone. Same warm family as the light value, lifted until
      it clears 4.5:1 on this theme's --bg-surface — see the invariant on the
      light declaration. */
-  --delay-severe: #F0837A;
+  --delay-severe: var(--p-rust-50);
   /* Tuned per tier to clear 4.5:1 on this theme's page, --accent-soft and
      current-row surfaces; only mild coincides with its ramp fill. */
-  --delay-text-ok: #31B483;
-  --delay-text-mild: #C99A2E;
-  --delay-text-moderate: #E08A61;
+  --delay-text-ok: var(--p-green-250);
+  --delay-text-mild: var(--p-amber-475);
+  --delay-text-moderate: var(--p-clay-50);
   /* --color-warning itself already clears 4.5:1 on this theme's surfaces —
      see the light declaration for why light needs a separate darkened value. */
-  --color-warning-text: #C99A2E;
-  --trend-good: #4ade80;
-  --trend-bad: #fbbf24;
-  --trend-neutral: #94a3b8;
-  --track-bg: rgba(255, 255, 255, 0.08);
-  --hover-tint: rgba(255, 255, 255, 0.08);
-  --skeleton-a: #202642;
-  --skeleton-b: #30385A;
+  --color-warning-text: var(--color-warning);
+  --trend-good: var(--p-green-50);
+  --trend-bad: var(--p-amber-375);
+  --trend-neutral: var(--p-slate-425);
+  --track-bg: var(--p-white-a08);
+  --hover-tint: var(--p-white-a08);
+  --skeleton-a: var(--p-indigo-625);
+  --skeleton-b: var(--p-indigo-425);
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change.
      Stays in --accent's hue family; see the light declaration. */
-  --accent-strong: #BCCBFF;
+  --accent-strong: var(--p-blue-200);
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change. */
-  --delay-flag: #E08A54;
+  --delay-flag: var(--p-clay-325);
   /* Border, not text -- reuses the existing dark --border-subtle value
      rather than introducing a third near-identical border hue. */
   --card-border: var(--border-subtle);
@@ -309,26 +415,26 @@
      tier carries a hairline ring and a top inset highlight to draw its own
      edge; only the floating tiers add a drop, and el-3 makes it deep enough
      to darken the page visibly behind a modal. */
-  --el-1: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --el-2: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
-          0 8px 24px rgba(0, 0, 0, 0.40);
-  --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
-          0 24px 60px rgba(0, 0, 0, 0.60);
-  /* Same hairline ring and top inset highlight as el-2 above -- depth on a
-     near-black page still has to come from the edge, not the shadow -- with
-     the drop cast to the left instead of down. */
-  --el-left: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
-             -8px 0 24px rgba(0, 0, 0, 0.40);
+  /* The invisible third layer (zero offset/blur/spread, hidden behind the
+     box) gives --el-1 the same layer count and inset-ness per position as
+     --el-2/--el-3 below: a box-shadow transition (.lift) can't interpolate
+     between lists of different shape, so a card resting at --el-1 and
+     rising to --el-2 on hover would otherwise snap instead of ease. */
+  --el-1: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06), 0 0 0 var(--p-black-a40);
+  --el-2: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
+          0 8px 24px var(--p-black-a40);
+  --el-3: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
+          0 24px 60px var(--p-black-a60);
   /* More translucent than the light value: a near-black --bg-surface mixed
      at the same 82% reads as a near-opaque card rather than glass, which
      defeats the point over a bright basemap (aerial photo, GSI std). The
-     hairline needs its own lighter line for the same reason --card-border
-     (a light-grey literal) does not read on a dark surface. */
+     hairline needs its own lighter line for the same reason --card-border's
+     light-grey value does not read on a dark surface. */
   --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
-  --glass-line: rgba(255, 255, 255, 0.16);
+  --glass-line: var(--p-white-a16);
   /* Deeper than the light wash: on a near-black page a 32% ink wash barely
      separates the panel from what it covers. */
-  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim: var(--p-black-a55);
 }
 
 /* One global reduced-motion regime, so a stylesheet does not have to remember
@@ -365,8 +471,30 @@ input[type="date"] { color-scheme: light; }
    "simulation"): it qualifies what it sits beside without competing with it. */
 .caveat-badge { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 999px; background: var(--bg-soft); color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
 
-/* A one-line note under a report table. */
-.report-footnote { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); }
+/* How a figure compares with its own trailing reference ("better", "about the
+   same", "worse"): one neutral tone in every direction, since the words carry
+   the judgement and a reference is context, not an alarm. */
+.reference-chip { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 999px; color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+
+/* Today's value beside a snapshot's figure that has moved since: a soft
+   accent tint that marks the difference without reading as an alarm. */
+.figure-today { display: inline-block; padding: 1px 6px; border-radius: var(--radius); background: var(--accent-soft); color: var(--text-primary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+
+/* Whether a figure meets its performance target: calm in both directions,
+   the words carrying the verdict and the tone only reinforcing it. */
+.standard-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+.standard-chip--meets { background: var(--accent-soft); color: var(--accent-strong); }
+.standard-chip--below { background: var(--bg-soft); color: var(--color-warning-text); }
+/* Why a target has no verdict: a plain note, not a state to worry about. */
+.standard-unjudged { font-size: var(--text-xs); color: var(--text-tertiary); }
+/* The on-time definition a panel's targets were judged on. */
+.standard-definition { margin-top: 12px; }
+.standard-definition p { margin: 0 0 4px; max-width: 60ch; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
+
+/* A one-line note under a report table. It writes its links out, and a URL
+   is one unbroken word, so it wraps anywhere rather than overflow a narrow
+   screen or the page. */
+.report-footnote { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); overflow-wrap: anywhere; }
 
 /* The language switch on pages outside the app shell (login, legal). */
 .language-toggle__options { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; }
@@ -462,18 +590,28 @@ html, body, #root { height: 100%; margin: 0; }
   margin-top: 16px;
 }
 
-/* BP.sm: Sidebar's bottom tab bar becomes `position: fixed` at this
-   breakpoint (Sidebar.tsx's `MOBILE_TABBAR_HEIGHT_PX` -- keep this 56px in
-   sync with that constant) and no longer claims layout space as a flex
-   sibling, so the content column needs the same height reserved at its own
-   bottom edge or the tab bar sits on top of whatever the active tab last
+/* BP.sm, phone width. Sidebar's bottom tab bar becomes `position: fixed`
+   at this breakpoint (Sidebar.tsx's `MOBILE_TABBAR_HEIGHT_PX` -- keep this
+   56px in sync with that constant) and no longer claims layout space as a
+   flex sibling, so the content column needs the same height reserved at its
+   own bottom edge or the tab bar sits on top of whatever the active tab last
    renders instead of below it. */
 @media (max-width: 640px) {
+  /* Taller tap targets than the desktop control sizes. */
+  :root {
+    --control-h: 44px;
+    --control-h-sm: 36px;
+  }
+
   /* border-box, not the default content-box: main's height is a flex
      stretch value (its parent, .app-shell, is the 100dvh row), so an
      content-box padding would grow main taller than that stretch target
      instead of eating into it, pushing the whole shell past the viewport. */
   .app-main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+
+  /* A long comparison would otherwise hold its table cell or its figure's
+     grid column wider than a phone. */
+  .reference-chip { white-space: normal; max-width: 100%; }
 }
 
 body {
@@ -567,23 +705,103 @@ summary:focus-visible,
   stroke-width: 3;
   filter: drop-shadow(0 0 2px var(--focus-ring));
 }
-/* Shared secondary-button style (CSV downloads, share actions, etc.) --
-   an explicit visible border + accent text, so it never looks disabled
-   when the action is actually available (default browser button chrome
-   reads as flat/grey either way). */
-.btn-ghost {
-  background: var(--bg-surface);
-  color: var(--accent-strong);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  padding: 7px 13px;
-  font-size: 12px;
-  font-weight: 500;
+/* Shared button family: one base control (.btn) plus a visual variant
+   (primary/secondary/ghost/icon) and an optional .btn--sm size modifier for
+   compact in-card actions (CSV downloads, share actions). Also used on an
+   <a>/<Link> styled as a button, hence text-decoration: none in the base
+   rather than left to each caller. The muted disabled/aria-disabled rule is
+   declared last in this block so it wins ties against a variant's own
+   :hover at equal specificity. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-h);
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--control-radius);
+  font-size: var(--text-base);
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    background-color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
 }
-.btn-ghost:disabled {
-  color: var(--text-tertiary);
-  border-color: var(--border-subtle);
+.btn--primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--el-1);
+}
+.btn--primary:hover {
+  box-shadow: var(--el-2);
+  transform: translateY(-1px);
+}
+
+.btn--secondary {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--card-border), var(--el-1);
+}
+.btn--secondary:hover {
+  box-shadow: inset 0 0 0 1px var(--text-tertiary), var(--el-1);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--accent-strong);
+}
+.btn--ghost:hover {
+  background: var(--accent-soft);
+}
+
+.btn--icon {
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+}
+.btn--icon:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+.btn--icon.btn--sm {
+  width: var(--control-h-sm);
+  padding: 0;
+}
+
+.btn--sm {
+  height: var(--control-h-sm);
+  padding: 0 12px;
+  border-radius: var(--control-radius-sm);
+  font-size: var(--text-sm);
+}
+
+/* A toggle that is on (aria-pressed) reads as chosen whatever its variant;
+   after the variants so it outranks their :hover at equal specificity. */
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* After every variant's :hover: a press is also a hover, and the press must
+   win the transform. */
+.btn:active {
+  transform: scale(.96);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  transform: none;
   cursor: not-allowed;
+  background: var(--bg-soft);
+  color: var(--text-tertiary);
+  box-shadow: none;
 }
 
 /* The wrapper `Tooltip` (components/Tooltip.tsx) puts around its trigger. It
@@ -838,6 +1056,71 @@ summary::-webkit-details-marker { display: none; }
   }
 }
 
+/* ---------- Shared interactive motion primitives ----------
+   Reused across tabs, so a page composes "lively but calm" from one
+   definition rather than retuning distance/timing/shadow per screen. */
+
+/* An interactive card rises slightly with its shadow stepping up to the
+   floating tier (--el-2) on hover or keyboard focus; reduced motion
+   drops the transform, keeping only the instant shadow cue.
+   A host with its own `transition` outranks this rule on specificity and
+   drops transform/box-shadow from the transitioned set, so the lift
+   snaps instead of easing. Compose `var(--lift-transition)` there rather
+   than hand-copying .lift's timing, which would drift when the token
+   changes (see .ov-card.ov-clickable in overview.css). */
+.lift {
+  transition: var(--lift-transition);
+}
+.lift:hover, .lift:focus-visible {
+  transform: translateY(-4px);
+  box-shadow: var(--el-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lift:hover, .lift:focus-visible { transform: none; }
+}
+
+/* A light sheen that sweeps once across a sparkline/mini-chart's line on
+   mount -- never a loop, so it reads as a one-time "here's the trend" cue,
+   not an ambient distraction. Renders as a second, wider stroke mixed
+   toward --glint-tint, so it reads as a sheen passing over the line
+   rather than the line thickening. Delayed one --dur-4 -- the draw-on's
+   own duration (see .chart-draw-on above) -- so it starts once the line
+   has finished drawing in rather than racing ahead of ink that isn't
+   there yet. */
+.glint {
+  opacity: 0;
+  stroke-dashoffset: 14;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes glint-sweep {
+    from { stroke-dashoffset: 14; opacity: 0.45; }
+    60%  { opacity: 0.45; }
+    to   { stroke-dashoffset: -100; opacity: 0; }
+  }
+  .glint {
+    animation: glint-sweep var(--dur-4) var(--ease-out) var(--dur-4) 1 forwards;
+  }
+}
+
+/* A "live" indicator dot's calm, slow expanding ring -- the one primitive
+   here allowed to loop, since it marks an ongoing state rather than a
+   one-time event. Reads currentColor, so the host sets `color` to whatever
+   tone its own dot already uses for "live" rather than this primitive
+   picking one. Explicit `animation: none` under reduced motion rather than
+   relying on the page-wide blanket rule: a shared primitive gets copied
+   into contexts this file's author won't see, so the loop's exemption from
+   motion has to travel with the rule that creates it. */
+.live-dot {
+  animation: live-ring calc(var(--dur-4) * 2) var(--ease-in-out) infinite;
+}
+@keyframes live-ring {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 35%, transparent); }
+  50%      { box-shadow: 0 0 0 8px color-mix(in srgb, currentColor 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+}
+
 /* The daily chart's plot is a keyboard-operable range control: arrows move
    the read-out cursor, Shift+arrows extend the selection. */
 .chart-brush-surface:focus-visible {
@@ -913,6 +1196,19 @@ summary::-webkit-details-marker { display: none; }
   color: var(--accent);
 }
 
+/* The notices above the routed page (stale data, feed health): a calm
+   warning tint in either theme, never alarm red. */
+[data-shell-banner] {
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--bg-surface));
+  color: var(--color-warning-text);
+}
+
+.user-manual-content hr {
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  margin: 24px 0;
+}
+
 /* Print-only header and footer (components/PrintFrame): hidden on screen, shown
    by the print block below. */
 .print-frame { display: none; }
@@ -925,8 +1221,10 @@ summary::-webkit-details-marker { display: none; }
 @media print {
   body { background: white; }
   .app-shell { display: block !important; height: auto !important; }
-  .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
+  .app-shell > aside, nav, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
   main { overflow: visible !important; }
+  /* An admin's raw ids are working text, not part of the paper. */
+  .scope-id { display: none !important; }
   .focus-page { color: black; }
   .focus-page svg { break-inside: avoid; }
   /* A printed page cannot scroll, so a chart shrinks to it instead of
@@ -937,11 +1235,19 @@ summary::-webkit-details-marker { display: none; }
      header once at the top, the generated time pinned to every page's foot. */
   .print-frame { display: block !important; color: black; }
   .print-frame__header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #999; font-size: 11pt; }
-  .print-frame__footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 9pt; color: #444; text-align: right; }
+  .print-frame__footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 9pt; line-height: 1.3; color: #444; text-align: right; }
+  /* A screen's own line (printFootSlot.ts), above the generated time. Its
+     link is one long word, so it wraps anywhere rather than overflow. */
+  .print-frame__snapshot { display: block; overflow-wrap: anywhere; }
   /* The credit follows the content and stays whole on one page; its URLs are
      long unbroken words, so they wrap anywhere rather than overflow the page. */
   .print-frame__credit { margin-top: 16px; padding-top: 6px; border-top: 1px solid #999; font-size: 9pt; break-inside: avoid; }
   .print-frame__credit h2 { margin: 0 0 2px; font-size: 9pt; font-weight: 600; }
   .print-frame__credit p { margin: 0; overflow-wrap: anywhere; }
+  /* Room after the content's end, so its last lines clear the fixed foot:
+     one 9pt line at line-height 1.3 is about 4.1mm. 14mm holds the stamp;
+     with a screen's line in the foot, 20mm holds the stamp and that line
+     wrapped onto as many as three lines. */
   main { padding-bottom: 14mm; }
+  .app-shell:has(.print-frame__snapshot:not(:empty)) main { padding-bottom: 20mm; }
 }

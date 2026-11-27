@@ -3,7 +3,8 @@ audience, plus a per-trip "delay certificate" export.
 
 ``compute_council_summary`` pools the on-time/late tolerance resolved by
 :mod:`pipeline.reports.definition` into ONE figure across every route matching
-``ctx``, beside the service-delivered rate from
+``ctx``, and the early-departure rate the same way, beside the
+service-delivered rate from
 :func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`.
 That rate, its planned/executed counts and the data-quality share come from
 per-agency aggregates, so they always cover the whole agency for ``ctx``'s
@@ -11,9 +12,10 @@ dates, whatever route/dow/service/time_band filter narrows the on-time figures
 (:func:`on_time_filter_narrows`) -- unlike
 :func:`pipeline.reports.rankings.compute_on_time`, which reports per-route,
 and unlike :func:`pipeline.reports.network.compute_network_summary`, whose
-on-time figure is always the ``legacy_60s`` exact column with no tolerance
-override. The fast path reuses ``pipeline.reports.rankings``'s own
-``_read_dist_scalars``/``_read_dist_with_hist`` SQL byte-for-byte, simply
+on-time figure is always the default preset's window, whatever tolerance the
+report names. The fast path reuses ``pipeline.reports.rankings``'s own
+``_read_dist_scalars`` SQL, or ``_read_dist_with_hist`` for a window the
+exact columns cannot answer, byte-for-byte, simply
 pooling every returned route into one total instead of emitting one row per
 route (with no per-route minimum-sample gate -- that
 gate exists in ``compute_on_time`` to keep a *ranking* free of thin-sample
@@ -39,24 +41,38 @@ import logging
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
-from api.clickhouse import max_captured_at_before_by_agency
-from api.range import RangeCtx, build_updates_filter_ch
+from api.clickhouse import newest_filed_date_before_by_agency
+from api.range import RangeCtx, updates_filter_ch
 from api.scope_applied import ALL_SIX
-from pipeline.clickhouse import UPDATES_TABLE, checked_table
-from pipeline.db import observation_filter_ch
+from pipeline.db import stop_event_filter_ch
 from pipeline.freshness import is_stale
 from pipeline.histogram import (
-    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
     N_BUCKETS,
-    count_in_range,
+    count_early,
+    count_on_time,
+    exact_window,
+    on_time_from_columns,
 )
+from pipeline.live_filing import band_candidates
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
-from pipeline.reports.filters import _dedup_cte_ch
-from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1
+from pipeline.reports import comparability
+from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
+from pipeline.reports.network import compute_network_summary
+from pipeline.reports.rankings import (
+    DEFAULT_EARLY_TOLERANCE_SEC,
+    DEFAULT_LATE_TOLERANCE_SEC,
+    _avg_min,
+    _pct1,
+    _read_dist_scalars,
+    _read_dist_with_hist,
+    _round1,
+    early_departure_sec,
+    tolerance_aggregates_serve,
+)
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
-from pipeline.service_day import service_date_of
+from pipeline.static_archive import observation_rows
 
 _log = logging.getLogger(__name__)
 
@@ -76,27 +92,30 @@ async def _agency_on_time_pooled(
     conn,
     ch,
     early_tolerance_sec: int | None,
-    late_tolerance_sec: int | None,
-) -> tuple[float | None, float | None, int]:
-    """``(on_time_pct, avg_delay_min, samples)`` pooled across EVERY
-    route matching ``ctx`` -- the same tolerance semantics
+    late_tolerance_sec: int,
+) -> tuple[float | None, float | None, float | None, int]:
+    """``(on_time_pct, early_departure_pct, avg_delay_min, samples)`` pooled
+    across EVERY route matching ``ctx`` -- the same tolerance semantics
     :func:`pipeline.reports.rankings.compute_on_time` resolves per-route,
-    collapsed to one figure. ``(None, None, 0)`` when nothing
-    matches ``ctx`` at all.
+    collapsed to one figure, and the share of departures more than
+    :func:`~pipeline.reports.rankings.early_departure_sec` early, counted as
+    the route table counts it. ``(None, None, None, 0)`` when nothing matches
+    ``ctx`` at all.
     """
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
-    high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
-    is_legacy = early_tolerance_sec is None and late_tolerance_sec is None
+    high_sec = late_tolerance_sec
+    early_sec = early_departure_sec(early_tolerance_sec)
 
-    if ctx.time_band != "all":
+    if not tolerance_aggregates_serve(ctx, early_tolerance_sec, late_tolerance_sec):
         if ch is None:
-            raise RuntimeError("council summary's time_band-filtered live fallback requires a ClickHouse client")
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
+            raise RuntimeError("council summary's live fallback requires a ClickHouse client")
+        cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
         low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
         result = await ch.query(
             f"WITH {cte_sql}\n"
             "SELECT\n"
             f"    sum(CASE WHEN dep_delay <= {{ot_high:Int32}} AND {low_clause} THEN 1.0 ELSE 0 END) AS on_time_n,\n"
+            "    countIf(dep_delay < {ot_early:Int32}) AS early_n,\n"
             "    sum(dep_delay) AS sum_delay_sec,\n"
             "    count(*) AS samples\n"
             "FROM deduped",
@@ -104,47 +123,54 @@ async def _agency_on_time_pooled(
                 "agency_id": agency_id,
                 "ot_high": high_sec,
                 "ot_low": 0 if low_sec is None else low_sec,
+                "ot_early": -early_sec,
                 **ch_params,
             },
         )
-        on_time_n, sum_delay_sec, samples = result.result_rows[0]
+        on_time_n, early_n, sum_delay_sec, samples = result.result_rows[0]
         if not samples:
-            return None, None, 0
+            return None, None, None, 0
         return (
             float(_round1(on_time_n * 100.0 / samples)),
+            float(_pct1(early_n, samples)),
             float(_avg_min(sum_delay_sec, samples)),
             int(samples),
         )
 
-    if is_legacy:
-        rows = await _read_dist_scalars(agency_id, ctx, conn)
-        samples = sum(r["samples"] for r in rows)
-        if not samples:
-            return None, None, 0
-        on_time_count = sum(r["on_time_count"] for r in rows)
-        # Postgres SUM(bigint) returns NUMERIC (asyncpg -> Decimal); _avg_min
-        # wraps it in Decimal(...) itself (safe whether the input here is
-        # already Decimal or a plain int) rather than dividing by the float
-        # 60.0 directly, which raises TypeError mixing Decimal and float.
-        sum_delay_sec = sum(r["sum_delay_sec"] for r in rows)
-        return (
-            float(_round1(on_time_count * 100.0 / samples)),
-            float(_avg_min(sum_delay_sec, samples)),
-            samples,
-        )
-
-    rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    exact = exact_window(early_tolerance_sec, high_sec)
+    if exact:
+        rows = await _read_dist_scalars(agency_id, ctx, conn, early_sec=early_sec)
+    else:
+        rows = await _read_dist_with_hist(agency_id, ctx, conn)
     samples = sum(r["samples"] for r in rows)
     if not samples:
-        return None, None, 0
+        return None, None, None, 0
+    # Postgres SUM(bigint) returns NUMERIC (asyncpg -> Decimal); _avg_min
+    # wraps it in Decimal(...) itself (safe whether the input here is
+    # already Decimal or a plain int) rather than dividing by the float
+    # 60.0 directly, which raises TypeError mixing Decimal and float.
     sum_delay_sec = sum(r["sum_delay_sec"] for r in rows)
-    merged_hist = [0] * N_BUCKETS
-    for r in rows:
-        for i, c in enumerate(r["hist"]):
-            merged_hist[i] += c
-    on_time_est = count_in_range(merged_hist, low_sec, high_sec)
+    columns = {
+        "samples": samples,
+        "on_time_count": sum(r["on_time_count"] for r in rows),
+        "late5_count": sum(r["late5_count"] for r in rows),
+    }
+    early_count: float
+    on_time: float
+    if exact:
+        exact_early = sum(r["early_count"] for r in rows)
+        early_count = exact_early
+        on_time = on_time_from_columns(early_tolerance_sec, high_sec, early_count=exact_early, **columns)
+    else:
+        merged_hist = [0] * N_BUCKETS
+        for r in rows:
+            for i, c in enumerate(r["hist"]):
+                merged_hist[i] += c
+        early_count = count_early(merged_hist, early_sec)
+        on_time = count_on_time(merged_hist, early_tolerance_sec, high_sec, **columns)
     return (
-        float(_round1(on_time_est * 100.0 / samples)),
+        float(_round1(on_time * 100.0 / samples)),
+        float(_pct1(early_count, samples)),
         float(_avg_min(sum_delay_sec, samples)),
         samples,
     )
@@ -156,6 +182,21 @@ async def _agency_on_time_pooled(
 ON_TIME_HONOURS: tuple[str, ...] = ALL_SIX
 DELIVERED_HONOURS: tuple[str, ...] = ("from", "to")
 _ON_TIME_ONLY = tuple(f for f in ON_TIME_HONOURS if f not in DELIVERED_HONOURS)
+
+
+# The figures the board's comparability gate judged, carried from its row as
+# they are, with the plan figures that say why coverage could not be
+# measured, so one verdict's reason comes from one read.
+_BOARD_GATE_FIGURES = (
+    "coverage_pct",
+    "observed_trips",
+    "coverage_planned_trips",
+    "ci_low",
+    "ci_high",
+    "clamp_pct",
+    "planned_trips",
+    "delivered_missing",
+)
 
 
 def on_time_filter_narrows(ctx: RangeCtx) -> bool:
@@ -173,13 +214,44 @@ def on_time_filter_narrows(ctx: RangeCtx) -> bool:
     return any(is_set[field] for field in _ON_TIME_ONLY)
 
 
+async def _freshness_and_quality(agency_id: int, ctx: RangeCtx, conn, ch) -> tuple[bool, float | None]:
+    """``(is_stale, clamp_pct)`` for one agency over ``ctx``'s dates, read the
+    way the agencies board reads them for every agency, for a report the
+    board's cached result does not cover."""
+    agg_max_row = await conn.fetchrow("SELECT MAX(date) AS d FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
+    agg_max_day: date | None = agg_max_row["d"] if agg_max_row else None
+    today_jst_midnight_utc = (
+        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    )
+    # This probe backs ONLY is_stale -- clamp_pct comes from Postgres.
+    # `newest_filed_date_before_by_agency` already degrades a failing probe to
+    # None rather than raising (is_stale(agg_day, None) is "not stale": no
+    # completed day / can't determine -> nothing owed), the same shared
+    # degrade shape pipeline.reports.network.compute_network_summary relies
+    # on for its own per-agency probes.
+    live_max_day = (await newest_filed_date_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(
+        agency_id
+    )
+
+    feed_row = await conn.fetchrow(
+        "SELECT COALESCE(SUM(raw_samples), 0) AS raw, COALESCE(SUM(clamp_count), 0) AS clamp "
+        "FROM agg_feed_health WHERE agency_id = $1 AND date BETWEEN $2 AND $3",
+        agency_id,
+        ctx.from_date,
+        ctx.to_date,
+    )
+    raw = int(feed_row["raw"]) if feed_row else 0
+    clamp = int(feed_row["clamp"]) if feed_row else 0
+    return is_stale(agg_max_day, live_max_day), comparability.clamp_pct(clamp, raw)
+
+
 async def compute_council_summary(
     agency_id: int,
     ctx: RangeCtx,
     conn,
     ch,
-    early_tolerance_sec: int | None = None,
-    late_tolerance_sec: int | None = None,
+    early_tolerance_sec: int | None = DEFAULT_EARLY_TOLERANCE_SEC,
+    late_tolerance_sec: int = DEFAULT_LATE_TOLERANCE_SEC,
 ) -> dict:
     """Monthly/annual figures for ``ctx``'s range: the on-time rate pooled
     over ``ctx``'s filter + the whole agency's service-delivered rate + the
@@ -190,21 +262,34 @@ async def compute_council_summary(
     dict plus the caller's own :class:`~pipeline.reports.definition.DefinitionMeta`
     (:func:`~pipeline.reports.definition.resolve_definition_meta`).
 
-    Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
+    Returns ``{"on_time_pct", "early_departure_pct", "avg_delay_min", "samples", "planned_trips",
     "executed_trips", "service_delivered_pct", "covered_days", "window_days",
-    "delivered_missing", "is_stale", "clamp_pct", "filtered"}``; ``covered_days`` of ``window_days``
+    "delivered_missing", "is_stale", "clamp_pct", "filtered", "comparability"}``; ``covered_days`` of ``window_days``
     are the days a timetable plans (see
     :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`),
     the only ones the planned and executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
-    the first three cover less of the agency than the planned/executed/delivered
+    the first four cover less of the agency than the planned/executed/delivered
     figures and ``clamp_pct``.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     exactly when :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`
     says so (see that module), and ``delivered_missing`` then says why. ``clamp_pct`` is ``None`` when this agency has
     no ``agg_feed_health`` rows in range (raw_samples == 0) -- "not
     measurable", not a misleading 0%.
+
+    ``comparability`` is whether the agencies board ranks this agency over
+    the same dates, ``{"comparable", "reason", "coverage_pct",
+    "observed_trips", "coverage_planned_trips", "ci_low", "ci_high",
+    "clamp_pct", "planned_trips", "delivered_missing"}``, read from this
+    agency's row of the board's own cached result
+    (:func:`pipeline.reports.network.compute_network_summary`), so the two
+    can never disagree. It therefore judges the board's figures, the whole
+    agency on the board's on-time definition, whatever filter or tolerance
+    narrows the figures above. ``is_stale`` and ``clamp_pct`` come from the
+    same row. ``comparability`` is ``None`` when the cached board does not
+    list the agency yet or cannot be built, rather than a verdict of its
+    own; ``is_stale`` and ``clamp_pct`` are then read for this agency alone.
     """
-    on_time_pct, avg_delay_min, samples = await _agency_on_time_pooled(
+    on_time_pct, early_departure_pct, avg_delay_min, samples = await _agency_on_time_pooled(
         agency_id, ctx, conn, ch, early_tolerance_sec, late_tolerance_sec
     )
 
@@ -217,39 +302,28 @@ async def compute_council_summary(
         _log.warning("council summary: service-delivered figures unavailable for agency %s", agency_id, exc_info=True)
         d = unreadable_service_delivered(ctx.from_date, ctx.to_date)
 
-    # Freshness (agg-lag) + quality (implausible-reading share), scoped to
-    # THIS agency's ctx.from_date/to_date range -- the same two signals
-    # pipeline.reports.network.compute_network_summary already exposes
-    # network-wide, computed here for one agency instead of every agency at
-    # once.
-    agg_max_row = await conn.fetchrow("SELECT MAX(date) AS d FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
-    agg_max_day: date | None = agg_max_row["d"] if agg_max_row else None
-    today_jst_midnight_utc = (
-        datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
-    )
-    # This probe backs ONLY is_stale below -- every other field here comes
-    # from Postgres. `max_captured_at_before_by_agency` already degrades a
-    # failing probe to None rather than raising (is_stale(agg_day, None) is
-    # "not stale": no completed day / can't determine -> nothing owed), the
-    # same shared degrade shape pipeline.reports.network.compute_network_summary
-    # relies on for its own per-agency probes.
-    live_max_ts = (await max_captured_at_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(agency_id)
-    live_max_day = None if live_max_ts is None else service_date_of(live_max_ts)
-    agency_is_stale = is_stale(agg_max_day, live_max_day)
+    # The verdict is the agencies board's own, from its cached result for the
+    # same dates. Building the board reads every agency's figures, so a
+    # failure anywhere in it leaves this report without a verdict rather than
+    # failing a report whose own figures never needed it.
+    try:
+        board = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
+    except Exception:
+        _log.warning("council summary: agencies board unavailable for agency %s", agency_id, exc_info=True)
+        board = []
+    row = next((r for r in board if r["agency_id"] == agency_id), None)
 
-    feed_row = await conn.fetchrow(
-        "SELECT COALESCE(SUM(raw_samples), 0) AS raw, COALESCE(SUM(clamp_count), 0) AS clamp "
-        "FROM agg_feed_health WHERE agency_id = $1 AND date BETWEEN $2 AND $3",
-        agency_id,
-        ctx.from_date,
-        ctx.to_date,
-    )
-    raw = int(feed_row["raw"]) if feed_row else 0
-    clamp = int(feed_row["clamp"]) if feed_row else 0
-    clamp_pct = round(clamp / raw * 100, 2) if raw else None
+    # Freshness and the implausible-reading share come from the board's row,
+    # so the quality note and the verdict print one share. Without a row they
+    # are read for this agency alone.
+    if row is not None:
+        agency_is_stale, clamp_pct = row["is_stale"], row["clamp_pct"]
+    else:
+        agency_is_stale, clamp_pct = await _freshness_and_quality(agency_id, ctx, conn, ch)
 
     return {
         "on_time_pct": on_time_pct,
+        "early_departure_pct": early_departure_pct,
         "avg_delay_min": avg_delay_min,
         "samples": samples,
         "planned_trips": d["planned_trips"],
@@ -261,6 +335,13 @@ async def compute_council_summary(
         "is_stale": agency_is_stale,
         "clamp_pct": clamp_pct,
         "filtered": on_time_filter_narrows(ctx),
+        "comparability": None
+        if row is None
+        else {
+            "comparable": row["comparable"],
+            "reason": row["comparable_reason"],
+            **{k: row[k] for k in _BOARD_GATE_FIGURES},
+        },
     }
 
 
@@ -335,7 +416,7 @@ async def compute_delay_certificate(
     agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
     agency_name = agency_row["agency_name"] if agency_row else str(agency_id)
 
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
         f"WITH {cte_sql},\n"
         "filtered AS (\n"
@@ -444,7 +525,7 @@ async def _recorded_stops(
     return {(r["trip_id"], r["day"], r["stop_sequence"]): (r["stop_name"], r["is_first"]) for r in found}
 
 
-async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:
+async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, conn, ch) -> bool:
     """Whether ``ctx`` holds any departure observation at all.
 
     A certificate lookup that lists nothing means either that no departure
@@ -452,17 +533,25 @@ async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:
     the second is a gap in the data, so a passenger must be told which.
 
     The certificate's rows come from the latest observation of each stop
-    event, and that dedup keeps every event a raw row starts, so a raw row
-    passing the same filters exists exactly when the certificate had an
-    event to judge. Reading raw rows lets the probe stop at the first one
-    instead of aggregating the whole scope.
+    event among the rows the shared dedup reads, a plausible departure or a
+    row withdrawing one (`pipeline.db.stop_event_filter_ch`), so a raw row
+    of those passing the same filters exists whenever the certificate had an
+    event to judge. A scope whose every departure was withdrawn, or never
+    predicted before a CANCELED trip or SKIPPED stop, has one too, and reads
+    as observed: the feed did report on it, and nothing departed late.
+    Reading raw rows lets the probe stop at the first one instead of
+    aggregating the whole scope. They are filed as the certificate's are
+    (`pipeline.live_filing`).
     """
     if ch is None:
         raise RuntimeError("delay_certificate_observed requires a ClickHouse client")
-    where, ch_params = build_updates_filter_ch(ctx)
+    filing = await ctx_filing(conn, ch, agency_id, ctx)
+    filing.check(ctx.from_date, ctx.to_date)
+    where = band_candidates(updates_filter_ch(ctx, refit=filing.stamp.refiles), ctx.time_band, filing)
+    filed = " AND ".join(part for part in ("u.scheduled_time IS NOT NULL", where.filed) if part)
+    rows = observation_rows(stop_event_filter_ch(where.raw), filing.stamp, filed_where=filed, live_form=True)
     result = await ch.query(
-        f"SELECT 1 FROM {checked_table(UPDATES_TABLE)} AS u "
-        f"WHERE {observation_filter_ch(where)} AND u.scheduled_time IS NOT NULL LIMIT 1",
-        parameters={"agency_id": agency_id, **ch_params},
+        f"SELECT 1 {rows} LIMIT 1",
+        parameters={"agency_id": agency_id, **where.params, **filing.params},
     )
     return bool(result.result_rows)

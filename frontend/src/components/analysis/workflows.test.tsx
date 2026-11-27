@@ -49,10 +49,10 @@ vi.mock("./csv", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./csv")>()),
   downloadCsv: vi.fn(),
 }));
-// The scope sentence renders PresetMenu, which calls useSession -> a real
-// apiGet("/api/me"). Unstubbed that fetch stays pending past the end of this
-// file and destabilises whichever file vitest runs next, so it is settled
-// here. Partial mock: everything else in api/auth stays real.
+// The scope controls and the route screen ask useIsAdmin, which calls
+// useSession -> a real apiGet("/api/me"). Unstubbed that fetch stays pending
+// past the end of this file and destabilises whichever file vitest runs next,
+// so it is settled here. Partial mock: everything else in api/auth stays real.
 vi.mock("../../api/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/auth")>()),
   useSession: () => ({ data: null, isPending: false }),
@@ -70,12 +70,13 @@ vi.mock("../../api/hooks", () => ({
   useRouteShape: vi.fn(() => ({ data: { route: "101", geometry: null, stops: [{ stop_id: "A", stop_sequence: 1, stop_name: "Station A", lon: 140, lat: 40, avg_min: 2, samples: 5 }] }, isPending: false })),
   useScopeSummary: vi.fn(() => ({ data: undefined })),
   useOverviewSummary: vi.fn(() => ({ data: undefined, isPending: false })),
+  usePerformanceStandards: vi.fn(() => ({ data: undefined, error: null, refetch: vi.fn() })),
   useReport: vi.fn((_id, type) => ({ data: type ? { report_type: type, definition: {}, rows: type === "trend" ? [{ days: [{ date: "2026-09-07", avg_min: 2, samples: 4 }] }] : [["101", null, 2, 1, 3, 4]] } : undefined, isPending: false })),
 }));
 const ctx = { ...SCOPE_EXTRAS_NONE, from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, time_band: "morning" as const, service: "all" as const, routes: ["101"] };
-// Reports renders the scope sentence, whose PresetMenu calls useQueryClient to
-// invalidate saved presets -- so the tree needs a provider even though no test
-// here asserts on a query.
+// Reports renders the scope bar, whose PresetMenu looks up stop names
+// with a query (usePlaceLabels) -- so the tree needs a provider even though no
+// test here asserts on a query.
 function show(tab: "routes/101" | "reports", search = "") {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -106,21 +107,24 @@ it("keeps pattern and period in exported observations and saved analysis", async
   expect(readAnalyses()[0].query).toContain("time_band=morning");
 });
 it("changing keito scopes both report queries and CSV to the selected code", async () => {
-  // Driven through the scope sentence: the routes condition opens the route
-  // picker, and each pick applies at once.
+  // Driven through the scope bar: the routes condition opens the route
+  // picker, ticks stage a draft, and Apply commits it.
   show("reports");
   const user = setupUser();
-  await user.click(screen.getByRole("button", { name: "1 Coast" }));
+  await user.click(screen.getByRole("button", { name: /^Routes 1 ?Coast$/ }));
+  let dialog = screen.getByRole("dialog", { name: "Routes" });
   // The picker labels routes by plate and line name, not code: "1 Coast" is
   // 101 and "9 Coast" is 999. The space is optional because
   // dom-accessibility-api trims each inline element's own text, dropping the
   // space between the plate and the line name, where browsers keep it.
-  const picker = screen.getByRole("textbox", { name: "Search routes" }).parentElement!;
-  await user.click(within(picker).getByRole("button", { name: /^1 ?Coast$/ }));   // drop the initial 101
+  await user.click(within(dialog).getByRole("button", { name: /^1 ?Coast$/ })); // drop the initial 101
+  await user.click(within(dialog).getByRole("button", { name: "Show all routes" }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual([]);
-  await user.click(within(picker).getByRole("button", { name: /^9 ?Coast$/ }));
+  await user.click(screen.getByRole("button", { name: "Routes All" }));
+  dialog = screen.getByRole("dialog", { name: "Routes" });
+  await user.click(within(dialog).getByRole("button", { name: /^9 ?Coast$/ }));
+  await user.click(within(dialog).getByRole("button", { name: "Apply · 1 route" }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
-  await user.keyboard("{Escape}");
   await user.click(screen.getByRole("button", { name: "Export" }));
   await user.click(screen.getByRole("menuitem", { name: "Download CSV" }));
   // The mocked ranking data itself never changes (it's a fixed fixture), so
@@ -154,11 +158,10 @@ it("the header export menu's CSV item exports the report data, not just the filt
   expect(payload.flat()).toContain("median_minutes");
 });
 
-it("defers the analysis filters until Apply instead of querying mid-selection", async () => {
-  // This screen renders only while exactly one pattern is selected, and
-  // narrowing to one passes through a multi-code state, so committing each
-  // step dropped it into its empty state mid-selection. The selection must
-  // therefore not reach the shape query until Apply.
+it("stages a route pick in the scope bar until Apply instead of querying mid-selection", async () => {
+  // This screen renders only while exactly one route is selected, and moving
+  // from one route to another passes through a state with both or neither,
+  // so the routes control must not commit until Apply.
   show("routes/101");
   const user = setupUser();
   // The tab calls useRouteShape twice per render -- once for the period and
@@ -168,11 +171,15 @@ it("defers the analysis filters until Apply instead of querying mid-selection", 
     vi.mocked(useRouteShape).mock.calls.filter((c) => c[1] != null).at(-1)?.[1];
   expect(lastRequestedRoute()).toBe("101");
 
-  await user.selectOptions(screen.getByRole("combobox", { name: "Service pattern" }), "999");
+  const bar = screen.getByRole("region", { name: "What you're viewing" });
+  await user.click(within(bar).getByRole("button", { name: /^Routes 1 ?Coast$/ }));
+  const picker = screen.getByRole("dialog", { name: "Routes" });
+  await user.click(within(picker).getByRole("checkbox", { name: "1 Coast" }));
+  await user.click(within(picker).getByRole("checkbox", { name: "9 Coast" }));
   expect(lastRequestedRoute()).toBe("101");
   expect(screen.queryByText("Choose a route and service pattern")).toBeNull();
 
-  await user.click(screen.getByRole("button", { name: "Apply" }));
+  await user.click(within(picker).getByRole("button", { name: /^Apply/ }));
   expect(lastRequestedRoute()).toBe("999");
 });
 

@@ -12,7 +12,7 @@ type Props = {
   concentration: OverviewConcentration;
   /** The period the shares are of, as text. */
   periodRange: string;
-  movers?: OverviewMovers;
+  movers?: OverviewMovers | null;
   /** How many top routes to render. Card variant: 5 (default).
    *  Modal variant: 20 (matches backend top-N). */
   limit?: number;
@@ -55,7 +55,7 @@ export function ConcentrationBar({
   const wrapperClass =
     variant === "modal"
       ? "ov-conc-modal"
-      : `ov-card${clickable ? " ov-clickable" : ""}`;
+      : `ov-card${clickable ? " ov-clickable lift" : ""}`;
   const interactiveProps = clickable
     ? {
         tabIndex: 0,

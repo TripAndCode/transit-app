@@ -11,6 +11,7 @@ import { Z_INDEX } from "../styles/zIndex";
 import { Spinner } from "./Spinner";
 import { useToast } from "./ui/toastContext";
 import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
+import "./SidebarUserMenu.css";
 
 const THEME_OPTIONS = ["system", "light", "dark"] as const satisfies readonly Theme[];
 const THEME_OPTION_LABEL_KEYS: Record<(typeof THEME_OPTIONS)[number], string> = {
@@ -25,11 +26,10 @@ const popItemStyle: CSSProperties = {
   justifyContent: "space-between",
   width: "100%",
   padding: "7px 9px",
-  borderRadius: 5,
+  borderRadius: "var(--radius)",
   fontSize: 12,
   color: "var(--text-secondary)",
   textDecoration: "none",
-  background: "transparent",
   border: "none",
   cursor: "pointer",
   font: "inherit",
@@ -53,11 +53,10 @@ const groupLabelStyle: CSSProperties = {
   color: "var(--text-tertiary)",
 };
 
-/** Sidebar footer control: collapses what used to be five separate header
- *  controls (Live/sign-in/language/theme/settings) into one avatar-trigger
- *  popover, following the standard "user menu" pattern instead of a row of
- *  bare icons wrapping across two lines. */
-export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
+/** Sidebar footer control: gathers Live, sign-in, language and theme into
+ *  one avatar-trigger popover, following the standard "user menu" pattern
+ *  instead of a row of bare icons wrapping across two lines. */
+export function SidebarUserMenu() {
   const { t, i18n } = useTranslation();
   const { data: config, isLoading: configLoading } = useConfig();
   const { data: session, isLoading: sessionLoading } = useSession();
@@ -95,7 +94,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             bottom: "calc(100% + 6px)",
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-lg)",
             boxShadow: "var(--el-2)",
             padding: 6,
             zIndex: Z_INDEX.dropdown,
@@ -103,12 +102,12 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
         >
           {config?.auth_enabled &&
             (session ? (
-              <Link role="menuitem" to="/me" onClick={() => setOpen(false)} style={popItemStyle}>
+              <Link role="menuitem" to="/me" onClick={() => setOpen(false)} className="sidebar-user-menu-item" style={popItemStyle}>
                 <span>{displayName}</span>
               </Link>
             ) : (
-              <Link role="menuitem" to="/login" onClick={() => setOpen(false)} style={popItemStyle}>
-                <span>{t("common.login")}</span>
+              <Link role="menuitem" to="/login" onClick={() => setOpen(false)} className="sidebar-user-menu-item" style={popItemStyle}>
+                <span>{t("common.admin_login")}</span>
               </Link>
             ))}
           <div role="group" aria-labelledby={languageLabelId}>
@@ -133,6 +132,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                     setSwitchTarget(lng);
                     void switchTo(lng);
                   }}
+                  className="sidebar-user-menu-item"
                   style={lng === current ? selectedItemStyle : loading ? { ...popItemStyle, cursor: "default" } : popItemStyle}
                 >
                   <span>{LOCALE_NAMES[lng]}</span>
@@ -156,23 +156,13 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                 role="menuitemradio"
                 aria-checked={theme === option}
                 onClick={() => setTheme(option)}
+                className="sidebar-user-menu-item"
                 style={theme === option ? selectedItemStyle : popItemStyle}
               >
                 <span>{t(THEME_OPTION_LABEL_KEYS[option])}</span>
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onOpenSettings();
-            }}
-            style={popItemStyle}
-          >
-            <span>{t("header.settings_aria")}</span>
-          </button>
           {config?.auth_enabled && session && (
             <>
               <div role="separator" style={{ height: 1, margin: "6px 0", background: "var(--border-soft)" }} />
@@ -185,6 +175,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                   if (logout.isPending) return;
                   logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") });
                 }}
+                className="sidebar-user-menu-item"
                 style={logout.isPending ? { ...popItemStyle, cursor: "default" } : popItemStyle}
               >
                 <span>{t("account.logout")}</span>
@@ -206,15 +197,15 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
         aria-expanded={open}
         aria-label={t("nav.account_menu")}
         onClick={() => setOpen((v) => !v)}
+        className="sidebar-user-trigger"
         style={{
           width: "100%",
           display: "flex",
           alignItems: "center",
           gap: 9,
           padding: 8,
-          borderRadius: 8,
+          borderRadius: "var(--radius-lg)",
           border: "1px solid transparent",
-          background: "transparent",
           cursor: "pointer",
           font: "inherit",
           color: "var(--text-primary)",

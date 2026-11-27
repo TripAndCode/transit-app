@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import i18n from "../../i18n";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { StopEvidenceChart } from "./StopEvidenceChart";
+import * as isAdmin from "../../api/useIsAdmin";
 import type { StopEvidence } from "./stopEvidence";
 import type { ConvMessage } from "../../api/types";
 
@@ -72,5 +73,20 @@ describe("StopEvidenceChart detail placement", () => {
     for (let i = 0; i < 5; i++) fireEvent.scroll(strip);
     expect(raf).toHaveBeenCalledTimes(1);
     raf.mockRestore();
+  });
+});
+
+describe("StopEvidenceChart raw stop id", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const withId: StopEvidence[] = [{ sequence: 1, name: "Central", minutes: 4.2, samples: 30, stopId: "S-0042" }];
+
+  it.each([
+    [true, true],
+    [false, false],
+  ])("for admin=%s shows the GTFS stop id: %s", (admin, shown) => {
+    vi.spyOn(isAdmin, "useIsAdmin").mockReturnValue(admin);
+    renderWithProviders(<StopEvidenceChart messageId={1} points={withId} />);
+    fireEvent.click(screen.getAllByRole("button", { pressed: false })[0]);
+    expect(screen.queryByText("S-0042") !== null).toBe(shown);
   });
 });

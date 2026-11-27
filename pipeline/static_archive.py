@@ -1,27 +1,50 @@
 """Every timetable an agency loads, kept in ClickHouse under its content.
 
-analyze joins a day's rows to the timetable they were ingested against, which
-may no longer be loaded, so each timetable is kept here before it is replaced
-(load_static) and again by analyze while it is loaded (a backstop for one
-loaded before this existed). Content, not the version name, is the key: a
-reload under a new name with the same content stores nothing new, and the
-version map says which content each name carried.
+analyze joins a day's rows to the timetable in force on their service date
+(pipeline.timetable_in_force), or to the one they were ingested against where
+none is known to be, and either may no longer be loaded. So each timetable is
+kept here before it is replaced (load_static) and again by analyze while it is
+loaded (a backstop for one loaded before this existed): its stop times, its
+schedule as ingest stamps a poll matching each stop time, and its calendar,
+which says the days its trips run. Content, not the version name, is the key
+of the stop times and the schedule: a reload under a new name with the same
+content stores nothing new there, and the version map says which content each
+name carried. The calendar, which the content does not cover, is kept per name
+and content (archive_calendar). The days each name covers are kept beside the
+map, as its span. Postgres
+mirrors the map, each name at its latest content (MIRROR), for the definition
+stamp, which reads it on every request.
 """
 
 import hashlib
 import logging
 import secrets
 from collections.abc import Callable, Iterable
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from enum import Enum
 from typing import NamedTuple
 
+import psycopg2.extras
+
+from pipeline.clickhouse import UPDATE_COLUMNS, UPDATES_TABLE, checked_table
+from pipeline.planned_trips import WEEKDAY_COLUMNS
+from pipeline.service_day import FILING_REACH_HOURS, filed_date_ch, service_day_start_utc
 from pipeline.static_content import static_parts
+from pipeline.timetable_in_force import Segment, Version, gtfs_date, in_force, schedule_row, version_span
 
 logger = logging.getLogger(__name__)
 
 ARCHIVE = "static_stop_times_archive"
+SCHEDULE = "static_schedule_archive"
 VERSION_MAP = "static_version_map"
-_COLUMNS = ["agency_id", "content_hash", "trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]
+SPANS = "static_version_spans"
+CALENDAR = "static_calendar_archive"
+# The Postgres mirror of VERSION_MAP (migration 0097).
+MIRROR = "static_version_contents"
+# The rows of each date analyze read refiled, as REFIT filed them, and what
+# each date's were filed against (pipeline.refiled).
+FILED_TABLE = "updates_filed"
+FILED_DATES = "updates_filed_dates"
 _BATCH = 50_000
 
 
@@ -74,9 +97,20 @@ def require_tables(ch) -> None:
     names = {
         row[0] for row in ch.query("SELECT name FROM system.tables WHERE database = currentDatabase()").result_rows
     }
-    missing = [table for table in (ARCHIVE, VERSION_MAP) if table not in names]
+    missing = [table for table in (ARCHIVE, SCHEDULE, VERSION_MAP, SPANS, CALENDAR) if table not in names]
     if missing:
-        raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; apply the schema with `make ch-bootstrap`")
+        raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; run `make ch-bootstrap`")
+
+
+def require_mirror(conn) -> None:
+    """Refuse to map names against a Postgres that predates the map's mirror:
+    a map row written without its mirror row would leave the stamp without the
+    name's content until the mirror is filled by hand."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (MIRROR,))
+        missing = cur.fetchone()[0] is None
+    if missing:
+        raise RuntimeError(f"Postgres has no {MIRROR}; run `make migrate`")
 
 
 def loaded_stem(conn, agency_id: int) -> str | None:
@@ -87,14 +121,41 @@ def loaded_stem(conn, agency_id: int) -> str | None:
     return row[0] if row else None
 
 
-def _work_table(agency_id: int, key: str) -> str:
+class _Kept(NamedTuple):
+    """What the archive keeps of a content in *table*: the Postgres SELECT of
+    the loaded timetable's rows, the agency bound as %s, and each row's
+    columns after agency_id and content_hash, as *row* shapes them."""
+
+    table: str
+    columns: list[str]
+    select: str
+    row: Callable[[tuple], tuple]
+
+
+_STOP_TIMES = _Kept(
+    ARCHIVE,
+    ["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"],
+    "SELECT trip_id, stop_sequence, stop_id, arrival_time, departure_time FROM static_stop_times WHERE agency_id = %s",
+    lambda row: row,
+)
+# A stop time whose trip static_trips lacks matches no poll at ingest, so it has no schedule row.
+_SCHEDULE = _Kept(
+    SCHEDULE,
+    ["trip_id", "stop_sequence", "service_type", "route_id", "scheduled_time", "scheduled_sec"],
+    "SELECT st.trip_id, st.stop_sequence, t.service_id, t.route_id, st.departure_time FROM static_stop_times st "
+    "JOIN static_trips t ON t.agency_id = st.agency_id AND t.trip_id = st.trip_id WHERE st.agency_id = %s",
+    lambda row: schedule_row(*row),
+)
+
+
+def _work_table(table: str, agency_id: int, key: str) -> str:
     # Unique per attempt: a load's outgoing archive and an analyze backstop can
     # archive the same content at once, and must not drop each other's table.
     # It ends like an aggregate work table, so the test fixtures' sweep by
     # ch_aggregates.WORK_TABLE_PATTERN finds one a killed copy left behind.
     # Nothing reuses the name, so in a store such a table stays until dropped
     # by hand.
-    return f"{ARCHIVE}_{key[:8]}_{secrets.token_hex(4)}__work_a{int(agency_id)}"
+    return f"{table}_{key[:8]}_{secrets.token_hex(4)}__work_a{int(agency_id)}"
 
 
 def stop_time_count(parts: list[str]) -> int:
@@ -106,18 +167,24 @@ def stop_time_count(parts: list[str]) -> int:
     return 0
 
 
-def is_archived(ch, agency_id: int, key: str) -> bool:
-    """Whether the archive holds stop times of the agency's content *key*."""
+def _holds(ch, table: str, agency_id: int, key: str) -> bool:
     rows = ch.query(
-        f"SELECT count() FROM {ARCHIVE} WHERE agency_id = {{agency:Int32}} AND content_hash = {{key:String}}",
+        f"SELECT count() FROM {table} WHERE agency_id = {{agency:Int32}} AND content_hash = {{key:String}}",
         parameters={"agency": agency_id, "key": key},
     ).result_rows
     return bool(rows and rows[0][0])
 
 
-def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> str | None:
+def is_archived(ch, agency_id: int, key: str) -> bool:
+    """Whether the archive holds stop times of the agency's content *key*."""
+    return _holds(ch, ARCHIVE, agency_id, key)
+
+
+def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None, mirror_conn=None) -> str | None:
     """Archive the agency's loaded timetable unless its content is already kept,
-    map its version name to that content, and return the content's key.
+    keep its calendar unless kept (archive_calendar), map its version name to
+    that content, mirror the name's mapping into Postgres, record the name's
+    span unless one is recorded, and return the content's key.
 
     None when no stop times are loaded, or when the timetable changed while it
     was being copied (a concurrent load_static committed): nothing is swapped
@@ -125,7 +192,9 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
     not promise the mapping: a name read after the timetable changed is left
     unmapped, for the next call to record. *parts*, when the
     caller already read them, saves reading them again; they must be the
-    loaded timetable's.
+    loaded timetable's. *mirror_conn* is the Postgres the map is mirrored in
+    (MIRROR), *conn* unless the timetable is loaded in another database than
+    the one the app reads (scripts/backfill_timetable_archive.py's scratch).
     """
     if parts is None:
         parts = static_parts(agency_id, conn, True)
@@ -133,56 +202,350 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
     if expected == 0:
         return None
     key = content_hash(parts)
-    if not is_archived(ch, agency_id, key) and not _copy(conn, ch, agency_id, key, parts, expected):
+    for kept, count in ((_STOP_TIMES, expected), (_SCHEDULE, None)):
+        if not _holds(ch, kept.table, agency_id, key) and not _copy(conn, ch, agency_id, key, parts, kept, count):
+            return None
+    # Before the map row, so a mapped name normally has its calendar; one that
+    # lacks it (a process stopped in between) gains it on the next call.
+    if not archive_calendar(conn, ch, agency_id, key, parts):
         return None
-    _map(conn, ch, agency_id, key, parts)
+    _map(conn, ch, agency_id, key, parts, conn if mirror_conn is None else mirror_conn)
+    _record_loaded_span(conn, ch, agency_id)
     return key
 
 
-def _copy(conn, ch, agency_id: int, key: str, parts: list[str], expected: int) -> bool:
-    """Copy the loaded stop times into the archive under *key*, swapped in whole,
-    unless the timetable no longer matches *parts* once copied."""
-    work = _work_table(agency_id, key)
-    ch.command(f"CREATE TABLE {work} AS {ARCHIVE}")
+def _copy(conn, ch, agency_id: int, key: str, parts: list[str], kept: _Kept, expected: int | None) -> bool:
+    """Copy the loaded timetable's rows of *kept* into its table under *key*,
+    swapped in whole, unless the timetable no longer matches *parts* once
+    copied, or the rows copied are not the *expected* count when one is given."""
+    work = _work_table(kept.table, agency_id, key)
+    ch.command(f"CREATE TABLE {work} AS {kept.table}")
+    columns = ["agency_id", "content_hash", *kept.columns]
     try:
         copied = 0
         with conn.cursor(name=f"archive_{int(agency_id)}_{secrets.token_hex(4)}") as cur:
             cur.itersize = _BATCH
-            cur.execute(
-                "SELECT trip_id, stop_sequence, stop_id, arrival_time, departure_time "
-                "FROM static_stop_times WHERE agency_id = %s",
-                (agency_id,),
-            )
+            cur.execute(kept.select, (agency_id,))
             batch: list[tuple] = []
             for row in cur:
-                batch.append((agency_id, key, *row))
+                batch.append((agency_id, key, *kept.row(row)))
                 if len(batch) == _BATCH:
-                    ch.insert(work, batch, column_names=_COLUMNS)
+                    ch.insert(work, batch, column_names=columns)
                     copied += len(batch)
                     batch = []
             if batch:
-                ch.insert(work, batch, column_names=_COLUMNS)
+                ch.insert(work, batch, column_names=columns)
                 copied += len(batch)
         # The key was read before the copy, in another statement: a load that
         # committed in between would leave another timetable's rows under it.
-        if copied != expected or static_parts(agency_id, conn, True) != parts:
+        if (expected is not None and copied != expected) or static_parts(agency_id, conn, True) != parts:
             logger.warning(f"  timetable archive: agency {agency_id}'s timetable changed while copying; not archived")
             return False
-        ch.command(f"ALTER TABLE {ARCHIVE} REPLACE PARTITION ({int(agency_id)}, '{key}') FROM {work}")
-        logger.info(f"  timetable archive: agency {agency_id} content {key} archived ({copied:,} stop times)")
+        # A content none of whose stop times has its trip loaded has no
+        # schedule: no poll matched it at ingest either, so there is none to keep.
+        if copied:
+            ch.command(f"ALTER TABLE {kept.table} REPLACE PARTITION ({int(agency_id)}, '{key}') FROM {work}")
+        logger.info(f"  timetable archive: agency {agency_id} content {key} kept in {kept.table} ({copied:,} rows)")
         return True
     finally:
         ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
 
 
-def clear_archive_joined_states(conn, agency_id: int) -> None:
-    """Clear the agency's archive-joined tables' states, so its next analyze rebuilds them in full."""
+_CALENDAR_COLUMNS = [
+    "agency_id",
+    "static_version_id",
+    "content_hash",
+    "calendar_digest",
+    "kind",
+    "service_id",
+    *WEEKDAY_COLUMNS,
+    "start_date",
+    "end_date",
+    "date",
+    "exception_type",
+]
+
+# A digest of the loaded calendar's rows, so a kept calendar is compared with
+# the loaded one without reading either. Byte order (COLLATE "C") and fixed
+# date text, so two databases digest one calendar alike.
+_LOADED_CALENDAR_DIGEST = f"""md5(
+    coalesce((SELECT string_agg(concat_ws(chr(31), service_id, {", ".join(WEEKDAY_COLUMNS)},
+                                          to_char(start_date, 'YYYYMMDD'), to_char(end_date, 'YYYYMMDD')),
+                                chr(30) ORDER BY service_id COLLATE "C")
+              FROM static_calendar WHERE agency_id = %(agency)s), '')
+    || chr(29) ||
+    coalesce((SELECT string_agg(concat_ws(chr(31), service_id, date, coalesce(exception_type::text, chr(28))),
+                                chr(30) ORDER BY service_id COLLATE "C", date COLLATE "C")
+              FROM static_calendar_dates WHERE agency_id = %(agency)s), ''))"""
+
+# The loaded name, its calendar's digest and row count, read in one statement
+# so they describe one timetable.
+_LOADED_CALENDAR_STATE_SQL = f"""
+    SELECT (SELECT max(static_version_id) FROM static_trips WHERE agency_id = %(agency)s),
+           {_LOADED_CALENDAR_DIGEST},
+           (SELECT count(*) FROM static_calendar WHERE agency_id = %(agency)s)
+           + (SELECT count(*) FROM static_calendar_dates WHERE agency_id = %(agency)s)
+"""
+
+# The same, with every calendar row: the name and digest on each.
+_LOADED_CALENDAR_ROWS_SQL = f"""
+    WITH loaded AS (
+        SELECT (SELECT max(static_version_id) FROM static_trips WHERE agency_id = %(agency)s) AS stem,
+               {_LOADED_CALENDAR_DIGEST} AS digest
+    )
+    SELECT loaded.stem, loaded.digest, 'calendar', service_id, {", ".join(WEEKDAY_COLUMNS)}, start_date, end_date,
+           NULL::text, NULL::int
+    FROM static_calendar, loaded WHERE agency_id = %(agency)s
+    UNION ALL
+    SELECT loaded.stem, loaded.digest, 'calendar_dates', service_id, {", ".join(["false"] * len(WEEKDAY_COLUMNS))},
+           NULL::date, NULL::date, date, exception_type
+    FROM static_calendar_dates, loaded WHERE agency_id = %(agency)s
+"""
+
+
+class ArchivedCalendar(NamedTuple):
+    """A timetable's calendar as the loader stored it: ``static_calendar``'s
+    rows (service_id, the weekday flags Monday first, start_date, end_date) by
+    service, and ``static_calendar_dates``' (service_id, the feed's raw date
+    text, exception_type) by service and date."""
+
+    calendar: list[tuple]
+    calendar_dates: list[tuple]
+
+
+def _kept_digest(ch, agency_id: int, stem: str, key: str) -> str | None:
+    """The digest of the calendar kept for *stem* at *key*, or None when none is kept."""
+    rows = ch.query(
+        f"SELECT any(calendar_digest), count() FROM {CALENDAR} WHERE agency_id = {{agency:Int32}} "
+        "AND static_version_id = {stem:String} AND content_hash = {key:String}",
+        parameters={"agency": agency_id, "stem": stem, "key": key},
+    ).result_rows
+    return rows[0][0] if rows and rows[0][1] else None
+
+
+def archive_calendar(conn, ch, agency_id: int, key: str, parts: list[str]) -> bool:
+    """Keep the loaded timetable's calendar under its version name and *key*
+    unless it is kept already. False, keeping nothing, when the timetable no
+    longer matches *parts* once its calendar is read. A timetable with no name
+    or no calendar rows keeps none: it plans no day.
+
+    Keyed by the name as well as the content, which covers trips and stop
+    times but not the calendar: a reissue that only moves the calendar keeps
+    its content under a new name, and each name plans the days of its own. A
+    calendar-only refetch under the same name keeps the first calendar, and is
+    logged. The rows go in one insert, a single block, so a kept calendar is
+    whole. Only the digest is read while the calendar is kept, so the rows are
+    read once.
+    """
+    with conn.cursor() as cur:
+        cur.execute(_LOADED_CALENDAR_STATE_SQL, {"agency": agency_id})
+        stem, digest, count = cur.fetchone()
+    if stem is None or not count:
+        return True
+    kept = _kept_digest(ch, agency_id, stem, key)
+    if kept is not None:
+        if kept != digest:
+            logger.warning(
+                f"  timetable archive: agency {agency_id}'s {stem} carries another calendar than the one kept "
+                f"for content {key}; the first one stands"
+            )
+        return True
+    with conn.cursor() as cur:
+        cur.execute(_LOADED_CALENDAR_ROWS_SQL, {"agency": agency_id})
+        rows = cur.fetchall()
+    # A load replaces the name, the calendar and the content in one commit.
+    if not rows or rows[0][0] != stem or static_parts(agency_id, conn, True) != parts:
+        logger.warning(f"  timetable archive: agency {agency_id}'s timetable changed while reading its calendar")
+        return False
+    # Dates as ISO text: a feed's open end, 9999-12-31, is past Date32.
+    ch.insert(
+        CALENDAR,
+        [
+            (
+                agency_id,
+                row_stem,
+                key,
+                row_digest,
+                kind,
+                service_id,
+                *flags,
+                None if start is None else start.isoformat(),
+                None if end is None else end.isoformat(),
+                day,
+                exception_type,
+            )
+            for row_stem, row_digest, kind, service_id, *flags, start, end, day, exception_type in rows
+        ],
+        column_names=_CALENDAR_COLUMNS,
+    )
+    logger.info(f"  timetable archive: agency {agency_id} {stem}'s calendar kept ({len(rows):,} rows)")
+    return True
+
+
+_ARCHIVED_CALENDAR_SQL = (
+    f"SELECT DISTINCT kind, service_id, {', '.join(WEEKDAY_COLUMNS)}, start_date, end_date, date, exception_type "
+    f"FROM {CALENDAR} WHERE agency_id = {{agency:Int32}} AND static_version_id = {{stem:String}} "
+    "AND content_hash = {content:String}"
+)
+
+
+def archived_calendar(ch, agency_id: int, stem: str, content: str) -> ArchivedCalendar | None:
+    """The calendar kept for the agency's version *stem* at *content*, or None when none is."""
+    parameters = {"agency": agency_id, "stem": stem, "content": content}
+    return _archived_calendar(ch.query(_ARCHIVED_CALENDAR_SQL, parameters=parameters).result_rows)
+
+
+async def archived_calendar_async(ch, agency_id: int, stem: str, content: str) -> ArchivedCalendar | None:
+    """archived_calendar through an async ClickHouse client."""
+    parameters = {"agency": agency_id, "stem": stem, "content": content}
+    return _archived_calendar((await ch.query(_ARCHIVED_CALENDAR_SQL, parameters=parameters)).result_rows)
+
+
+_CALENDAR_DIGESTS_SQL = (
+    f"SELECT DISTINCT static_version_id, content_hash, calendar_digest FROM {CALENDAR} "
+    "WHERE agency_id = {agency:Int32}"
+)
+
+
+async def calendar_digests_async(ch, agency_id: int) -> dict[tuple[str, str], str]:
+    """The digest of each (version name, content) of the agency whose calendar
+    is kept: two equal digests are one calendar."""
+    rows = (await ch.query(_CALENDAR_DIGESTS_SQL, parameters={"agency": agency_id})).result_rows
+    return {(stem, content): digest for stem, content, digest in rows}
+
+
+def _archived_calendar(rows) -> ArchivedCalendar | None:
+    if not rows:
+        return None
+    calendar = sorted(
+        (service_id, *flags, date.fromisoformat(start), date.fromisoformat(end))
+        for kind, service_id, *flags, start, end, _day, _exception in rows
+        if kind == "calendar"
+    )
+    calendar_dates = sorted(
+        (
+            (service_id, day, exception)
+            for kind, service_id, *_flags, _start, _end, day, exception in rows
+            if kind != "calendar"
+        ),
+        key=lambda row: (row[0], row[1]),
+    )
+    return ArchivedCalendar(calendar, calendar_dates)
+
+
+def calendar_versions(ch, agency_id: int) -> set[tuple[str, str]]:
+    """Each (version name, content) of the agency whose calendar is kept."""
+    rows = ch.query(
+        f"SELECT DISTINCT static_version_id, content_hash FROM {CALENDAR} WHERE agency_id = {{agency:Int32}}",
+        parameters={"agency": agency_id},
+    ).result_rows
+    return {(stem, content) for stem, content in rows}
+
+
+def service_trips(ch, agency_id: int, content: str) -> list[tuple[str, str | None, int]]:
+    """Each trip of the agency's *content* with a stop time, as (trip_id,
+    service_id, stop times): read from its kept schedule, which holds exactly
+    the stop times whose trip the timetable has."""
+    rows = ch.query(
+        f"SELECT trip_id, any(service_type), toInt64(count()) FROM {SCHEDULE} "
+        "WHERE agency_id = {agency:Int32} AND content_hash = {content:String} GROUP BY trip_id",
+        parameters={"agency": agency_id, "content": content},
+    ).result_rows
+    return [(trip_id, service_id, stops) for trip_id, service_id, stops in rows]
+
+
+_SCHEDULED_SQL = f"SELECT DISTINCT content_hash FROM {SCHEDULE} WHERE agency_id = {{agency:Int32}}"
+_SPANS_SQL = (
+    f"SELECT static_version_id, argMax(tuple(first_day, last_day), recorded_at) FROM {SPANS} "
+    "WHERE agency_id = {agency:Int32} GROUP BY static_version_id"
+)
+_VERSION_MAP_SQL = (
+    f"SELECT static_version_id, argMax(content_hash, archived_at) FROM {VERSION_MAP} "
+    "WHERE agency_id = {agency:Int32} GROUP BY static_version_id ORDER BY static_version_id"
+)
+
+
+def scheduled_contents(ch, agency_id: int) -> set[str]:
+    """The agency's contents whose schedule the archive keeps."""
+    return {row[0] for row in ch.query(_SCHEDULED_SQL, parameters={"agency": agency_id}).result_rows}
+
+
+def _spans(rows) -> dict[str, tuple[date, date]]:
+    return {stem: (span[0], span[1]) for stem, span in rows}
+
+
+def spans(ch, agency_id: int) -> dict[str, tuple[date, date]]:
+    """Each of the agency's version names with a recorded span, at its latest one."""
+    return _spans(ch.query(_SPANS_SQL, parameters={"agency": agency_id}).result_rows)
+
+
+def record_span(ch, agency_id: int, stem: str, span: tuple[date, date]) -> None:
+    """Record that version *stem* covers *span*, unless that is already its latest span.
+
+    A changed span moves which version is in force on the days between the
+    two, which analyze finds by comparing what it last built against
+    (pipeline.analyze), so nothing is cleared here.
+    """
+    if spans(ch, agency_id).get(stem) == span:
+        return
+    ch.insert(
+        SPANS,
+        [(agency_id, stem, span[0], span[1], datetime.now(timezone.utc))],
+        column_names=["agency_id", "static_version_id", "first_day", "last_day", "recorded_at"],
+    )
+
+
+# The loaded name and its calendar's bounds, read in one statement so they
+# describe one timetable. calendar_dates holds raw text, compared here only as
+# eight digits, which sort in calendar order.
+_LOADED_CALENDAR_SQL = """
+    SELECT (SELECT max(static_version_id) FROM static_trips WHERE agency_id = %(agency)s),
+           (SELECT min(start_date) FROM static_calendar WHERE agency_id = %(agency)s),
+           (SELECT max(end_date) FROM static_calendar WHERE agency_id = %(agency)s),
+           (SELECT min(date) FROM static_calendar_dates WHERE agency_id = %(agency)s AND date ~ '^[0-9]{8}$'),
+           (SELECT max(date) FROM static_calendar_dates WHERE agency_id = %(agency)s AND date ~ '^[0-9]{8}$')
+"""
+
+
+def _record_loaded_span(conn, ch, agency_id: int) -> None:
+    """Record the loaded version's span from its calendar when it has none.
+
+    load_static records each timetable's span as it loads it, from
+    feed_info.txt where the zip has one, so this reaches only a timetable
+    loaded before spans were kept, whose feed_info.txt is gone.
+    """
+    with conn.cursor() as cur:
+        cur.execute(_LOADED_CALENDAR_SQL, {"agency": agency_id})
+        stem, first, last, first_date, last_date = cur.fetchone()
+    if stem is None or stem in spans(ch, agency_id):
+        return
+    covered = [(first, last)] if first is not None and last is not None else []
+    covered += [(day, day) for day in map(gtfs_date, (first_date, last_date)) if day is not None]
+    span = version_span(None, None, covered)
+    if span is not None:
+        record_span(ch, agency_id, stem, span)
+
+
+def archive_joined_tables() -> list[str]:
+    """The tables that read the archive: by each row's version, or by the version in force on its service date."""
     # agg_registry imports ch_aggregates, which imports this module: imported here, at call time.
     from pipeline import agg_registry
     from pipeline.agg_registry import Timetable
+
+    return [
+        name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED or table.in_force
+    ]
+
+
+def clear_archive_joined_states(conn, agency_id: int) -> None:
+    """Clear the states of the agency's tables that read the archive, so its next analyze rebuilds them in full."""
+    clear_states(conn, agency_id, archive_joined_tables())
+
+
+def clear_states(conn, agency_id: int, names: list[str]) -> None:
+    """Clear the states of the agency's tables *names*, so its next analyze rebuilds them in full."""
     from pipeline.locks import agency_ingest_lock
 
-    names = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
     # Under the agency lock: an analyze in flight would otherwise record these
     # states again at its end, as built, and the rebuild would be lost. Within
     # analyze itself the lock is the session's own, taken again.
@@ -192,8 +555,10 @@ def clear_archive_joined_states(conn, agency_id: int) -> None:
         conn.commit()
 
 
-def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
-    """Record that the loaded version name carries *key*, unless that is already its latest mapping.
+def _map(conn, ch, agency_id: int, key: str, parts: list[str], mirror_conn) -> None:
+    """Record that the loaded version name carries *key*, unless that is
+    already its latest mapping, and mirror the name's latest mapping into
+    *mirror_conn*.
 
     A name already mapped to other content (a timetable refetched under the
     same name) leaves the dates ingested under it built against the other one,
@@ -203,13 +568,16 @@ def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
     if stem is None:
         return
     latest = ch.query(
-        f"SELECT argMax(content_hash, archived_at) FROM {VERSION_MAP} "
+        f"SELECT argMax(tuple(content_hash, archived_at), archived_at) FROM {VERSION_MAP} "
         "WHERE agency_id = {agency:Int32} AND static_version_id = {stem:String}",
         parameters={"agency": agency_id, "stem": stem},
     ).result_rows
-    # argMax over no rows is '', which no content is.
-    previous = latest[0][0] if latest else ""
+    # An aggregate over no rows is still one row, ('', the epoch), and '' is no content.
+    previous, previous_at = latest[0][0]
     if previous == key:
+        # Mirrored again from the map's own row: a name mapped before the
+        # mirror existed, or whose mirror write failed, catches up here.
+        mirror(mirror_conn, [Mapping(agency_id, stem, key, previous_at)])
         return
     # A load replaces the name and the content in one commit, so content read
     # after the name still matching *parts* means the name read was *key*'s.
@@ -224,32 +592,130 @@ def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
         # Cleared and committed before the map row lands, so a process that
         # dies in between still rebuilds them; clearing again is harmless.
         clear_archive_joined_states(conn, agency_id)
+    archived_at = _map_time()
     ch.insert(
         VERSION_MAP,
-        [(agency_id, stem, key, datetime.now(timezone.utc))],
+        [(agency_id, stem, key, archived_at)],
         column_names=["agency_id", "static_version_id", "content_hash", "archived_at"],
     )
+    # After the map row, so the mirror never names a content the map does not.
+    mirror(mirror_conn, [Mapping(agency_id, stem, key, archived_at)])
+
+
+def _map_time() -> datetime:
+    """Now, at the map's millisecond precision, so the mirror holds the map row's own time."""
+    now = datetime.now(timezone.utc)
+    return now.replace(microsecond=now.microsecond - now.microsecond % 1000)
+
+
+class Mapping(NamedTuple):
+    """A version name's content in the map, and when the map recorded it."""
+
+    agency_id: int
+    stem: str
+    content: str
+    archived_at: datetime
+
+
+def _utc(at: datetime) -> datetime:
+    # The map's times are UTC, which a client may return without a zone.
+    return at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at
+
+
+_LATEST_MAPPINGS_SQL = (
+    f"SELECT agency_id, static_version_id, argMax(tuple(content_hash, archived_at), archived_at) "
+    f"FROM {VERSION_MAP} GROUP BY agency_id, static_version_id ORDER BY agency_id, static_version_id"
+)
+
+
+def latest_mappings(ch) -> list[Mapping]:
+    """Every agency's mapped version names, each at its latest content, by agency then name."""
+    rows = ch.query(_LATEST_MAPPINGS_SQL).result_rows
+    return [Mapping(agency, stem, latest[0], _utc(latest[1])) for agency, stem, latest in rows]
+
+
+def mirror(conn, mappings: Iterable[tuple[int, str, str, datetime]]) -> int:
+    """Copy *mappings* (:class:`Mapping` or its tuple), each (agency, name) at
+    most once, into the map's Postgres mirror and commit; how many rows changed.
+
+    A name keeps its row unless *mappings* maps it later, so the mirror holds
+    each name at the latest content the map gives it, whichever copy lands
+    last, and copying a mapping again changes nothing. Committed at once: the
+    map has no rollback, and a mirror row left in a caller's transaction would
+    be lost with it.
+    """
+    rows = [(agency_id, stem, content, _utc(archived_at)) for agency_id, stem, content, archived_at in mappings]
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        written = psycopg2.extras.execute_values(
+            cur,
+            f"INSERT INTO {MIRROR} (agency_id, static_version_id, content_hash, archived_at) VALUES %s "
+            "ON CONFLICT (agency_id, static_version_id) DO UPDATE "
+            "SET content_hash = EXCLUDED.content_hash, archived_at = EXCLUDED.archived_at "
+            f"WHERE {MIRROR}.archived_at < EXCLUDED.archived_at RETURNING 1",
+            rows,
+            fetch=True,
+        )
+    conn.commit()
+    return len(written)
+
+
+# A step below the day number of any date, so every date has one at or before it.
+_BEFORE_EVERY_DAY = -(2**31)
+
+
+def _day_number(day: date) -> int:
+    """*day* as ClickHouse's toInt32 of a Date or Date32 gives it: days since 1970-01-01."""
+    return (day - date(1970, 1, 1)).days
 
 
 class ScheduleJoin(NamedTuple):
     """Which archived timetable each version name joins, and the loaded one every other row joins.
 
     *current* is the loaded timetable's key, or "" with none loaded: then only
-    rows of a mapped name join anything.
+    rows of a mapped name join anything. *force* is the versions in force over
+    the agency's service dates, disjoint and in date order
+    (pipeline.timetable_in_force), each a mapped name whose content's schedule
+    is kept, so a row of a date one covers is filed under it (Stamp). *filed*
+    is the dates whose refiled rows
+    pipeline.refiled wrote, each with the build a read takes (Stamp.FILED).
     """
 
     stems: list[str]
     hashes: list[str]
     current: str
+    force: tuple[Segment, ...] = ()
+    filed: tuple[tuple[date, str], ...] = ()
+
+    def filed_dates(self) -> set[date]:
+        return {day for day, _build in self.filed}
 
     def content_of(self) -> Callable[[str], str]:
         """The content each version name joins: its mapped one, else the loaded one."""
         mapped = dict(zip(self.stems, self.hashes, strict=True))
         return lambda stem: mapped.get(stem, self.current)
 
-    def params(self, present: Iterable[str] | None = None) -> dict:
+    def in_force(self) -> list[tuple[date, date, str, str]]:
+        """Each segment of *force* with its content: (first, last, version name, content)."""
+        mapped = dict(zip(self.stems, self.hashes, strict=True))
+        return [(s.first, s.last, s.stem, mapped[s.stem]) for s in self.force]
+
+    def filing_params(self, between: tuple[date, date]) -> dict:
+        """The bound parameters observation_rows reads to file rows of the
+        service dates *between* (force_params) under Stamp.IN_FORCE, REFIT or FILED."""
+        return {
+            "join_stems": self.stems,
+            "join_hashes": self.hashes,
+            **self.force_params(between),
+            **self._filed_params(between),
+        }
+
+    def params(self, present: Iterable[str] | None = None, between: tuple[date, date] | None = None) -> dict:
         """The join's bound parameters. *present*, the version names of the rows
-        being joined, narrows the archive side to the contents they join."""
+        being joined, narrows the archive side to the contents they join, and
+        *between* the versions in force to those of the read's dates
+        (force_params)."""
         mapped = dict(zip(self.stems, self.hashes, strict=True))
         if present is None:
             contents = {*self.hashes, self.current}
@@ -260,14 +726,441 @@ class ScheduleJoin(NamedTuple):
             "join_hashes": self.hashes,
             "join_current": self.current,
             "join_contents": sorted(contents - {""}),
+            **self.force_params(between),
+            **self._filed_params(between),
+        }
+
+    def _filed_params(self, between: tuple[date, date] | None) -> dict:
+        """The written dates of *filed* within *between* and their builds, which a FILED read binds."""
+        if not self.filed:
+            return {}
+        filed = [(day, build) for day, build in self.filed if between is None or between[0] <= day <= between[1]]
+        days = [day for day, _ in filed]
+        skips = _capture_skips(days)
+        unwritten = between is None or (between[1] - between[0]).days + 1 > len(days)
+        return {
+            # 0 when every date the read reaches is written: its rows of
+            # `updates` would all be filed under written dates or outside it.
+            "filed_rest": int(unwritten),
+            "filed_dates": days,
+            "filed_builds": [build for _, build in filed],
+            # No written date binds an empty range, which reads none.
+            "filed_first": min(days, default=date(1970, 1, 2)),
+            "filed_last": max(days, default=date(1970, 1, 1)),
+            **{f"filed_skip_from_{i}": start for i, (start, _end) in enumerate(skips)},
+            **{f"filed_skip_to_{i}": end for i, (_start, end) in enumerate(skips)},
+        }
+
+    def force_params(self, between: tuple[date, date] | None = None) -> dict:
+        """The bound parameters of the segments in force, which IN_FORCE_STEM_SQL reads.
+
+        *between*, the first and last service dates a read can reach (both
+        inclusive), keeps only the segments overlapping them, so a REFIT read
+        loads only those versions' schedules. A read must not reach a date
+        outside it: a row there would be read as having none in force. The
+        dates are those its rows are filed under (FILED_DATE_SQL), which for a
+        read selecting rows by capture reach a day either side of theirs.
+
+        The segments bind as steps over day numbers (_force_at): a segment's
+        first day steps to its place, and the day after its last steps back to
+        0 unless the next segment starts there. Days before the first segment are 0.
+        """
+        mapped = dict(zip(self.stems, self.hashes, strict=True))
+        force = [s for s in self.force if between is None or (s.first <= between[1] and between[0] <= s.last)]
+        steps = {_BEFORE_EVERY_DAY: 0}
+        for at, segment in enumerate(force, start=1):
+            steps[_day_number(segment.first)] = at
+            steps[_day_number(segment.last) + 1] = 0
+        return {
+            "force_steps": list(steps),
+            "force_step_at": list(steps.values()),
+            "force_stems": [s.stem for s in force],
+            "force_contents": [mapped[s.stem] for s in force],
         }
 
 
-def schedule_join(ch, agency_id: int, current: str | None) -> ScheduleJoin:
-    """The agency's version map, each name at its latest content, with *current* the loaded timetable's key."""
-    rows = ch.query(
-        f"SELECT static_version_id, argMax(content_hash, archived_at) FROM {VERSION_MAP} "
-        "WHERE agency_id = {agency:Int32} GROUP BY static_version_id ORDER BY static_version_id",
-        parameters={"agency": agency_id},
-    ).result_rows
-    return ScheduleJoin([row[0] for row in rows], [row[1] for row in rows], current or "")
+# How many runs of written dates a FILED read skips in `updates` by capture:
+# a fixed count, so its SQL text never depends on the data. A read reaching
+# more runs skips the longest, and tests the rest row by row.
+FILED_SKIP_RUNS = 8
+_NO_SKIP = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+# The latest scheduled offset _capture_skips files exactly: a later one
+# captured early in a run's day shifts back past the run's first day.
+MAX_EXACT_SKIP_OFFSET_SEC = 44 * 3600
+
+
+def _capture_skips(days: list[date]) -> list[tuple[datetime, datetime]]:
+    """For each run of consecutive *days*, longest first and at most
+    FILED_SKIP_RUNS, the captures a FILED read skips in `updates`: from its
+    first day's start plus the filing reach to the day after its last's
+    start less the reach. FILED_DATE_SQL files a reading captured there under
+    a day of the run, whose rows FILED_TABLE holds, and one captured outside
+    can file under a day beside the run. That holds for scheduled offsets
+    under 44:00 (MAX_EXACT_SKIP_OFFSET_SEC); a reading scheduled later and
+    captured in a run day's first hours files under the day before. Unused
+    slots skip nothing."""
+    runs: list[tuple[date, date]] = []
+    for day in sorted(set(days)):
+        if runs and runs[-1][1] + timedelta(days=1) == day:
+            runs[-1] = (runs[-1][0], day)
+        else:
+            runs.append((day, day))
+    runs.sort(key=lambda run: run[1] - run[0], reverse=True)
+    reach = timedelta(hours=FILING_REACH_HOURS)
+    skips = [
+        (service_day_start_utc(first) + reach, service_day_start_utc(last + timedelta(days=1)) - reach)
+        for first, last in runs[:FILED_SKIP_RUNS]
+    ]
+    return skips + [(_NO_SKIP, _NO_SKIP)] * (FILED_SKIP_RUNS - len(skips))
+
+
+# A FILED read's `updates` rows outside every skipped span, as ranges the sort key prunes on.
+_OUTSIDE_SKIPS = " AND ".join(
+    f"(u.captured_at < {{filed_skip_from_{i}:DateTime64}} OR u.captured_at >= {{filed_skip_to_{i}:DateTime64}})"
+    for i in range(FILED_SKIP_RUNS)
+)
+
+
+def schedule_join(ch, agency_id: int, current: str | None, *, by_service_date: bool = False) -> ScheduleJoin:
+    """The agency's version map, each name at its latest content, with *current* the loaded timetable's key.
+
+    *by_service_date* adds the versions in force, for an agency whose ingest
+    stamps each row's version (pipeline.strategies.static_join): only those
+    rows' schedule came from a join a later one can redo. A version whose
+    content's schedule is not kept leaves the dates it is in force over with
+    none, so their rows keep what ingest joined.
+    """
+    parameters = {"agency": agency_id}
+    rows = ch.query(_VERSION_MAP_SQL, parameters=parameters).result_rows
+    if not by_service_date:
+        return _schedule_join(rows, current)
+    kept = ch.query(_SCHEDULED_SQL, parameters=parameters).result_rows
+    return _schedule_join(rows, current, (kept, ch.query(_SPANS_SQL, parameters=parameters).result_rows))
+
+
+async def schedule_join_async(
+    ch, agency_id: int, current: str | None, *, by_service_date: bool = False
+) -> ScheduleJoin:
+    """schedule_join through an async ClickHouse client."""
+    parameters = {"agency": agency_id}
+    rows = (await ch.query(_VERSION_MAP_SQL, parameters=parameters)).result_rows
+    if not by_service_date:
+        return _schedule_join(rows, current)
+    kept = (await ch.query(_SCHEDULED_SQL, parameters=parameters)).result_rows
+    return _schedule_join(rows, current, (kept, (await ch.query(_SPANS_SQL, parameters=parameters)).result_rows))
+
+
+def _schedule_join(map_rows, current: str | None, in_force_rows: tuple | None = None) -> ScheduleJoin:
+    """The join of _VERSION_MAP_SQL's rows, with the versions in force from
+    _SCHEDULED_SQL's and _SPANS_SQL's rows when *in_force_rows* holds them."""
+    stems, hashes = [row[0] for row in map_rows], [row[1] for row in map_rows]
+    force: tuple[Segment, ...] = ()
+    if in_force_rows is not None:
+        kept_rows, span_rows = in_force_rows
+        mapped = dict(zip(stems, hashes, strict=True))
+        kept = {row[0] for row in kept_rows}
+        versions = [Version(stem, *span) for stem, span in _spans(span_rows).items() if stem in mapped]
+        force = tuple(s for s in in_force(versions) if mapped[s.stem] in kept)
+    return ScheduleJoin(stems, hashes, current or "", force)
+
+
+class Stamp(str, Enum):
+    """Which timetable a read of `updates` files each row under (observation_rows).
+
+    INGESTED: the one ingest joined, as it stamped the row.
+
+    IN_FORCE: the version in force on the service date the row is filed
+    under (ScheduleJoin.force, FILED_DATE_SQL) names the row, and its schedule
+    columns stay as ingested. Exact where that version's content is the one ingest joined,
+    which is every row but those REFIT reads.
+
+    REFIT: IN_FORCE, and a row whose ingest joined other content than the
+    version in force carries that version's schedule: its service, scheduled
+    time and seconds. A row whose stop that version lacks carries none, as
+    ingest leaves a row the timetable misses. The content ingest joined is the
+    one its version name maps to. A row with no name (its trip missed the
+    timetable then loaded) or a name the archive does not map joined content
+    that cannot be told, so it is read from the version in force whenever one
+    is; a trip no timetable has stays without a schedule.
+
+    The route is the one exception: a refiled row takes the version's route
+    only where it has none. Ingest writes the feed's route_id, or the loaded
+    timetable's route for the trip where the feed names none, and the stored
+    row does not say which, so a route ingest filled from another timetable
+    stays. A trip_id rarely changes route between revisions.
+
+    FILED: REFIT's rows, without its archive join. The rows of each date
+    ScheduleJoin.filed names are read from FILED_TABLE, where pipeline.refiled
+    wrote them as REFIT files them, and every other date's rows as IN_FORCE
+    reads them. Exact where no other date the read reaches holds a row REFIT
+    refiles (refit_dates), and only while each written date's filing holds
+    (pipeline.refiled.valid_builds).
+    """
+
+    INGESTED = "ingested"
+    IN_FORCE = "in_force"
+    REFIT = "refit"
+    FILED = "filed"
+
+    @property
+    def refiles(self) -> bool:
+        """Whether a row's schedule and route can be other than ingest stored."""
+        return self in (Stamp.REFIT, Stamp.FILED)
+
+
+# The service date a stored row is filed under (pipeline.service_day.filed_date_ch).
+FILED_DATE_SQL = filed_date_ch("u.")
+
+
+def _force_at(date_sql: str) -> str:
+    """The place of service date *date_sql* in the bound segments in force
+    (ScheduleJoin.force_params), 0 for a date none covers; element 0 of an
+    array is its type's default, ''. The date's day number rounds down to the
+    last step at or before it, which a function taking the steps as a constant
+    array finds without the per-row copy a lambda reading them would make."""
+    return (
+        f"transform(roundDown(toInt32({date_sql}), {{force_steps:Array(Int32)}}), "
+        "{force_steps:Array(Int32)}, {force_step_at:Array(UInt32)}, toUInt32(0))"
+    )
+
+
+_FORCE_AT = _force_at(FILED_DATE_SQL)
+
+# The version name a row is filed under: the one in force on its service date, else its own stamp ('' for none).
+IN_FORCE_STEM_SQL = f"if({_FORCE_AT} = 0, ifNull(u.static_version_id, ''), {{force_stems:Array(String)}}[{_FORCE_AT}])"
+
+# The content ingest joined a row to: its version name's mapped one, or '' where it cannot be told.
+_STAMPED_CONTENT = (
+    "transform(ifNull(u.static_version_id, ''), {join_stems:Array(String)}, {join_hashes:Array(String)}, '')"
+)
+
+_REFIT_COLUMNS = {
+    "service_type": "if(u.refit, s.service_type, u.service_type)",
+    "scheduled_time": "if(u.refit, s.scheduled_time, u.scheduled_time)",
+    "scheduled_sec": "if(u.refit, s.scheduled_sec, u.scheduled_sec)",
+    "route_code": "if(u.refit AND u.route_code IS NULL, s.route_id, u.route_code)",
+}
+
+
+def _marked_rows(where: str, table: str, source: str | None = None) -> str:
+    """*table*'s rows matching *where*, or *source*'s rows, each with its place
+    among the segments in force, and whether REFIT reads its schedule from the
+    archive."""
+    rows = f"{checked_table(table)} AS u WHERE {where}" if source is None else f"{source} AS u"
+    return (
+        f"SELECT u.*, {FILED_DATE_SQL} AS filed_date, {_FORCE_AT} AS force_at, "
+        "{force_contents:Array(String)}[force_at] AS force_content, "
+        f"force_content != '' AND force_content != {_STAMPED_CONTENT} AS refit, "
+        "if(refit, force_content, '') AS refit_content "
+        f"FROM {rows}"
+    )
+
+
+# The columns a row is filed by (_marked_rows, _REFIT_COLUMNS), and the stop event it is part of.
+_STOP_EVENT_KEYS = (
+    "agency_id",
+    "trip_id",
+    "stop_sequence",
+    "static_version_id",
+    "route_code",
+    "service_type",
+    "scheduled_time",
+    "scheduled_sec",
+)
+
+
+def _stop_events(where: str, table: str) -> str:
+    """*table*'s rows matching *where*, one per stop event (a trip's stop on
+    the service day it is filed under, FILED_DATE_SQL) and stored schedule and
+    version name, with `updates`'
+    columns: the latest poll's capture, file name, departure delay, both
+    schedule relationships and stop, by (captured_at, file_name), and any
+    poll's of the rest. Every poll grouped together is filed alike, so a read keeping only
+    each stop event's latest poll among those it files together, and whether
+    that poll withdraws the departure (pipeline.db.latest_departure_ch), reads
+    the same rows from these, filing a fraction as many. The latest poll's
+    fields are taken in a tuple, which argMax does not skip as it skips a
+    NULL argument."""
+    latest = "max((u.captured_at, u.file_name))"
+    reading = (
+        "argMax(tuple(u.dep_delay, u.schedule_relationship_trip, u.schedule_relationship_stop, u.stop_id), "
+        "(u.captured_at, u.file_name))"
+    )
+    picked = {
+        "captured_at": f"tupleElement({latest}, 1)",
+        "file_name": f"tupleElement({latest}, 2)",
+        "dep_delay": f"tupleElement({reading}, 1)",
+        "schedule_relationship_trip": f"tupleElement({reading}, 2)",
+        "schedule_relationship_stop": f"tupleElement({reading}, 3)",
+        "stop_id": f"tupleElement({reading}, 4)",
+    }
+    columns = ", ".join(
+        f"u.{column} AS event_{column}"
+        if column in _STOP_EVENT_KEYS
+        else f"{picked.get(column, f'any(u.{column})')} AS event_{column}"
+        for column in UPDATE_COLUMNS
+    )
+    keys = ", ".join(f"u.{column}" for column in _STOP_EVENT_KEYS)
+    return (
+        f"(SELECT {', '.join(f'event_{column} AS {column}' for column in UPDATE_COLUMNS)} FROM "
+        f"(SELECT {columns} FROM {checked_table(table)} AS u WHERE {where} "
+        f"GROUP BY {keys}, {FILED_DATE_SQL}))"
+    )
+
+
+_IN_FORCE_STEM = "if(u.force_at = 0, u.static_version_id, {force_stems:Array(String)}[u.force_at])"
+
+# The columns filing rewrites, which FILED_TABLE keeps beside the stored ones as filed_<column>.
+FILED_COLUMNS = ("static_version_id", *_REFIT_COLUMNS)
+
+
+def _archive_join(live_form: bool) -> str:
+    """REFIT's join of _marked_rows' rows, aliased `u`, to the schedules of the
+    contents in force, aliased `s`."""
+    if live_form:
+        keys = "cityHash64(content_hash, trip_id, stop_sequence) AS archive_key"
+        on = "s.archive_key = cityHash64(u.refit_content, toString(u.trip_id), toInt32(u.stop_sequence))"
+    else:
+        keys = "content_hash, trip_id, stop_sequence"
+        on = "s.content_hash = u.refit_content AND s.trip_id = u.trip_id AND s.stop_sequence = toInt32(u.stop_sequence)"
+    return (
+        f"ANY LEFT JOIN (SELECT {keys}, service_type, route_id, scheduled_time, "
+        f"scheduled_sec FROM {SCHEDULE} WHERE agency_id = {{agency_id:UInt16}} "
+        "AND has({force_contents:Array(String)}, content_hash)) AS s "
+        f"ON {on}"
+    )
+
+
+def refiled_rows_sql(where: str) -> str:
+    """The SELECT of `updates`' rows matching *where* (on `u.` columns) that
+    FILED_TABLE keeps: every column as stored, in UPDATE_COLUMNS order, then
+    filed_date, then each of FILED_COLUMNS as REFIT files it, as filed_<column>.
+    It binds ScheduleJoin.params and joins the archive on its exact keys, as
+    analyze's REFIT reads do, so a FILED read gives their rows."""
+    filed = {column: _REFIT_COLUMNS.get(column, _IN_FORCE_STEM) for column in FILED_COLUMNS}
+    columns = [f"u.{column} AS {column}" for column in UPDATE_COLUMNS]
+    columns.append("u.filed_date AS filed_date")
+    columns += [f"{filed[column]} AS filed_{column}" for column in FILED_COLUMNS]
+    return f"SELECT {', '.join(columns)} FROM ({_marked_rows(where, UPDATES_TABLE)}) AS u {_archive_join(False)}"
+
+
+def _written_rows(where: str) -> str:
+    """FILED_TABLE's rows of the written dates a FILED read binds, matching
+    *where* on their stored columns, as filed_date and `updates`' columns
+    filed. *where* is tested in the inner query, where no filed alias exists,
+    so a bare column in it names the stored one, as on `updates`. The date
+    range lets the sort key and the partitions prune; the dates and builds
+    pick the written rows, by IN, which tests a set where has() would scan
+    the array for every row."""
+    columns = ", ".join(
+        f"u.filed_{column} AS {column}" if column in FILED_COLUMNS else f"u.{column} AS {column}"
+        for column in UPDATE_COLUMNS
+    )
+    rows = (
+        f"SELECT * FROM {FILED_TABLE} AS u WHERE u.agency_id = {{agency_id:UInt16}} "
+        "AND u.filed_date BETWEEN {filed_first:Date} AND {filed_last:Date} "
+        "AND u.filed_date IN {filed_dates:Array(Date)} "
+        f"AND u.build IN {{filed_builds:Array(String)}} AND ({where})"
+    )
+    return f"SELECT u.filed_date AS filed_date, {columns} FROM ({rows}) AS u"
+
+
+def _filed_columns(refit: bool) -> str:
+    columns = ["u.filed_date AS filed_date"]
+    for column in UPDATE_COLUMNS:
+        if column == "static_version_id":
+            expression = _IN_FORCE_STEM
+        elif refit and column in _REFIT_COLUMNS:
+            expression = _REFIT_COLUMNS[column]
+        else:
+            expression = f"u.{column}"
+        columns.append(f"{expression} AS {column}")
+    return ", ".join(columns)
+
+
+def observation_rows(
+    where: str,
+    stamp: Stamp,
+    table: str = UPDATES_TABLE,
+    filed_where: str = "",
+    *,
+    live_form: bool = False,
+    by_stop_event: bool = False,
+) -> str:
+    """The FROM clause of a read of *table*'s rows matching *where*, aliased
+    `u`, with `updates`' columns, each row filed under *stamp*'s timetable.
+
+    *where* names columns as `u.` columns and is tested on each row as ingest
+    stored it. A column filing rewrites (static_version_id, and under REFIT
+    service_type, scheduled_time, scheduled_sec and route_code) may be tested
+    there only by a test that keeps a row lacking it: REFIT gives a schedule to
+    a row ingest left without one, which a test needing it would drop first.
+    A test of the filed value goes in *filed_where*, on the filed row. The
+    timeliness cutoff (pipeline.db.timely_reading_ch) reads the stored
+    scheduled_sec on purpose, as FILED_DATE_SQL does: a reading is timely or
+    not, like its filed day, whichever stamp reads it, and it is tested before
+    REFIT's per-event pick (_stop_events), so a stop event falls back to its
+    last timely reading instead of losing a late one picked as its latest. A
+    revision that moves a stop's time moves its bound by as much.
+
+    Under INGESTED the clause is the table itself; otherwise a subquery that
+    binds ScheduleJoin.params, which files a row only by the segments in force,
+    and carries `filed_date`, the service date FILED_DATE_SQL files the row as
+    stored under (filed_date_sql). REFIT also joins the schedule archive, so a
+    read whose rows need none of it (refit_dates) is cheaper under IN_FORCE,
+    with the same result.
+
+    *live_form*, for a read inside the API's time budget
+    (pipeline.live_filing), joins the archive on one 64-bit hash of its three
+    keys instead of the keys themselves, which ClickHouse probes several times
+    faster. A hash two stop times share would file a row under the other's
+    schedule; those reads accept that bound, while analyze, whose figures are
+    versioned by this SQL's text (pipeline.agg_registry), keeps the exact
+    join. *by_stop_event* files one row per stop event and stored schedule
+    (_stop_events) under REFIT, for a read that keeps only each stop event's
+    latest delay.
+
+    FILED reads `updates` only, and needs neither: it joins nothing. Its
+    written dates' rows come from FILED_TABLE, tested by *where* on their
+    stored columns as a row of `updates` is, and the rest from *table*.
+    """
+    if stamp is Stamp.INGESTED:
+        return f"FROM {checked_table(table)} AS u WHERE {where}" + (f" AND ({filed_where})" if filed_where else "")
+    after = f" WHERE {filed_where}" if filed_where else ""
+    if stamp is Stamp.FILED:
+        if table != UPDATES_TABLE:
+            raise ValueError(f"only {UPDATES_TABLE}' rows are written filed, not {table}'")
+        rest = _marked_rows(
+            f"{{filed_rest:UInt8}} = 1 AND ({where}) AND {_OUTSIDE_SKIPS} "
+            f"AND {FILED_DATE_SQL} NOT IN {{filed_dates:Array(Date)}}",
+            table,
+        )
+        return f"FROM (SELECT {_filed_columns(False)} FROM ({rest}) AS u UNION ALL {_written_rows(where)}) AS u{after}"
+    events = by_stop_event and stamp is Stamp.REFIT
+    marked = _marked_rows(where, table, _stop_events(where, table) if events else None)
+    if stamp is Stamp.IN_FORCE:
+        return f"FROM (SELECT {_filed_columns(False)} FROM ({marked}) AS u) AS u{after}"
+    return f"FROM (SELECT {_filed_columns(True)} FROM ({marked}) AS u {_archive_join(live_form)}) AS u{after}"
+
+
+def filed_date_sql(stamp: Stamp) -> str:
+    """The service date a row read through observation_rows under *stamp* is
+    filed under: FILED_DATE_SQL of the row as stored, which a refiled row
+    carries as `filed_date` because its schedule columns are the archive's."""
+    return FILED_DATE_SQL if stamp is Stamp.INGESTED else "u.filed_date"
+
+
+def refit_dates(
+    ch, agency_id: int, where: str, params: dict, join: ScheduleJoin, between: tuple[date, date] | None = None
+) -> set[date]:
+    """The service dates holding a row matching *where* (on `u.` columns) whose
+    schedule Stamp.REFIT reads from the archive. *between* bounds the dates
+    *where* can reach (ScheduleJoin.force_params)."""
+    sql = (
+        "SELECT DISTINCT filed_date FROM "
+        f"({_marked_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', UPDATES_TABLE)}) WHERE refit"
+    )
+    rows = ch.query(sql, parameters={"agency_id": agency_id, **params, **join.params(between=between)}).result_rows
+    return {row[0] for row in rows}

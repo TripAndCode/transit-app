@@ -8,8 +8,10 @@ import {
   Workflow,
   LayoutDashboard,
   MessageCircle,
+  BarChart3,
   ScrollText,
   ToggleLeft,
+  ArrowLeftRight,
   type LucideIcon,
 } from "lucide-react";
 import { usePendingApprovalCount } from "./pendingApprovals";
@@ -29,6 +31,8 @@ const NAV_GROUPS: readonly { groupKey: string; items: readonly NavItem[] }[] = [
       { to: "/admin/agencies", labelKey: "admin.nav.agencies", Icon: Building2 },
       { to: "/admin/ops", labelKey: "admin.nav.ops", Icon: Activity },
       { to: "/admin/ask", labelKey: "admin.nav.ask_ops", Icon: MessageCircle },
+      { to: "/admin/usage", labelKey: "admin.nav.usage", Icon: BarChart3 },
+      { to: "/admin/transfers", labelKey: "admin.nav.transfers", Icon: ArrowLeftRight },
     ],
   },
   {

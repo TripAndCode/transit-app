@@ -270,20 +270,20 @@ async def compute_rain_delay(agency_id: int, ctx: RangeCtx, conn) -> dict[str, A
 
 # Plain-language, jargon-free (no "pooled"/"association"/"n="), and explicit on
 # all three of: these are observations, not a forecast; the comparison is not a
-# cause; and what a "measurement" is, so the sample counts aren't ambiguous.
+# cause; and what an "observation" is, so the observation counts aren't ambiguous.
 _DISCLAIMER: dict[str, str] = {
     "ja": (
         "実際に観測された日々の降水量（雨が降った日＝日降水量1mm以上）と、その日の遅れの記録を"
         "日付で突き合わせて平均を比べたものです。天気予報や将来の遅れの予測ではありません。"
         "雨が遅れの原因であることを示すものでもありません（行事や工事なども同じ日に重なります）。"
-        "遅れの記録1回＝ある日のある停留所での1計測です。"
+        "遅れの記録1件＝ある日のある停留所での1観測です。"
     ),
     "en": (
         "Compares the average recorded delay on days when rain was actually observed "
         "(1 mm or more for the day) against days when it was not, matched by date. It is "
         "not a weather forecast and not a prediction of future delays, and it does not show "
         "that rain caused the difference -- events, roadworks and the like fall on the same "
-        "days. Each delay measurement is one stop, on one run, on one day."
+        "days. Each delay observation is one stop, on one run, on one day."
     ),
 }
 

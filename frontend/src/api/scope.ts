@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
 import { useSearchParams } from "react-router-dom";
+import { EARLY_ANY, type ScopeEarly } from "./onTimeDefault";
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 /** A legacy group, or a Monday-first comma list of weekdays (see canonicalDow). */
@@ -23,9 +24,10 @@ export type Scope = {
   hour: [number, number] | null;
   stop: string | null;
   dir: 0 | 1 | null;
-  /** On-time tolerances in seconds. */
+  /** On-time tolerances in seconds, each the default's when unset
+   *  (onTimeDefault.ts); `early` "any" counts every early departure. */
   late: number | null;
-  early: number | null;
+  early: ScopeEarly;
 };
 
 /** `null` clears a param (and, for from/to, falls back to the default period). */
@@ -105,6 +107,7 @@ function canon(key: ScopeParam, raw: string): string | null {
       return raw === "0" || raw === "1" ? raw : null;
     case "late":
     case "early":
+      if (key === "early" && raw === EARLY_ANY) return raw;
       return /^\d{1,4}$/.test(raw) && Number(raw) <= MAX_TOLERANCE_SEC ? String(Number(raw)) : null;
   }
 }
@@ -138,7 +141,7 @@ export function parseScope(params: URLSearchParams, defaults: { from: string; to
     stop: get("stop"),
     dir: num("dir") as 0 | 1 | null,
     late: num("late"),
-    early: num("early"),
+    early: get("early") === EARLY_ANY ? EARLY_ANY : num("early"),
   };
 }
 

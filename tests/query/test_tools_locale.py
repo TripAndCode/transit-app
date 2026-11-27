@@ -54,61 +54,6 @@ def test_summary_interpolates_vars():
     assert out == "Delay ranking, top 10 routes"
 
 
-def test_summary_suggest_reason_anomaly_exact_strings():
-    """Insight Panel reason text is pinned exactly in both locales -- a
-    substring check (e.g. `"0%" in text`) would miss a wording regression
-    or the ja/en templates drifting out of sync in content. The card names
-    the route above the text, so the text names the day it judged."""
-    assert (
-        _summary("suggest_reason_anomaly", lang="ja", day="10/23（金）", avg_min="6.5")
-        == "10/23（金）の平均遅延が、その前の7日間と比べて大幅に悪化しています（平均6.5分）。"
-    )
-    assert (
-        _summary("suggest_reason_anomaly", lang="en", day="Fri 10/23", avg_min="6.5")
-        == "Average delay on Fri 10/23 was much worse than over the 7 days before (avg 6.5 min)."
-    )
-
-
-def test_summary_suggest_reason_trend_worsened_exact_strings():
-    assert (
-        _summary("suggest_reason_trend_worsened", lang="ja", span="10/17（土）〜10/23（金）", delta_min="+4.0")
-        == "10/17（土）〜10/23（金）の途中から遅延が悪化しています（+4.0分の変化）。"
-    )
-    assert (
-        _summary("suggest_reason_trend_worsened", lang="en", span="Sat 10/17 – Fri 10/23", delta_min="+4.0")
-        == "Delays worsened partway through Sat 10/17 – Fri 10/23 (+4.0 min change)."
-    )
-
-
-def test_summary_suggest_reason_trend_improved_exact_strings():
-    assert (
-        _summary("suggest_reason_trend_improved", lang="ja", span="10/17（土）〜10/23（金）", delta_min="-2.5")
-        == "10/17（土）〜10/23（金）の途中から遅延が改善しています（-2.5分の変化）。"
-    )
-    assert (
-        _summary("suggest_reason_trend_improved", lang="en", span="Sat 10/17 – Fri 10/23", delta_min="-2.5")
-        == "Delays improved partway through Sat 10/17 – Fri 10/23 (-2.5 min change)."
-    )
-
-
-def test_summary_suggest_reason_on_time_fallback_exact_strings():
-    assert (
-        _summary("suggest_reason_on_time_fallback", lang="ja", span="10/17（土）〜10/23（金）", pct="21")
-        == "10/17（土）〜10/23（金）で最も定時率が低い路線です（定時率21%）。"
-    )
-    assert (
-        _summary("suggest_reason_on_time_fallback", lang="en", span="Sat 10/17 – Fri 10/23", pct="21")
-        == "The lowest on-time rate of any route over Sat 10/17 – Fri 10/23 (21% on time)."
-    )
-
-
-def test_summary_suggest_day_and_span_exact_strings():
-    assert _summary("suggest_day", lang="ja", month=10, day=23, dow="金") == "10/23（金）"
-    assert _summary("suggest_day", lang="en", month=10, day=23, dow="Fri") == "Fri 10/23"
-    assert _summary("suggest_span", lang="ja", first="10/17（土）", last="10/23（金）") == "10/17（土）〜10/23（金）"
-    assert _summary("suggest_span", lang="en", first="Sat 10/17", last="Fri 10/23") == "Sat 10/17 – Fri 10/23"
-
-
 def test_summary_schedule_realism_padding_exact_strings():
     assert (
         _summary("schedule_realism_padding_summary", lang="ja", route="16012")
@@ -123,6 +68,16 @@ def test_summary_schedule_realism_padding_exact_strings():
         _summary("schedule_realism_terminus_suffix", lang="en", pct=40, n=5)
         == " — terminus early-arrival rate 40% (n=5)"
     )
+    assert (
+        _summary("schedule_realism_timetable_suffix", lang="ja", version="gtfs_20261101", days=14)
+        == "／ダイヤ gtfs_20261101（14日分）"
+    )
+    assert (
+        _summary("schedule_realism_timetable_suffix", lang="en", version="gtfs_20261101", days=14)
+        == " — timetable gtfs_20261101 (14 days)"
+    )
+    assert _summary("schedule_realism_feed_estimate", lang="ja") == "／フィードの予測値に基づく推定値"
+    assert _summary("schedule_realism_feed_estimate", lang="en") == " — feed-based estimate"
 
 
 def test_dispatch_unknown_tool_returns_en_message():
@@ -154,7 +109,7 @@ def test_render_tool_result_table_en():
 
 
 def test_render_tool_result_series_en():
-    """Series rendering uses the EN 'mean / samples / worst' decorations."""
+    """Series rendering uses the EN 'mean / observations / worst' decorations."""
     result = ToolResult(
         kind="series",
         summary="Daily trend (2025-01-01 to 2025-01-02): mean 1.50 min",
@@ -169,7 +124,7 @@ def test_render_tool_result_series_en():
     )
     out = render_tool_result(result, locale="en")
     assert "mean 1.50 min" in out
-    assert "100 samples" in out
+    assert "100 observations" in out
     assert "worst:" in out
     assert "route 16071" in out
 
