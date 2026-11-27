@@ -22,8 +22,9 @@ Reads the tool input JSON on stdin; exit 2 = block, 0 = allow. An unreadable pay
 is refused, as the dev-store guard does.
 
 Decisions are made on shlex-tokenized statements, so a `git` reached through `-C`, a
-global option, a wrapper (`time`, `env`), `&&`/`;`/`|` or a newline, a shell `-c`
-script or `eval` is read the same way, while the words inside a commit message, a grep
+global option, a wrapper (`time`, `env`), `&&`/`;`/`|` or a newline, a backtick
+substitution, a shell `-c` script or `eval` is read the same way, and a statement
+continued over a backslash-newline is read whole, while the words inside a commit message, a grep
 pattern or an echo are prose and pass. A command shlex cannot tokenize (an unbalanced
 quote, usually an apostrophe) is read line by line for the same shapes instead, each
 line cut at its first separator or `#`.
@@ -91,11 +92,12 @@ PUSH_LONG_OPTIONS = (
 STASH_VALUE_OPTIONS = {"-m", "--message"}
 STASH_REWRITES = {"pop", "drop", "clear"}
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-OPERATOR_CHARS = "();<>|&\n"
+# A backtick opens or closes a command substitution, whose command runs.
+OPERATOR_CHARS = "();<>|&`\n"
 # An operator run that ends a statement. A redirect run that carries `&` (`2>&1`)
 # ends one too, which only shortens a statement that is scanned for every `git` in
 # it anyway.
-_STATEMENT_END = set(";|&()\n")
+_STATEMENT_END = set(";|&()`\n")
 
 # For text shlex cannot tokenize: git, optional global options (with a value that is
 # not itself the subcommand), then the subcommand.
@@ -103,7 +105,35 @@ _RAW_GIT = r"\bgit\b(?:\s+-\S+(?:\s+(?!push\b|stash\b)[^-\s]\S*)?)*"
 RAW_STASH = re.compile(_RAW_GIT + r"\s+stash\s+(?:-\S+\s+)*(pop|drop|clear)\b")
 RAW_PUSH = re.compile(_RAW_GIT + r"\s+push\b(.*)")
 # Where a push's own arguments end on an unlexed line: the next statement or a comment.
-RAW_ARGUMENTS_END = re.compile(r"\s*(?:;|&&|\|\||\||#).*$")
+RAW_ARGUMENTS_END = re.compile(r"\s*(?:;|&&|\|\||\||`|#).*$")
+
+
+def join_continued_lines(text: str) -> str:
+    """Drop each backslash-newline the shell reads as a line continuation, which
+    continues a statement rather than ending one: outside quotes and inside double
+    quotes, not inside single quotes, where a backslash is literal."""
+    out: list[str] = []
+    quote: str | None = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            out.append(ch)
+            if ch == "'":
+                quote = None
+        elif ch == "\\" and i + 1 < len(text):
+            if text[i + 1] != "\n":
+                out.append(text[i : i + 2])
+            i += 2
+            continue
+        else:
+            out.append(ch)
+            if quote is None and ch in "'\"":
+                quote = ch
+            elif ch == quote:
+                quote = None
+        i += 1
+    return "".join(out)
 
 
 def shell_tokens(text: str) -> list[str]:
@@ -311,7 +341,9 @@ def nested_verdict(statement: list[str], cwd: str) -> str | None:
 
 
 def raw_verdict(command: str, cwd: str) -> str | None:
-    for line in command.splitlines():
+    # The quote that made the text unlexable leaves its quoting unknown, so every
+    # backslash-newline is read as a continuation.
+    for line in command.replace("\\\n", "").splitlines():
         stash = RAW_STASH.search(line)
         if stash:
             return stash_verdict([stash.group(1)])
@@ -326,6 +358,7 @@ def raw_verdict(command: str, cwd: str) -> str | None:
 def verdict(command: str, cwd: str) -> str | None:
     """The reason to block `command`, or None. `cwd` is where it runs; a `cd` in an
     earlier statement moves it for the statements after."""
+    command = join_continued_lines(command)
     try:
         tokens = shell_tokens(command)
     except ValueError:

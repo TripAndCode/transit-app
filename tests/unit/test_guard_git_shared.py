@@ -12,6 +12,7 @@ executes them.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -65,6 +66,17 @@ BLOCKED = [
     pytest.param("git push origin +feature", id="force-plus-refspec"),
     pytest.param("git push origin +HEAD:feature", id="force-plus-head-refspec"),
     pytest.param("git push --force --force-with-lease origin feature", id="force-overrides-lease"),
+    # A backslash-newline continues the statement; it ends none.
+    pytest.param("git push \\\n  origin main", id="push-main-line-continuation"),
+    pytest.param("git push origin \\\nmain", id="push-main-destination-continued"),
+    pytest.param("git push \\\n--force origin feature", id="force-line-continuation"),
+    pytest.param("make check && \\\ngit push origin main", id="push-main-continued-after-and"),
+    pytest.param("git stash \\\n  pop", id="stash-pop-line-continuation"),
+    pytest.param('bash -c "git push \\\n origin main"', id="push-main-continued-inside-bash-c"),
+    pytest.param("echo don't \\\n; git push origin \\\nmain", id="push-main-continued-unlexable"),
+    # A backtick substitution runs its command.
+    pytest.param("echo `git push origin main`", id="push-main-in-backticks"),
+    pytest.param("`git stash pop`", id="stash-pop-in-backticks"),
     # Unlexable text (an apostrophe) is read line by line for the same shapes.
     pytest.param("echo don't; git stash pop", id="stash-pop-after-unbalanced-quote"),
     pytest.param("echo don't && git push origin main", id="push-main-after-unbalanced-quote"),
@@ -114,6 +126,9 @@ ALLOWED = [
     pytest.param('grep -rn "git stash pop" AGENTS.md', id="grep-prose"),
     pytest.param('echo "git push origin main"', id="echo-prose"),
     pytest.param("git log --grep 'stash pop'", id="log-grep-prose"),
+    pytest.param("echo 'git push \\\n origin main'", id="single-quoted-continuation-prose"),
+    pytest.param('git commit -m "never \\`git push origin main\\`"', id="escaped-backticks-in-message"),
+    pytest.param("git push \\\n  origin feature", id="push-branch-line-continuation"),
     pytest.param("echo don't && git status", id="unbalanced-quote-no-git-write"),
     pytest.param("git push origin feature && echo it's main", id="unbalanced-quote-prose-after-push"),
     pytest.param("echo don't; git push origin feature # main", id="unbalanced-quote-comment-after-push"),
@@ -233,6 +248,20 @@ def _bash_hook_commands(config: Path) -> list[str]:
 
 def test_the_guard_is_registered_for_claude_code():
     assert any("guard-git-shared.sh" in c for c in _bash_hook_commands(ROOT / ".claude" / "settings.json"))
+
+
+@pytest.mark.parametrize(("command", "code"), [("git stash pop", 2), ("git stash list", 0)])
+def test_the_registered_claude_code_command_runs_the_guard(command, code):
+    registered = next(c for c in _bash_hook_commands(ROOT / ".claude" / "settings.json") if "guard-git-shared.sh" in c)
+    result = subprocess.run(
+        ("bash", "-c", registered),
+        cwd=ROOT,
+        env={**os.environ, "CLAUDE_PROJECT_DIR": str(ROOT)},
+        input=json.dumps({"tool_input": {"command": command}}),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == code, result.stderr
 
 
 def test_the_guard_is_registered_for_codex():

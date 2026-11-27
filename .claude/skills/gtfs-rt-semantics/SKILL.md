@@ -29,8 +29,8 @@ anything that depends on it, and keep the rule in that one place.
   inside the dedup, because a frozen feed otherwise skews every mean. Every
   `DefinitionMeta` carries that threshold as `exclusion_threshold_sec`. The dedup also
   drops a reading received more than `MAX_PLAUSIBLE_DELAY_SEC +
-  LISTED_AFTER_DEPARTURE_SEC` after the scheduled departure (`timely_reading_ch`), the
-  130 minutes `DEDUP_RULE`'s text names.
+  LISTED_AFTER_DEPARTURE_SEC` after the scheduled departure (`timely_reading_ch`);
+  `DEDUP_RULE`'s user-facing text states that sum.
 - `static_version_id` names the static GTFS zip the row's `static_join` matched;
   NULL on a join miss and for the regex strategy, which joins nothing. A join from an
   observation to `static_*` reads the version the observation matched, not "the
@@ -38,9 +38,12 @@ anything that depends on it, and keep the rule in that one place.
   timetable for exactly that reason.
 - `schedule_relationship_trip`/`_stop` are nullable and sparse. A CANCELED trip or a
   SKIPPED stop is "not run", never "late". `pipeline/db.py::withdrawn_ch` is the
-  predicate the dedup, feed quality and transfers share;
+  shared predicate (the dedup, feed quality, transfers);
   `pipeline/agg_sql.py::service_delivered_ch_sql` counts delivered service, and its
-  `coalesce(…, -1)` before `argMax` is load-bearing. Change the two together.
+  `coalesce(…, -1)` before `argMax` is load-bearing. Other readers take the columns
+  directly (`pipeline/static_archive.py`, the strategies, the network and replay
+  routers), so a change to how a withdrawal is read starts with a search for the
+  column names, not for these helpers.
 - `service_type` and `route_code` are NULL in real feeds. An aggregate that neither
   COALESCEs nor filters them drops rows silently (`postgres-perf`).
 
