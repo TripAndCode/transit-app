@@ -40,10 +40,10 @@ anything that depends on it, and keep the rule in that one place.
   SKIPPED stop is "not run", never "late". `pipeline/db.py::withdrawn_ch` is the
   shared predicate (the dedup, feed quality, transfers);
   `pipeline/agg_sql.py::service_delivered_ch_sql` counts delivered service, and its
-  `coalesce(…, -1)` before `argMax` is load-bearing. Other readers take the columns
-  directly (`pipeline/static_archive.py`, the strategies, the network and replay
-  routers), so a change to how a withdrawal is read starts with a search for the
-  column names, not for these helpers.
+  `coalesce(…, -1)` before `argMax` is load-bearing. Other SQL reads the columns
+  directly (`pipeline/static_archive.py`, `api/routers/replay.py`), so a change to
+  how a withdrawal is read starts with a search for the column names, not for these
+  helpers.
 - `service_type` and `route_code` are NULL in real feeds. An aggregate that neither
   COALESCEs nor filters them drops rows silently (`postgres-perf`).
 
