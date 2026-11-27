@@ -27,15 +27,20 @@ anything that depends on it, and keep the rule in that one place.
   `agg_stop_routes` is the one deliberate exception (`postgres-perf` explains why).
 - Clamp: an observation beyond `MAX_PLAUSIBLE_DELAY_SEC` (`pipeline/db.py`) is excluded
   inside the dedup, because a frozen feed otherwise skews every mean. Every
-  `DefinitionMeta` carries that threshold as `exclusion_threshold_sec`.
+  `DefinitionMeta` carries that threshold as `exclusion_threshold_sec`. The dedup also
+  drops a reading received more than `MAX_PLAUSIBLE_DELAY_SEC +
+  LISTED_AFTER_DEPARTURE_SEC` after the scheduled departure (`timely_reading_ch`), the
+  130 minutes `DEDUP_RULE`'s text names.
 - `static_version_id` names the static GTFS zip the row's `static_join` matched;
   NULL on a join miss and for the regex strategy, which joins nothing. A join from an
   observation to `static_*` reads the version the observation matched, not "the
   current timetable": `pipeline/analyze.py` rebuilds the dates that follow a reloaded
   timetable for exactly that reason.
 - `schedule_relationship_trip`/`_stop` are nullable and sparse. A CANCELED trip or a
-  SKIPPED stop is "not run", never "late"; `pipeline/agg_sql.py::service_delivered_ch_sql`
-  is the one reader, and its `coalesce(…, -1)` before `argMax` is load-bearing.
+  SKIPPED stop is "not run", never "late". `pipeline/db.py::withdrawn_ch` is the
+  predicate the dedup, feed quality and transfers share;
+  `pipeline/agg_sql.py::service_delivered_ch_sql` counts delivered service, and its
+  `coalesce(…, -1)` before `argMax` is load-bearing. Change the two together.
 - `service_type` and `route_code` are NULL in real feeds. An aggregate that neither
   COALESCEs nor filters them drops rows silently (`postgres-perf`).
 
@@ -49,8 +54,10 @@ anything that depends on it, and keep the rule in that one place.
 - The **service day** turns over at `SERVICE_DAY_CUTOVER_HOURS` (04:00 JST), not at
   midnight: `pipeline/service_day.py` (`service_date_ch`, `service_day_offset`,
   `service_day_start_utc`). Bucketing on the calendar date splits a 23:40 → 00:30 trip
-  across two dates and double-counts its tail. SQL that keys on a date uses
-  `service_date_ch(...)`, never `toDate(captured_at)`.
+  across two dates and double-counts its tail. Never `toDate(captured_at)`: a reading
+  buckets by `service_date_ch(...)`, and a stop event (the dedup, every aggregate built
+  on it) is filed by `filed_date_ch`, which moves a reading near the cutover to its
+  trip's service day (`pipeline/static_archive.py::FILED_DATE_SQL`).
 - GTFS `departure_time` reaches past 24:00 (`25:30:00`). `scheduled_time` is NULL for
   `hour >= 24`; `scheduled_sec` holds the value
   (`pipeline/strategies/_time.py::parse_departure_time`). An hour-of-day bucket parsed
@@ -63,12 +70,13 @@ anything that depends on it, and keep the rule in that one place.
 
 ## On-time
 
-- The only preset is `legacy_60s` (`pipeline/histogram.py`,
-  `pipeline/reports/rankings.py::ON_TIME_PRESETS`): late tolerance 60 s, severe 300 s,
-  **no early tolerance** — an early departure counts as on time by default. Both
-  thresholds are baked into analyze-time columns; any explicit tolerance, even one
-  equal to the default, reads the approximate histogram instead (the docstrings in
-  `rankings.py` own that distinction).
+- On-time windows are the presets in `pipeline/reports/rankings.py::ON_TIME_PRESETS`,
+  as (early, late) tolerances. `DEFAULT_PRESET` is `standard_m1_p5`, (60 s, 300 s), the
+  window operators publish; `legacy_60s`, (none, 60 s), counts every early departure
+  as on time. `frontend/src/api/onTimeDefault.json` mirrors the default. A window
+  `pipeline/histogram.py::exact_window` accepts (late 60 s or 300 s, early none or on a
+  bucket edge) reads analyze's exact columns; any other reads the approximate
+  histogram.
 - A ranked group needs observations before its percentiles mean anything:
   `MIN_GROUP_SAMPLES` is `compute_ranking`'s floor and `RANKING_MIN_SAMPLES` the
   higher one the Reports ranking applies (both in `pipeline/reports/rankings.py`).
