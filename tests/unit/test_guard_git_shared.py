@@ -83,6 +83,9 @@ BLOCKED = [
     pytest.param('echo don\'t; git push origin "main"', id="quoted-main-unlexable"),
     pytest.param('echo don\'t; bash -c "git push origin main"', id="bash-c-push-main-unlexable"),
     pytest.param("echo don't; git stash 'pop'", id="quoted-stash-pop-unlexable"),
+    pytest.param("echo don't; git push origin topic#2 main", id="push-main-after-hash-in-word-unlexable"),
+    # An unlexed line's quoting is unknown, so a push after a `#` there is still read.
+    pytest.param("echo don't; git push origin feature # git push origin main", id="push-main-after-hash-unlexable"),
     # A comment ends at its newline, a backslash before it notwithstanding.
     pytest.param("echo a # note \\\ngit push origin main", id="push-main-after-comment-backslash"),
     pytest.param("ls #\\\ngit stash pop", id="stash-pop-after-comment-backslash"),
@@ -237,6 +240,14 @@ def test_the_line_by_line_fallback_reads_the_checkout_too(clone):
     repo, feature = clone
     assert _run("echo don't; git push", cwd=repo).returncode == 2
     assert _run("echo don't; git push", cwd=feature).returncode == 0
+
+
+def test_the_line_by_line_fallback_refuses_a_bare_push_it_cannot_place(clone):
+    repo, feature = clone
+    assert _run(f"echo don't; cd {repo} && git push origin", cwd=feature).returncode == 2
+    assert _run(f"echo don't; git -C {repo} push origin", cwd=feature).returncode == 2
+    assert _run(f"echo don't; git -C {repo} push origin HEAD", cwd=feature).returncode == 2
+    assert _run(f"echo don't; git -C {feature} push origin feature", cwd=repo).returncode == 0
 
 
 def test_dash_C_decides_which_checkout_a_bare_push_reads(clone):

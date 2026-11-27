@@ -28,8 +28,11 @@ continued over a backslash-newline is read whole, while the words inside a commi
 message, a grep pattern, an echo or a `#` comment are prose and pass. A comment
 opens only at a `#` that starts a word and ends at its newline, a backslash before
 it notwithstanding, as in the shell. A command shlex cannot tokenize (an unbalanced
-quote, usually an apostrophe) is read line by line for the same shapes instead, each
-push's arguments cut at the next separator or `#`.
+quote, usually an apostrophe) is read line by line for the same shapes instead. Its
+quoting is unknown there, so a push's arguments end at the next separator or at a
+`#` that starts a word, a push written after such a `#` is still read, and a push of
+the checked-out branch is refused when the text holds a `cd` or `-C`, because the
+directory it runs in is then unknown.
 
 Known gaps, still allowed: a destination that is computed (`git push origin
 "$BRANCH"`) or written as `heads/main` rather than `main` or `refs/heads/main`, a
@@ -108,8 +111,11 @@ _STATEMENT_END = set(";|&()`\n")
 # not itself the subcommand), then the subcommand.
 _RAW_GIT = r"\bgit\b(?:\s+-\S+(?:\s+(?!push\b|stash\b)[^-\s]\S*)?)*"
 RAW_STASH = re.compile(_RAW_GIT + r"\s+stash\s+(?:-\S+\s+)*['\"]?(pop|drop|clear)\b")
-# A push's own arguments on an unlexed line end at the next statement or a comment.
-RAW_PUSH = re.compile(_RAW_GIT + r"\s+push\b(.*?)(?=\s*(?:;|&&|\|\||\||`|#)|$)")
+# A push's own arguments on an unlexed line end at the next statement or at a `#`
+# that starts a word.
+RAW_PUSH = re.compile(_RAW_GIT + r"\s+push\b(.*?)(?=\s*(?:;|&&|\|\||\||`)|\s+#|$)")
+# A `cd` or `-C` in unlexed text moves where a push runs to a directory left unread.
+RAW_MOVES = re.compile(r"(?:^|[\s;&|(`])cd\b|\s-C")
 # Characters after which a `#` starts a word, and so a comment.
 _WORD_BOUNDARY = " \t\n;&|()<>`"
 
@@ -290,7 +296,14 @@ _FORCE = (
 )
 
 
-def push_verdict(args: list[str], where: str) -> str | None:
+_UNKNOWN_CHECKOUT = (
+    "git push — this command cannot be tokenized (an unbalanced quote) and moves with `cd` or `-C`, so the branch "
+    "this push sends is unknown. Name the branch (`git push origin <branch>`) or balance the quote."
+)
+
+
+def push_verdict(args: list[str], where: str | None) -> str | None:
+    """`where` is the directory the push runs in, or None when it cannot be read."""
     force, everything, tags_only, destinations = _push_shape(args)
     if everything:
         return _lands_on_main("--all, --mirror, --branches, a `*` refspec or a bare `:` pushes every branch")
@@ -299,9 +312,12 @@ def push_verdict(args: list[str], where: str) -> str | None:
             return _lands_on_main(f"destination `{destination}`")
     current = [d for d in destinations if d in CURRENT_BRANCH]
     pushes_checked_out_branch = bool(current) or (not destinations and not tags_only)
-    if pushes_checked_out_branch and current_branch(where) == "main":
-        how = f"`{current[0]}` names it" if current else "no refspec was given"
-        return _lands_on_main(f"`main` is checked out in {where} and {how}")
+    if pushes_checked_out_branch:
+        if where is None:
+            return _UNKNOWN_CHECKOUT
+        if current_branch(where) == "main":
+            how = f"`{current[0]}` names it" if current else "no refspec was given"
+            return _lands_on_main(f"`main` is checked out in {where} and {how}")
     if force:
         return _FORCE
     return None
@@ -358,12 +374,13 @@ def nested_verdict(statement: list[str], cwd: str) -> str | None:
 def raw_verdict(command: str, cwd: str) -> str | None:
     # The quote that made the text unlexable leaves its quoting unknown, so every
     # backslash-newline is read as a continuation.
+    where = None if RAW_MOVES.search(command) else cwd
     for line in command.replace("\\\n", "").splitlines():
         stash = RAW_STASH.search(line)
         if stash:
             return stash_verdict([stash.group(1)])
         for push in RAW_PUSH.finditer(line):
-            reason = push_verdict([word.strip("'\"") for word in push.group(1).split()], cwd)
+            reason = push_verdict([word.strip("'\"") for word in push.group(1).split()], where)
             if reason:
                 return reason
     return None
