@@ -2,6 +2,8 @@
 
 <!-- 2-4 sentence summary: what changed and why. -->
 
+**Serves:** <!-- the audience job from docs/features/audience.md this change serves, or "internal" and why -->
+
 ## What changed
 
 -

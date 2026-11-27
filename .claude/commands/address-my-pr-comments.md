@@ -26,7 +26,7 @@ Boundaries.
   blindly.
 - `superpowers:systematic-debugging` — when a thread reports a bug or a change
   breaks a test, before proposing a fix.
-- `transit-app-gotchas` / `postgres-perf` / `maplibre-map` — invoke when a thread
+- `transit-app-gotchas` / `gtfs-rt-semantics` / `postgres-perf` / `maplibre-map` — invoke when a thread
   touches the area they cover.
 
 ## Auth

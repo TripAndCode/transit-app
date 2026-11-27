@@ -29,7 +29,7 @@ never resolves a review thread; see Boundaries.
 
 - `superpowers:receiving-code-review` — before judging any reply, verify it against
   the actual code instead of accepting performatively or dismissing blindly.
-- `transit-app-gotchas` / `postgres-perf` / `maplibre-map` — when a thread or a new
+- `transit-app-gotchas` / `gtfs-rt-semantics` / `postgres-perf` / `maplibre-map` — when a thread or a new
   commit touches the area they cover.
 
 ## Auth
