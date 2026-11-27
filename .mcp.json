@@ -4,14 +4,6 @@
       "command": "npx",
       "args": ["shadcn@latest", "mcp"]
     },
-    "postgres": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-postgres",
-        "${POSTGRES_MCP_URL:-postgresql://transit:transit@localhost:5544/transit_test}"
-      ]
-    },
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
