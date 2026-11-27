@@ -80,6 +80,9 @@ BLOCKED = [
     # Unlexable text (an apostrophe) is read line by line for the same shapes.
     pytest.param("echo don't; git stash pop", id="stash-pop-after-unbalanced-quote"),
     pytest.param("echo don't; git push origin feature && git push origin main", id="second-push-unlexable"),
+    pytest.param('echo don\'t; git push origin "main"', id="quoted-main-unlexable"),
+    pytest.param('echo don\'t; bash -c "git push origin main"', id="bash-c-push-main-unlexable"),
+    pytest.param("echo don't; git stash 'pop'", id="quoted-stash-pop-unlexable"),
     # A comment ends at its newline, a backslash before it notwithstanding.
     pytest.param("echo a # note \\\ngit push origin main", id="push-main-after-comment-backslash"),
     pytest.param("ls #\\\ngit stash pop", id="stash-pop-after-comment-backslash"),

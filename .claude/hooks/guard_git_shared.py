@@ -107,7 +107,7 @@ _STATEMENT_END = set(";|&()`\n")
 # For text shlex cannot tokenize: git, optional global options (with a value that is
 # not itself the subcommand), then the subcommand.
 _RAW_GIT = r"\bgit\b(?:\s+-\S+(?:\s+(?!push\b|stash\b)[^-\s]\S*)?)*"
-RAW_STASH = re.compile(_RAW_GIT + r"\s+stash\s+(?:-\S+\s+)*(pop|drop|clear)\b")
+RAW_STASH = re.compile(_RAW_GIT + r"\s+stash\s+(?:-\S+\s+)*['\"]?(pop|drop|clear)\b")
 # A push's own arguments on an unlexed line end at the next statement or a comment.
 RAW_PUSH = re.compile(_RAW_GIT + r"\s+push\b(.*?)(?=\s*(?:;|&&|\|\||\||`|#)|$)")
 # Characters after which a `#` starts a word, and so a comment.
@@ -363,7 +363,7 @@ def raw_verdict(command: str, cwd: str) -> str | None:
         if stash:
             return stash_verdict([stash.group(1)])
         for push in RAW_PUSH.finditer(line):
-            reason = push_verdict(push.group(1).split(), cwd)
+            reason = push_verdict([word.strip("'\"") for word in push.group(1).split()], cwd)
             if reason:
                 return reason
     return None

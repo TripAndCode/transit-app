@@ -18,6 +18,13 @@ anything that depends on it, and keep the rule in that one place.
   are **the operator's bus-location vendor's prediction at that poll**, not a measured
   departure. No VehiclePositions are ingested and no vehicle id is stored, so nothing
   here can produce a vehicle- or driver-level figure. Schema: `db/clickhouse/schema.sql`.
+- Two kinds of row are not a prediction the feed sent. For a trip the feed cancels
+  without listing a stop, `pipeline/strategies/static_join.py::parse_feed` writes a
+  trip-level row (`stop_sequence` = `pipeline/clickhouse.py::TRIP_LEVEL_STOP_SEQUENCE`,
+  no stop, no delay) and a withdrawal row from the timetable for each stop still to
+  come. A count of the updates the feed sends leaves the timetable rows out
+  (`pipeline/db.py::timetable_cancellation_ch`); a trip's withdrawal is read with its
+  trip-level rows through `pipeline/db.py::latest_trip_report_ch`.
 - The latest poll per stop event is the closest the data gets to what happened:
   `pipeline/db.py::build_dedup_ch_sql` keeps `argMax(..., (captured_at, file_name))`
   per stop event, which `pipeline/reports/definition.py` names `DEDUP_RULE`.
